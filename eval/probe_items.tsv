@@ -1,0 +1,67 @@
+id	cat	spoken	expect
+ip1	ip	So it only allows localhost on one two seven point zero point zero point one.	127.0.0.1
+ip2	ip	Point the client at ten point zero point zero point five.	10.0.0.5
+ip3	ip	The router lives at one ninety two point one sixty eight point one point one.	192.168.1.1
+ip4	ip	Block traffic from eight point eight point eight point eight for now.	8.8.8.8
+ip5	ip	Bind the server to zero point zero point zero point zero so it listens everywhere.	0.0.0.0
+ver1	version	We shipped version two point five point one last night.	2.5.1
+ver2	version	Upgrade to Swift six point two before you build.	6.2
+ver3	version	The bug came back in release one point zero point zero RC thirty nine.	1.0.0
+ver4	version	macOS fifteen point four point one broke the audio tap.	15.4.1
+ver5	version	Pin the library at three point eleven point two.	3.11.2
+port1	port	Run it on port eight thousand eighty.	8080
+port2	port	The dev server is on localhost colon three thousand.	3000
+tm1	time	Let's meet at four fifteen tomorrow.	4:15
+tm2	time	The deadline is eleven fifty nine PM on Friday.	11:59
+tm3	time	The call starts at nine thirty AM Pacific.	9:30
+tm4	time	I'll be back by two o'clock.	2:00|2 o'clock|two o'clock
+money1	money	The plan costs twelve dollars and fifty cents a month.	$12.50
+money2	money	Revenue hit three point two million dollars last quarter.	$3.2 million
+money3	money	They raised forty five million dollars in the series B.	$45 million
+money4	money	Pro is a one time payment of seventy nine dollars.	$79
+pct1	percent	Churn dropped to two point five percent.	2.5%
+pct2	percent	About eighteen percent of users never finish onboarding.	18%
+dec1	decimal	The word error rate is thirteen point seven one.	13.71
+dec2	decimal	Set the threshold to zero point eight five.	0.85
+dec3	decimal	The ratio is about one point five.	1.5
+phone1	phone	Call me at four one five five five five zero one nine eight.	415-555-0198|(415) 555-0198|4155550198
+phone2	phone	The support line is eight hundred five five five one two one two.	800-555-1212|(800) 555-1212
+zip1	zip	Ship it to zip code nine four one zero seven.	94107
+code1	code	Your verification code is four eight two nine one seven.	482917
+code2	code	The error code is E four zero four.	E404|E 404
+code3	code	Look at ticket number twelve thirty four.	1234|12 34
+code4	code	Check issue sixty six on the feedback board.	66
+part1	part	Order part number A B three seven seven dash two.	AB377-2|AB 377-2|AB3772
+part2	part	The model is an M four Pro with twenty four gigs of RAM.	M4 Pro
+part3	part	Use the RTX forty ninety for training.	4090
+email1	email	Send it to support at mimicscribe dot app.	support@mimicscribe.app
+email2	email	My address is john dot smith at gmail dot com.	john.smith@gmail.com
+url1	url	The docs are at mimicscribe dot app slash feedback.	mimicscribe.app/feedback
+url2	url	Go to github dot com slash nvidia slash nemo.	github.com/nvidia/nemo
+date1	date	The launch is on October seventh twenty twenty six.	October 7, 2026|October 7th, 2026
+date2	date	We started back in March of twenty twenty four.	2024
+date3	date	The file is dated twenty twenty six dash ten dash zero seven.	2026-10-07
+year1	year	That paper came out in nineteen ninety eight.	1998
+ord1	ordinal	This is the third time it crashed.	third|3rd
+ord2	ordinal	He finished twenty first out of forty.	21st
+meas1	measure	The model is about six hundred megabytes.	600 MB|600 megabytes
+meas2	measure	It uses four hundred megs of RAM during a call.	400
+meas3	measure	The recording was three hours and twelve minutes long.	3 hours and 12 minutes
+meas4	measure	Keep latency under one hundred fifty milliseconds.	150 ms|150 milliseconds
+range1	range	Expect it to take between five and ten minutes.	5 and 10|five and ten
+range2	range	Pages twenty to thirty cover the setup.	20 to 30|20-30
+frac1	fraction	About two thirds of the files improved.	two thirds|2/3
+frac2	fraction	It's a three point five inch drive.	3.5
+score1	score	The judge preferred it twelve to zero.	12 to 0|12-0|12:0
+count1	count	We tested it on fifty seven files.	57
+count2	count	There were twenty five languages in the set.	25
+big1	big	The corpus has one point two billion tokens.	1.2 billion
+big2	big	We processed two thousand eight hundred fifty seven numbers.	2,857|2857
+neg1	negative	The temperature dropped to minus five degrees.	-5|minus 5|minus five
+ctl1	control	One of them said it was a good point.	One of them
+ctl2	control	At this point we need to decide.	At this point
+ctl3	control	I have one question for you.	one question
+ctl4	control	It was a one off thing, nothing more.	one off|one-off
+ctl5	control	No one knows the answer yet.	No one
+ctl6	control	Let me make two points about that.	two points
+ctl7	control	It works for the most part, but point taken.	point taken

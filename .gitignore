@@ -1,0 +1,6 @@
+__pycache__/
+*.wav
+*.nemo
+*.ckpt
+.env
+.venv/
