@@ -1,0 +1,109 @@
+"""Fine-tune Parakeet Ultra's prediction network and joint with the encoder frozen.
+
+Saves only the trainable weights (decoder + joint, ~18M params) to /vol/exp/<run>/decoder_joint.pt.
+"""
+
+import json
+import os
+import random
+import time
+
+import lightning.pytorch as pl
+import torch
+from omegaconf import OmegaConf, open_dict
+
+
+class KeepEncoderFrozen(pl.Callback):
+    """Lightning calls model.train() at epoch start; keep the frozen encoder's BatchNorm and
+    dropout in eval mode."""
+
+    def on_train_epoch_start(self, trainer, m):
+        m.encoder.eval()
+
+    def on_train_batch_start(self, trainer, m, batch, idx):
+        m.encoder.eval()
+
+
+class StepLog(pl.Callback):
+    def __init__(self):
+        self.t0 = time.time()
+
+    def on_train_batch_end(self, trainer, m, outputs, batch, idx):
+        if trainer.global_step % 10 == 0:
+            loss = outputs["loss"].item() if isinstance(outputs, dict) else float(outputs)
+            print(f"step {trainer.global_step} loss {loss:.4f} {time.time() - self.t0:.0f}s", flush=True)
+
+
+def write_mix(vol: str, out: str, parts: list[tuple[str, float]], seed: int = 1) -> float:
+    """Concatenate manifests, taking `hours` from each (all if hours <= 0)."""
+    r = random.Random(seed)
+    rows = []
+    for path, hours in parts:
+        src = [json.loads(l) for l in open(f"{vol}/{path}")]
+        r.shuffle(src)
+        if hours > 0:
+            acc, keep = 0.0, []
+            for x in src:
+                if acc >= hours * 3600:
+                    break
+                keep.append(x)
+                acc += x["duration"]
+            src = keep
+        print(f"mix {path}: {len(src)} rows, {sum(x['duration'] for x in src) / 3600:.2f} h")
+        rows += src
+    r.shuffle(rows)
+    with open(out, "w") as f:
+        for x in rows:
+            f.write(json.dumps({k: x[k] for k in ("audio_filepath", "duration", "text")}) + "\n")
+    return sum(x["duration"] for x in rows) / 3600
+
+
+def trainable_state(m) -> dict:
+    return {k: v.detach().cpu() for k, v in m.state_dict().items()
+            if not (k.startswith("encoder.") or k.startswith("preprocessor."))}
+
+
+def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_steps: int,
+          lr: float = 1e-4, batch_duration: float = 600, warmup: int = 20):
+    import nemo.collections.asr as nemo_asr
+
+    exp = f"{vol}/exp/{run}"
+    os.makedirs(exp, exist_ok=True)
+    hours = write_mix(vol, f"{exp}/train_manifest.jsonl", mix)
+    print(f"train mix: {hours:.2f} h")
+
+    m = nemo_asr.models.ASRModel.restore_from(ultra, map_location="cpu")
+    # A fresh train_ds: the checkpoint's own carries its original corpus settings (tarred inputs,
+    # bucket bins, a null max_tps) that do not apply here.
+    with open_dict(m.cfg):
+        print("checkpoint train_ds keys:", sorted(m.cfg.train_ds.keys()))
+        m.cfg.train_ds = OmegaConf.create({
+            "manifest_filepath": f"{exp}/train_manifest.jsonl", "sample_rate": 16000,
+            "use_lhotse": True, "text_field": "text", "batch_duration": batch_duration,
+            "max_duration": 20.0, "min_duration": 0.5, "use_bucketing": True, "num_buckets": 10,
+            "bucket_buffer_size": 20000, "shuffle": True, "shuffle_buffer_size": 10000, "seed": 1,
+            "num_workers": 8, "pin_memory": True, "skip_missing_manifest_entries": False})
+    m.setup_training_data(m.cfg.train_ds)
+    m.encoder.freeze()
+    groups = {}
+    for n, p in m.named_parameters():
+        if p.requires_grad:
+            k = ".".join(n.split(".")[:2])
+            groups[k] = groups.get(k, 0) + p.numel()
+    print(f"trainable params: {sum(groups.values()):,} {groups}")
+
+    trainer = pl.Trainer(devices=1, accelerator="gpu", precision="bf16-mixed", max_steps=max_steps,
+                         limit_train_batches=max_steps, limit_val_batches=0, num_sanity_val_steps=0,
+                         use_distributed_sampler=False, gradient_clip_val=1.0, logger=False,
+                         enable_checkpointing=False, enable_progress_bar=False,
+                         callbacks=[KeepEncoderFrozen(), StepLog()])
+    m.set_trainer(trainer)
+    m.setup_optimization(OmegaConf.create({
+        "name": "adamw", "lr": lr, "betas": [0.9, 0.98], "weight_decay": 1e-3,
+        "sched": {"name": "CosineAnnealing", "warmup_steps": warmup, "min_lr": lr / 10,
+                  "max_steps": max_steps}}))
+    t0 = time.time()
+    trainer.fit(m)
+    print(f"trained {max_steps} steps in {time.time() - t0:.0f}s")
+    torch.save(trainable_state(m), f"{exp}/decoder_joint.pt")
+    return m

@@ -1,0 +1,139 @@
+# One carrier per line: slot kinds in {braces}. Lines starting with # are ignored.
+# Kept disjoint from eval/probe_items.tsv (no probe sentence appears here).
+We need {int_small} more people on the call.
+I counted {int_tens} open tickets this morning.
+There are {int_hundreds} rows in that table.
+{int_hundreds} people signed up this week.
+About {int_4digit} users hit the bug before we rolled it back.
+The batch had {int_4digit} files, give or take.
+We sold {int_4digit} licenses last month.
+She moved here in {year}.
+The company was founded in {year}, I think.
+That standard dates back to {year}.
+By {year} we want the whole fleet migrated.
+Their market cap is around {big}.
+The dataset is roughly {big} words.
+We lost {big} in the first quarter alone.
+The latency is {decimal} on average.
+Set the learning rate to {decimal}.
+The score came out to {decimal}, which is fine.
+Multiply it by {decimal} and round down.
+It costs {money} per seat.
+Lunch was {money}, which seemed steep.
+The refund came to {money}.
+They want {money} for the annual plan.
+Our burn rate is {money} a month.
+Revenue grew {percent} year over year.
+Only {percent} of the tests passed.
+Battery was at {percent} when it died.
+Margins came in at {percent}, slightly above guidance.
+Rates went up {basis_points} last week.
+The spread widened by {basis_points}.
+Can we move the standup to {clock}?
+The flight lands at {clock}.
+I have a hard stop at {clock}.
+The build kicked off at {clock} and finished at {clock}.
+From {clock} to {clock} I'm in interviews.
+My number is {phone}.
+You can reach the front desk at {phone}.
+Leave a message at {phone} if I don't pick up.
+The confirmation number is {code}.
+Type in {code} when it asks for the PIN.
+The tracking number ends in {code}.
+I think the part is {alnum}.
+Grab the {alnum} adapter from the shelf.
+The error said {alnum} and then it crashed.
+SSH into {ip} and check the logs.
+The gateway is {ip}.
+Requests from {ip} keep timing out.
+We're still on {version} in production.
+The changelog for {version} is pretty short.
+Roll back to {version} if anything breaks.
+The API listens on port {port}.
+Something else is already using port {port}.
+Open port {port} on the firewall.
+The contract starts {date}.
+Can we push the review to {date}?
+I'll be out until {date}.
+Our next offsite is {date}.
+She came {ordinal} in the race.
+This is the {ordinal} release this year.
+We're the {ordinal} customer to ask for that.
+It should take {range} minutes.
+Plan for {range} people.
+We usually see {range} errors a day.
+About {fraction} of the budget is gone.
+The tank is {fraction} full.
+It took {fraction} hours to fix.
+The download is {measure}.
+Response times are around {measure}.
+The run took {measure} on the old machine.
+It's {measure} from the office.
+Overnight it got down to {negative} degrees.
+The account is at {negative} after the refund.
+The final was {score}.
+They won {score} in overtime.
+Are you still running {identifier}?
+We spent the morning on {identifier}.
+Check the {slash} settings first.
+It's an {slash} question, honestly.
+The docs are on {url}.
+I put the notes up at {url}.
+Email {email} with the receipt.
+Forward it to {email} and copy me.
+That's about {multiplier} faster than before.
+The new build is {multiplier} smaller.
+The offer was {thousands_k} plus equity.
+We need roughly {thousands_k} to finish the pilot.
+So the total was {int_hundreds}, not {int_hundreds}.
+Between {year} and {year} the numbers barely moved.
+We went from {percent} to {percent} in a quarter.
+Hiring {int_small} engineers would cost {money}.
+In {year} we had {int_4digit} customers.
+{int_tens} of the {int_hundreds} files failed.
+Version {version} shipped on {date}.
+Call {phone} before {clock}.
+It went from {money} to {money} overnight.
+The ticket says {alnum} but the log says {alnum}.
+Honestly, I'd guess {int_tens} or so.
+Wait, was it {int_hundreds}? Or {int_hundreds}?
+Okay, so {percent}, right?
+Yeah, {money}, plus tax.
+Right, {clock} works for me.
+Um, it's like {measure}, maybe more.
+I want to say {year}, but don't quote me.
+So we're looking at {big}, roughly.
+And that's {decimal}, which matches the paper.
+Uh, the code was {code}.
+Hmm, {range}, depending on traffic.
+Look, {fraction} of them never reply.
+No, it's {ordinal}, not {ordinal}.
+Give me {int_small} minutes.
+Just {int_small} more questions.
+We had {int_tens} people show up.
+Page {int_hundreds} has the table.
+Add {int_tens} milliseconds of padding.
+Roughly {int_4digit} lines of code changed.
+The {ordinal} item on the list is the hard one.
+Grade it out of {int_tens}.
+Their headcount is about {int_4digit}.
+The bill came to {money} after the discount.
+Interest is {percent} for the first year.
+I'll call you back at {clock}.
+Our goal is {big} in annual revenue.
+The temperature hit {measure} yesterday.
+It weighs about {measure}.
+The patch bumps it to {version}.
+The server at {ip} went down again.
+Use port {port} for the staging box.
+The sale ends {date}.
+They finished {ordinal} overall.
+Expect {range} seconds of downtime.
+The meeting ran {measure} over.
+The poll had us at {percent}.
+It cost {money} to ship.
+That was back in {year}.
+Only {int_small} of them replied.
+She's been here {int_tens} years.
+There were {int_hundreds} applicants.
+We printed {int_4digit} copies.

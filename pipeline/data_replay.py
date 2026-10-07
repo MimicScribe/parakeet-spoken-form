@@ -1,0 +1,65 @@
+"""Replay data: real English speech whose labels contain no written-form characters.
+
+LibriSpeech-PC (CC BY 4.0) supplies punctuated, cased labels for LibriSpeech audio (CC BY 4.0).
+Writes, under /vol/replay:
+  lspc_train.jsonl          train-clean-100 rows, digit-free, chapter headings dropped
+  lspc_train_numwords.jsonl the subset containing English number words (upweighted in training)
+  lspc_dev.jsonl            dev-clean rows (validation)
+"""
+
+import json
+import os
+import re
+import subprocess
+
+from common import NUMBER_WORDS, WRITTEN_FORM
+
+SLR = "https://www.openslr.org/resources"
+HEADING = re.compile(r"\b[A-Z]{2,}\b(?:\s+[A-Z]{2,}\b)+")
+
+
+def _fetch_tar(url: str, dest: str) -> None:
+    os.makedirs(dest, exist_ok=True)
+    subprocess.run(f"wget -q --tries=5 -O - '{url}' | tar xz -C '{dest}'", shell=True, check=True)
+
+
+def prepare(vol: str, splits=("train-clean-100", "dev-clean")) -> None:
+    root = f"{vol}/replay"
+    ls = f"{vol}/librispeech"
+    if not any(f.endswith(".json") for _, _, fs in os.walk(f"{root}/manifests") for f in fs):
+        _fetch_tar(f"{SLR}/145/manifests.tar.gz", f"{root}/manifests")
+    for split in splits:
+        if not os.path.isdir(f"{ls}/LibriSpeech/{split}"):
+            _fetch_tar(f"{SLR}/12/{split}.tar.gz", ls)
+    found = {}
+    for dirpath, _, files in os.walk(f"{root}/manifests"):
+        for fn in files:
+            found[fn] = os.path.join(dirpath, fn)
+    print("manifests:", sorted(found))
+
+    def load(split):
+        rows, dropped = [], 0
+        for line in open(found[f"{split}.json"]):
+            r = json.loads(line)
+            if WRITTEN_FORM.search(r["text"]) or HEADING.search(r["text"]):
+                dropped += 1
+                continue
+            path = f"{ls}/LibriSpeech/{r['audio_filepath']}"
+            rows.append({"audio_filepath": path, "duration": r["duration"], "text": r["text"],
+                         "id": os.path.basename(path)[:-5]})
+        missing = sum(not os.path.exists(r["audio_filepath"]) for r in rows[:200])
+        print(f"{split}: {len(rows)} rows, {sum(r['duration'] for r in rows) / 3600:.1f} h, "
+              f"dropped {dropped}, missing audio in first 200: {missing}")
+        return rows
+
+    def write(name, rows):
+        with open(f"{root}/{name}", "w") as f:
+            for r in rows:
+                f.write(json.dumps(r) + "\n")
+
+    train = load("train-clean-100")
+    write("lspc_train.jsonl", train)
+    num = [r for r in train if NUMBER_WORDS.search(r["text"])]
+    print(f"number-word rows: {len(num)}, {sum(r['duration'] for r in num) / 3600:.1f} h")
+    write("lspc_train_numwords.jsonl", num)
+    write("lspc_dev.jsonl", load("dev-clean"))
