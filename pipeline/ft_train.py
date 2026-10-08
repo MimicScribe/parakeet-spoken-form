@@ -101,9 +101,9 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
     replay rows), so TTS rows learn spoken form freely. The batch carries no source tag, so rows
     are matched by their token ids.
 
-    `terms`: "dur" anchors only the duration distribution. The seam sim showed the extra deletions
-    come from timing: un-anchored fine-tunes emit ~10% of words one encoder frame early (shorter
-    durations), and the app's merge then drops words the windows did decode."""
+    `terms`: "dur" anchors only the duration distribution. Measured 2026-10-08: duration-only does
+    NOT hold the app's streaming deletions (worse than no anchor) although it keeps emission timing
+    identical to stock; the blank term is what holds them."""
     import copy
 
     teacher_dec, teacher_joint = copy.deepcopy(m.decoder).eval(), copy.deepcopy(m.joint).eval()
