@@ -111,6 +111,9 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
     for p in list(teacher_dec.parameters()) + list(teacher_joint.parameters()):
         p.requires_grad_(False)
     m._kl_teacher = (teacher_dec, teacher_joint)  # attribute (not a submodule): not saved
+    tset0 = {x.strip() for x in terms.split(",")}
+    assert "blank" in tset0 or not tset0 & {"gated", "gnorm", "g2", "tri"}, f"{terms}: gate/tri modes need 'blank'"
+    assert len(tset0 & {"gated", "gnorm", "g2"}) <= 1, f"{terms}: gated, gnorm and g2 are mutually exclusive"
     keep = {tuple(m.tokenizer.text_to_ids(t)) for t in only_texts} if only_texts is not None else None
     orig_step = m.training_step
 
@@ -130,7 +133,7 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
         f = enc.transpose(1, 2)
         nb = 8193  # 8192 tokens + blank; the last 5 outputs are durations
 
-        def chunk_kl(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl):
+        def chunk_kl(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, lab_sl):
             # Dropout zeroed inside the checkpointed function, so the backward recompute matches.
             with NoDropout(m.joint):
                 s_logits = m.joint.joint(f_sl, s_sl).float()
@@ -144,11 +147,38 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
             s_lnb = s_logits[..., :nb - 1].logsumexp(-1) - s_logits[..., :nb].logsumexp(-1)
             t_lnb = t_logits[..., :nb - 1].logsumexp(-1) - t_logits[..., :nb].logsumexp(-1)
             kl_blank = t_lb.exp() * (t_lb - s_lb) + t_lnb.exp() * (t_lnb - s_lnb)
+            tset = {x.strip() for x in terms.split(",")}
+            if "tri" in tset:
+                # Three-way KL over {blank, the reference's next label, any other token} (RNN-T distillation in the
+                # Panchapagesan style; Fable review 2026-10-08): also anchors substitutions. Replay labels are the same
+                # for teacher and student, so the label term cannot fight spoken form. Where no next label exists
+                # (u == label length) the two-way blank KL is kept.
+                lab = torch.zeros(s_logits.shape[0], U, dtype=torch.long, device=f_sl.device)
+                lab[:, :U - 1] = lab_sl[:, :U - 1]
+                idx = lab[:, None, :, None].expand(-1, T, -1, 1)
+                s_ll = s_logits[..., :nb].gather(-1, idx).squeeze(-1) - s_logits[..., :nb].logsumexp(-1)
+                t_ll = t_logits[..., :nb].gather(-1, idx).squeeze(-1) - t_logits[..., :nb].logsumexp(-1)
+                s_lr = torch.log1p(-torch.logsumexp(torch.stack([s_lb, s_ll]), 0).exp().clamp(max=1 - 1e-4))
+                t_lr = torch.log1p(-torch.logsumexp(torch.stack([t_lb, t_ll]), 0).exp().clamp(max=1 - 1e-4))
+                kl3 = (t_lb.exp() * (t_lb - s_lb) + t_ll.exp() * (t_ll - s_ll) + t_lr.exp() * (t_lr - s_lr))
+                # Only where a next label exists AND stock itself favours the reference label (P > 0.5): where stock
+                # would write "2" for a spoken "two", the label term would pull the student back to digits (Gemini).
+                valid = (mask & (torch.arange(U, device=f_sl.device)[None, None, :] < tok_len_sl[:, None, None])
+                         & (t_ll.exp() > 0.5))
+                kl_blank = torch.where(valid, kl3, kl_blank)
             s_dur, t_dur = s_logits[..., nb:].log_softmax(-1), t_logits[..., nb:].log_softmax(-1)
             kl_dur = (t_dur.exp() * (t_dur - s_dur)).sum(-1)
-            tset = {x.strip() for x in terms.split(",")}
             gate = mask & (t_lnb.exp() > 0.9)  # computed in every mode: the pass rate is logged
             bmask = mask
+            if "g2" in tset:
+                # Two-sided gate (Fable review): the emit gate as gnorm PLUS, as a separately normalized term, the points
+                # where stock is confident it waits (P(blank) > 0.95), so the student is also held against emitting
+                # there. Separate normalization keeps the anti-deletion term at gnorm strength (Gemini review).
+                wait = mask & (t_lb.exp() > 0.95)
+                zero = torch.zeros((), device=f_sl.device)
+                w_sum = (kl_blank * wait).sum() if "blank" in tset else zero
+                return ((kl_blank * gate).sum(), gate.sum(), (kl_dur * mask).sum() if "dur" in tset else zero,
+                        mask.sum(), gate.sum(), w_sum, wait.sum())
             if "gated" in tset or "gnorm" in tset:
                 # Only where stock confidently emits (P(non-blank) > 0.9). "gated" (v5gated, 2026-10-08)
                 # divides by ALL lattice points, which dilutes the blank term by the gate's pass rate;
@@ -158,33 +188,37 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
             b_sum = (kl_blank * bmask).sum() if "blank" in tset else zero
             d_sum = (kl_dur * mask).sum() if "dur" in tset else zero
             b_n = (mask if "gated" in tset else bmask).sum()
-            return b_sum, b_n, d_sum, mask.sum(), gate.sum()
+            return b_sum, b_n, d_sum, mask.sum(), gate.sum(), zero, zero
 
         rows = list(range(f.shape[0]))
         if keep is not None:
             rows = [i for i in rows if tuple(tokens[i, :int(tokens_len[i])].tolist()) in keep]
         zero = torch.zeros((), device=f.device)
-        b_tot = d_tot = b_cnt = count = passed = zero
+        b_tot = d_tot = b_cnt = count = passed = w_tot = w_cnt = zero
         for j in range(0, len(rows), sub_batch):
             sl = torch.tensor(rows[j:j + sub_batch], device=f.device)
             u = int(tokens_len[sl].max()) + 1
             t = int(enc_len[sl].max())
             # Checkpointed: the [b, T, U, 8198] logits are rebuilt during backward instead of
             # being held for every sub-batch at once (that ran out of memory at batch 600 s).
-            b_sum, b_n, d_sum, n, n_pass = torch.utils.checkpoint.checkpoint(
+            lab_sl = torch.zeros(len(sl), u, dtype=torch.long, device=f.device)
+            lab_sl[:, :u - 1] = tokens[sl, :u - 1]
+            b_sum, b_n, d_sum, n, n_pass, w_sum, w_n = torch.utils.checkpoint.checkpoint(
                 chunk_kl, f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
-                enc_len[sl], tokens_len[sl], use_reentrant=False)
+                enc_len[sl], tokens_len[sl], lab_sl, use_reentrant=False)
             # Kept as tensors: no GPU→CPU sync per sub-batch (Gemini review).
             b_tot, d_tot = b_tot + b_sum, d_tot + d_sum
             b_cnt, count, passed = b_cnt + b_n, count + n, passed + n_pass
-        kl_b = blank_scale * b_tot / b_cnt.clamp(min=1)
+            w_tot, w_cnt = w_tot + w_sum, w_cnt + w_n
+        kl_b = blank_scale * (b_tot / b_cnt.clamp(min=1) + w_tot / w_cnt.clamp(min=1))
         kl_d = d_tot / count.clamp(min=1)
         kl = kl_b + kl_d
         m.log("kl_blank_dur", kl.detach(), prog_bar=False)
         out["loss"] = out["loss"] + weight * kl
         if batch_idx % 10 == 0:
             print(f"kl_blank_dur {kl.item():.4f} (blank {kl_b.item():.4f} dur {kl_d.item():.4f}) "
-                  f"rows {len(rows)}/{f.shape[0]} gate-pass {int(passed)}/{int(count)}", flush=True)
+                  f"rows {len(rows)}/{f.shape[0]} gate-pass {int(passed)}/{int(count)} wait-pass {int(w_cnt)}",
+                  flush=True)
         return out
 
     m.training_step = training_step
