@@ -7,7 +7,7 @@ previous speaker. Edges are snapped into gaps between words so no label word is 
 Labels follow the project's spoken-form rule: fillers kept as transcribed ("uh", "um", "mm hmm"),
 hyphens dropped, "OK" written "okay", acronyms as joined capitals, quotes and comments dropped.
 Crops with more than 2% overlapped speech (cross-talk interleaves the labels), cut-off word
-fragments, symbols or digits are skipped; crops never reuse audio.
+fragments, symbols, digits or impossible label rates are skipped; crops never reuse audio.
 
 Runs locally (the corpus is on disk):
     python data_icsi.py <icsi_dir> <meetings.json> <out_dir> [hours]
@@ -119,7 +119,9 @@ def crops(meeting: str, words, dur: float, r: random.Random, n: int):
         if not any(t[3] == "W" for t in inside) or overlap_fraction(inside, a, b) > 0.02:
             continue
         text = render(inside)
-        if text:
+        # Digit-reading sections carry collapsed word times (400+ characters on 2–3 s of audio);
+        # conversational speech is ~13 characters a second.
+        if text and len(text) / (b - a) <= 22:
             used.append((a, b))
             yield a, b, text
 
