@@ -201,7 +201,7 @@ def write_mix(vol: str, out: str, parts: list[tuple[str, float]], seed: int = 1,
     """Concatenate manifests, taking `hours` from each (all if hours <= 0). Labels of rows from
     `replay/` manifests are added to `replay_texts` when given."""
     r = random.Random(seed)
-    rows = []
+    rows, exempt = [], set()
     for path, hours in parts:
         src = [json.loads(l) for l in open(f"{vol}/{path}")]
         r.shuffle(src)
@@ -214,9 +214,20 @@ def write_mix(vol: str, out: str, parts: list[tuple[str, float]], seed: int = 1,
                 acc += x["duration"]
             src = keep
         print(f"mix {path}: {len(src)} rows, {sum(x['duration'] for x in src) / 3600:.2f} h")
-        if replay_texts is not None and path.startswith("replay/") and not (kl_exempt and kl_exempt in path):
-            replay_texts.update(x["text"] for x in src)
+        if replay_texts is not None and path.startswith("replay/"):
+            if kl_exempt and kl_exempt in path:
+                exempt.update(x["text"] for x in src)
+            else:
+                replay_texts.update(x["text"] for x in src)
         rows += src
+    if replay_texts is not None and kl_exempt == "numwords":
+        # Real speech that says numbers is where spoken form is learned on real audio: no anchor there,
+        # whichever manifest the row came from (LSPC also holds number-word rows).
+        from common import NUMBER_WORDS
+        exempt |= {t for t in replay_texts if NUMBER_WORDS.search(t)}
+    if replay_texts is not None and exempt:
+        replay_texts.difference_update(exempt)
+        print(f"KL-exempt labels ({kl_exempt}): {len(exempt)}, anchored: {len(replay_texts)}")
     r.shuffle(rows)
     with open(out, "w") as f:
         for x in rows:
