@@ -87,7 +87,7 @@ class NoDropout:
         self.saved = []
 
 
-def add_blank_duration_kl(m, weight: float, sub_batch: int = 2):
+def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None):
     """Keep the model's emit-or-wait behaviour close to stock Ultra's.
 
     Extra loss: KL(teacher || student) over (a) blank vs not-blank and (b) the five TDT durations,
@@ -95,13 +95,18 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2):
     network + joint on the same frozen encoder output. Both terms ignore WHICH token is emitted, so
     the student can still learn spoken forms (stock would emit a digit, the student a word: both
     "not blank"). Fine-tuning without it lowered blank confidence and the app's windowed path then
-    dropped more words."""
+    dropped more words.
+
+    `only_texts`: apply the term only to utterances whose label is in this set (the real-speech
+    replay rows), so TTS rows learn spoken form freely. The batch carries no source tag, so rows
+    are matched by their token ids."""
     import copy
 
     teacher_dec, teacher_joint = copy.deepcopy(m.decoder).eval(), copy.deepcopy(m.joint).eval()
     for p in list(teacher_dec.parameters()) + list(teacher_joint.parameters()):
         p.requires_grad_(False)
     m._kl_teacher = (teacher_dec, teacher_joint)  # attribute (not a submodule): not saved
+    keep = {tuple(m.tokenizer.text_to_ids(t)) for t in only_texts} if only_texts is not None else None
     orig_step = m.training_step
 
     def training_step(batch, batch_idx):
@@ -138,9 +143,12 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2):
             kl_dur = (t_dur.exp() * (t_dur - s_dur)).sum(-1)
             return ((kl_blank + kl_dur) * mask).sum(), mask.sum()
 
+        rows = list(range(f.shape[0]))
+        if keep is not None:
+            rows = [i for i in rows if tuple(tokens[i, :int(tokens_len[i])].tolist()) in keep]
         total, count = 0.0, 0
-        for i in range(0, f.shape[0], sub_batch):
-            sl = slice(i, i + sub_batch)
+        for j in range(0, len(rows), sub_batch):
+            sl = torch.tensor(rows[j:j + sub_batch], device=f.device)
             u = int(tokens_len[sl].max()) + 1
             t = int(enc_len[sl].max())
             # Checkpointed: the [b, T, U, 8198] logits are rebuilt during backward instead of
@@ -150,11 +158,11 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2):
                 enc_len[sl], tokens_len[sl], use_reentrant=False)
             total = total + part
             count += int(n)
-        kl = total / max(count, 1)
+        kl = total / max(count, 1) if count else torch.zeros((), device=f.device)
         m.log("kl_blank_dur", kl.detach(), prog_bar=False)
         out["loss"] = out["loss"] + weight * kl
         if batch_idx % 10 == 0:
-            print(f"kl_blank_dur {kl.item():.4f}", flush=True)
+            print(f"kl_blank_dur {kl.item():.4f} rows {len(rows)}/{f.shape[0]}", flush=True)
         return out
 
     m.training_step = training_step
@@ -170,8 +178,9 @@ class StepLog(pl.Callback):
             print(f"step {trainer.global_step} loss {loss:.4f} {time.time() - self.t0:.0f}s", flush=True)
 
 
-def write_mix(vol: str, out: str, parts: list[tuple[str, float]], seed: int = 1) -> float:
-    """Concatenate manifests, taking `hours` from each (all if hours <= 0)."""
+def write_mix(vol: str, out: str, parts: list[tuple[str, float]], seed: int = 1, replay_texts=None) -> float:
+    """Concatenate manifests, taking `hours` from each (all if hours <= 0). Labels of rows from
+    `replay/` manifests are added to `replay_texts` when given."""
     r = random.Random(seed)
     rows = []
     for path, hours in parts:
@@ -186,6 +195,8 @@ def write_mix(vol: str, out: str, parts: list[tuple[str, float]], seed: int = 1)
                 acc += x["duration"]
             src = keep
         print(f"mix {path}: {len(src)} rows, {sum(x['duration'] for x in src) / 3600:.2f} h")
+        if replay_texts is not None and path.startswith("replay/"):
+            replay_texts.update(x["text"] for x in src)
         rows += src
     r.shuffle(rows)
     with open(out, "w") as f:
@@ -202,12 +213,14 @@ def trainable_state(m) -> dict:
 def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_steps: int,
           lr: float = 1e-4, batch_duration: float = 600, warmup: int = 20, freeze_blank_duration: bool = False,
           save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3, spec_augment: bool = True,
-          kl_weight: float = 0.0):
+          kl_weight: float = 0.0, kl_replay_only: bool = False, init_from: str = ""):
+    """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock)."""
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
     os.makedirs(exp, exist_ok=True)
-    hours = write_mix(vol, f"{exp}/train_manifest.jsonl", mix)
+    replay_texts = set()
+    hours = write_mix(vol, f"{exp}/train_manifest.jsonl", mix, replay_texts=replay_texts)
     print(f"train mix: {hours:.2f} h")
 
     m = nemo_asr.models.ASRModel.restore_from(ultra, map_location="cpu")
@@ -230,8 +243,15 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         print("SpecAugment off")
     m.encoder.freeze()
     if kl_weight:
-        add_blank_duration_kl(m, kl_weight)
-        print(f"blank/duration KL to stock, weight {kl_weight}")
+        add_blank_duration_kl(m, kl_weight, only_texts=replay_texts if kl_replay_only else None)
+        print(f"blank/duration KL to stock, weight {kl_weight}"
+              + (f", replay rows only ({len(replay_texts)} labels)" if kl_replay_only else ""))
+    if init_from:
+        src, _, step = init_from.partition("@")
+        missing, unexpected = m.load_state_dict(
+            torch.load(f"{vol}/exp/{src}/step{step}.pt", map_location="cpu"), strict=False)
+        assert not unexpected and not [k for k in missing if k.startswith(("decoder.", "joint."))], missing
+        print(f"initialized from {init_from}")
     extra = []
     if freeze_blank_duration:
         n = m.joint.joint_net[-1].weight.shape[0]
