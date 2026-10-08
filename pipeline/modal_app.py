@@ -263,7 +263,8 @@ def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: flo
         numwords_h: float = 5.0, fleurs_h: float = 3.0, warmup: int = 50, hold_blank_duration: bool = False,
         save_every: int = 250, spec_augment: bool = True, kl_weight: float = 0.0,
         kl_replay_only: bool = False, init_from: str = "", tts_h: float = 0.0, batch_duration: float = 600,
-        icsi_h: float = 0.0, kl_terms: str = "blank,dur", seed: int = 1):
+        icsi_h: float = 0.0, kl_terms: str = "blank,dur", seed: int = 1,
+        kl_exempt: str = ""):
     """Train, then score every saved checkpoint on the evaluation sets. `tts_h` < 0 leaves the TTS
     rows out (replay-only consolidation)."""
     import torch
@@ -281,7 +282,7 @@ def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: flo
                        max_steps=max_steps, lr=lr, warmup=warmup, freeze_blank_duration=hold_blank_duration,
                        save_every=save_every, on_save=vol.commit, spec_augment=spec_augment,
                        kl_weight=kl_weight, kl_replay_only=kl_replay_only, init_from=init_from,
-                       batch_duration=batch_duration, kl_terms=kl_terms, seed=seed)
+                       batch_duration=batch_duration, kl_terms=kl_terms, seed=seed, kl_exempt=kl_exempt)
     vol.commit()
     del m
     eval_ckpts.local(run, ",".join(str(s) for s in range(save_every, max_steps + 1, save_every)), tts,

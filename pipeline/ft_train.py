@@ -145,6 +145,10 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
             kl_blank = t_lb.exp() * (t_lb - s_lb) + t_lnb.exp() * (t_lnb - s_lnb)
             s_dur, t_dur = s_logits[..., nb:].log_softmax(-1), t_logits[..., nb:].log_softmax(-1)
             kl_dur = (t_dur.exp() * (t_dur - s_dur)).sum(-1)
+            if "gated" in terms:
+                # One-sided: only where stock confidently emits (P(non-blank) > 0.9) — holds against
+                # the student skipping words there, leaves new spoken-form emissions free elsewhere.
+                kl_blank = kl_blank * (t_lnb.exp() > 0.9)
             kl = (kl_blank if "blank" in terms else 0) + (kl_dur if "dur" in terms else 0)
             return (kl * mask).sum(), mask.sum()
 
@@ -192,7 +196,8 @@ class StepLog(pl.Callback):
             print(f"step {trainer.global_step} loss {loss:.4f} {time.time() - self.t0:.0f}s", flush=True)
 
 
-def write_mix(vol: str, out: str, parts: list[tuple[str, float]], seed: int = 1, replay_texts=None) -> float:
+def write_mix(vol: str, out: str, parts: list[tuple[str, float]], seed: int = 1, replay_texts=None,
+              kl_exempt: str = "") -> float:
     """Concatenate manifests, taking `hours` from each (all if hours <= 0). Labels of rows from
     `replay/` manifests are added to `replay_texts` when given."""
     r = random.Random(seed)
@@ -209,7 +214,7 @@ def write_mix(vol: str, out: str, parts: list[tuple[str, float]], seed: int = 1,
                 acc += x["duration"]
             src = keep
         print(f"mix {path}: {len(src)} rows, {sum(x['duration'] for x in src) / 3600:.2f} h")
-        if replay_texts is not None and path.startswith("replay/"):
+        if replay_texts is not None and path.startswith("replay/") and not (kl_exempt and kl_exempt in path):
             replay_texts.update(x["text"] for x in src)
         rows += src
     r.shuffle(rows)
@@ -228,14 +233,15 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           lr: float = 1e-4, batch_duration: float = 600, warmup: int = 20, freeze_blank_duration: bool = False,
           save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3, spec_augment: bool = True,
           kl_weight: float = 0.0, kl_replay_only: bool = False, init_from: str = "", kl_terms: str = "blank,dur",
-          seed: int = 1):
+          seed: int = 1, kl_exempt: str = ""):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock)."""
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
     os.makedirs(exp, exist_ok=True)
     replay_texts = set()
-    hours = write_mix(vol, f"{exp}/train_manifest.jsonl", mix, seed=seed, replay_texts=replay_texts)
+    hours = write_mix(vol, f"{exp}/train_manifest.jsonl", mix, seed=seed, replay_texts=replay_texts,
+                      kl_exempt=kl_exempt)
     pl.seed_everything(seed)
     print(f"train mix: {hours:.2f} h")
 
