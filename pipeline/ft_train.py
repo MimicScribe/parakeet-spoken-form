@@ -106,7 +106,7 @@ def trainable_state(m) -> dict:
 
 def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_steps: int,
           lr: float = 1e-4, batch_duration: float = 600, warmup: int = 20, freeze_blank_duration: bool = False,
-          save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3):
+          save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3, spec_augment: bool = True):
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
@@ -126,6 +126,12 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
             "bucket_buffer_size": 20000, "shuffle": True, "shuffle_buffer_size": 10000, "seed": 1,
             "num_workers": 8, "pin_memory": True, "skip_missing_manifest_entries": False})
     m.setup_training_data(m.cfg.train_ds)
+    if not spec_augment:
+        # With the encoder frozen, SpecAugment masks the encoder's INPUT while the label keeps the
+        # masked words, which rewards skipping ahead and guessing (suspected cause of the extra
+        # deletions in v3).
+        m.spec_augmentation = None
+        print("SpecAugment off")
     m.encoder.freeze()
     extra = []
     if freeze_blank_duration:

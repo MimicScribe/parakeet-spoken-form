@@ -184,7 +184,7 @@ def baseline(tts: str = "smoke", run: str = "ultra", full: bool = False):
 
 
 @app.function(image=nemo_image, volumes={VOL: vol}, cpu=4, memory=16384, timeout=1800)
-def export_weights(run: str = "ultra"):
+def export_weights(run: str = "ultra", step: int = 0):
     """Decoder + joint tensors (fp32, NeMo names) as safetensors, for swap_weights.py."""
     import os
 
@@ -194,6 +194,9 @@ def export_weights(run: str = "ultra"):
     vol.reload()
     if run == "ultra":
         sd = torch.load(ultra_state(), map_location="cpu")
+    elif step:
+        sd = torch.load(f"{VOL}/exp/{run}/step{step}.pt", map_location="cpu")
+        run = f"{run}@{step}"
     else:
         sd = torch.load(f"{VOL}/exp/{run}/decoder_joint.pt", map_location="cpu")
     keep = {k: v.float().contiguous() for k, v in sd.items() if k.startswith(("decoder.", "joint."))}
@@ -234,7 +237,7 @@ def filter_tts(name: str):
               timeout=3 * 3600)
 def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: float = 14.0,
         numwords_h: float = 5.0, fleurs_h: float = 3.0, warmup: int = 50, hold_blank_duration: bool = False,
-        save_every: int = 250):
+        save_every: int = 250, spec_augment: bool = True):
     """Train, then score every saved checkpoint on the evaluation sets."""
     import torch
 
@@ -247,15 +250,28 @@ def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: flo
                             ("replay/lspc_train_numwords.jsonl", numwords_h),
                             ("replay/fleurs_train_multi.jsonl", fleurs_h)],
                        max_steps=max_steps, lr=lr, warmup=warmup, freeze_blank_duration=hold_blank_duration,
-                       save_every=save_every, on_save=vol.commit)
+                       save_every=save_every, on_save=vol.commit, spec_augment=spec_augment)
     vol.commit()
-    m = m.cuda().eval()
-    exp = f"{VOL}/exp/{run}"
-    for step in range(save_every, max_steps + 1, save_every):
-        state = torch.load(f"{exp}/step{step}.pt", map_location="cpu")
-        m.load_state_dict(state, strict=False)
+    del m
+    eval_ckpts.local(run, ",".join(str(s) for s in range(save_every, max_steps + 1, save_every)), tts)
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=3 * 3600)
+def eval_ckpts(run: str, steps: str, tts: str):
+    """Score checkpoints, each in a FRESH model: reusing one model across load_state_dict calls
+    broke every second checkpoint's decode (one token, then nothing), 2026-10-07."""
+    import torch
+
+    import ft_eval
+
+    vol.reload()
+    for step in steps.split(","):
+        m = ft_eval.load_model(VOL, "ultra", ultra_path())
+        m.load_state_dict(torch.load(f"{VOL}/exp/{run}/step{step}.pt", map_location="cpu"), strict=False)
         ft_eval.eval_sets(VOL, m.cuda().eval(), run, tts, suffix=f"@{step}")
         vol.commit()
+        del m
+        torch.cuda.empty_cache()
 
 
 @app.function(image=tts_image, volumes={VOL: vol}, timeout=600)
@@ -273,4 +289,50 @@ def merge_tts(name: str, parts: str):
                     out.write(line)
                     n += 1
         print(f"{name}/{split}_ok: {n} clips")
+    vol.commit()
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=1800)
+def debug_ckpt(run: str = "v3free", steps: str = "500,750"):
+    """Load each checkpoint into a FRESH model and decode 20 LS dev clips; report weight stats."""
+    import json
+
+    import torch
+
+    import ft_eval
+
+    vol.reload()
+    ultra = torch.load(ultra_state(), map_location="cpu")
+    rows = [json.loads(l) for l in open(f"{VOL}/replay/lspc_dev.jsonl")][:20]
+    for step in steps.split(","):
+        sd = torch.load(f"{VOL}/exp/{run}/step{step}.pt", map_location="cpu")
+        bad = [k for k, v in sd.items() if v.is_floating_point() and not torch.isfinite(v).all()]
+        drift = {k: round(float((sd[k].float() - ultra[k].float()).norm() / (ultra[k].float().norm() + 1e-9)), 4)
+                 for k in ultra if k in sd}
+        print(step, "keys", len(sd), "nonfinite", bad[:5], "max rel drift",
+              sorted(drift.items(), key=lambda x: -x[1])[:4])
+        m = ft_eval.load_model(VOL, "ultra", ultra_path())
+        m.load_state_dict(sd, strict=False)
+        hyps = ft_eval.decode(m.cuda().eval(), [r["audio_filepath"] for r in rows])
+        print(step, "fresh-model decode:", [h["text"][:50] for h in hyps[:3]])
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, cpu=2, memory=8192, timeout=600)
+def shift_blank(run: str, step: int, deltas: str = "0.5,1.0,1.5"):
+    """Calibration variants: add `delta` to the blank logit's bias (joint output row 8192), saved as
+    exp/<run>_b<delta>/step<step>.pt. Fine-tuning lowered the model's blank confidence; this moves
+    it back without retraining."""
+    import os
+
+    import torch
+
+    vol.reload()
+    sd = torch.load(f"{VOL}/exp/{run}/step{step}.pt", map_location="cpu")
+    for d in deltas.split(","):
+        out = dict(sd)
+        b = sd["joint.joint_net.2.bias"].clone()
+        b[8192] += float(d)
+        out["joint.joint_net.2.bias"] = b
+        os.makedirs(f"{VOL}/exp/{run}_b{d}", exist_ok=True)
+        torch.save(out, f"{VOL}/exp/{run}_b{d}/step{step}.pt")
+        print(f"{run}_b{d}: blank bias {float(sd['joint.joint_net.2.bias'][8192]):.3f} -> {float(b[8192]):.3f}")
     vol.commit()
