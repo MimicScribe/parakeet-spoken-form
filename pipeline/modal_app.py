@@ -219,6 +219,8 @@ def soup(src: str, alphas: str, name: str):
     run, _, step = src.partition("@")
     ft = torch.load(f"{VOL}/exp/{run}/step{step}.pt", map_location="cpu")
     base = torch.load(ultra_state(), map_location="cpu")
+    trained = {k for k in ft if k.startswith(("decoder.", "joint."))}
+    assert trained == set(base), (sorted(trained ^ set(base))[:5])
     os.makedirs(f"{VOL}/exp/{name}", exist_ok=True)
     for a in (float(x) for x in alphas.split(",")):
         sd = {k: (base[k].float() + a * (v.float() - base[k].float())).to(v.dtype) if k in base else v

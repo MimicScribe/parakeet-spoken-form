@@ -136,8 +136,8 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None)
                     & (torch.arange(U, device=f_sl.device)[None, None, :] <= tok_len_sl[:, None, None]))
             s_lb = s_logits[..., nb - 1] - s_logits[..., :nb].logsumexp(-1)
             t_lb = t_logits[..., nb - 1] - t_logits[..., :nb].logsumexp(-1)
-            s_lnb = torch.log1p(-s_lb.exp().clamp(max=1 - 1e-6))
-            t_lnb = torch.log1p(-t_lb.exp().clamp(max=1 - 1e-6))
+            s_lnb = s_logits[..., :nb - 1].logsumexp(-1) - s_logits[..., :nb].logsumexp(-1)
+            t_lnb = t_logits[..., :nb - 1].logsumexp(-1) - t_logits[..., :nb].logsumexp(-1)
             kl_blank = t_lb.exp() * (t_lb - s_lb) + t_lnb.exp() * (t_lnb - s_lnb)
             s_dur, t_dur = s_logits[..., nb:].log_softmax(-1), t_logits[..., nb:].log_softmax(-1)
             kl_dur = (t_dur.exp() * (t_dur - s_dur)).sum(-1)
@@ -171,6 +171,15 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None)
 class StepLog(pl.Callback):
     def __init__(self):
         self.t0 = time.time()
+        self.clipped = 0
+
+    def on_before_optimizer_step(self, trainer, m, optimizer):
+        # Gradient norm before clipping (clip 1.0): a large KL term can scale the whole update down.
+        norm = torch.linalg.vector_norm(torch.stack(
+            [p.grad.detach().float().norm() for p in m.parameters() if p.grad is not None]))
+        self.clipped += int(norm > 1.0)
+        if trainer.global_step % 10 == 0:
+            print(f"grad_norm {norm.item():.3f} clipped {self.clipped}/{trainer.global_step + 1}", flush=True)
 
     def on_train_batch_end(self, trainer, m, outputs, batch, idx):
         if trainer.global_step % 10 == 0:
