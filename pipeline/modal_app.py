@@ -206,6 +206,28 @@ def export_weights(run: str = "ultra", step: int = 0):
     vol.commit()
 
 
+@app.function(image=nemo_image, volumes={VOL: vol}, cpu=4, memory=16384, timeout=1800)
+def soup(src: str, alphas: str, name: str):
+    """Interpolate decoder + joint between stock Ultra and `src` ("<run>@<step>"): weights =
+    stock + alpha * (fine-tuned - stock), one checkpoint per alpha at exp/<name>/step<100*alpha>.pt,
+    so `eval_ckpts` and `export_weights --step` take them as they are."""
+    import os
+
+    import torch
+
+    vol.reload()
+    run, _, step = src.partition("@")
+    ft = torch.load(f"{VOL}/exp/{run}/step{step}.pt", map_location="cpu")
+    base = torch.load(ultra_state(), map_location="cpu")
+    os.makedirs(f"{VOL}/exp/{name}", exist_ok=True)
+    for a in (float(x) for x in alphas.split(",")):
+        sd = {k: (base[k].float() + a * (v.float() - base[k].float())).to(v.dtype) if k in base else v
+              for k, v in ft.items()}
+        torch.save(sd, f"{VOL}/exp/{name}/step{round(100 * a)}.pt")
+        print(f"{name}: alpha {a} -> step{round(100 * a)}.pt")
+    vol.commit()
+
+
 def ultra_state() -> str:
     """Ultra's own decoder + joint, extracted once from the .nemo."""
     import os
@@ -238,7 +260,8 @@ def filter_tts(name: str):
 def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: float = 14.0,
         numwords_h: float = 5.0, fleurs_h: float = 3.0, warmup: int = 50, hold_blank_duration: bool = False,
         save_every: int = 250, spec_augment: bool = True, kl_weight: float = 0.0,
-        kl_replay_only: bool = False, init_from: str = "", tts_h: float = 0.0):
+        kl_replay_only: bool = False, init_from: str = "", tts_h: float = 0.0, batch_duration: float = 600,
+        icsi_h: float = 0.0):
     """Train, then score every saved checkpoint on the evaluation sets. `tts_h` < 0 leaves the TTS
     rows out (replay-only consolidation)."""
     import torch
@@ -251,10 +274,12 @@ def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: flo
                        mix=([(f"tts/{tts}/train_ok.jsonl", tts_h)] if tts_h >= 0 else [])
                        + [("replay/lspc_train.jsonl", lspc_h),
                           ("replay/lspc_train_numwords.jsonl", numwords_h),
-                          ("replay/fleurs_train_multi.jsonl", fleurs_h)],
+                          ("replay/fleurs_train_multi.jsonl", fleurs_h)]
+                       + ([("replay/icsi_train.jsonl", icsi_h)] if icsi_h else []),
                        max_steps=max_steps, lr=lr, warmup=warmup, freeze_blank_duration=hold_blank_duration,
                        save_every=save_every, on_save=vol.commit, spec_augment=spec_augment,
-                       kl_weight=kl_weight, kl_replay_only=kl_replay_only, init_from=init_from)
+                       kl_weight=kl_weight, kl_replay_only=kl_replay_only, init_from=init_from,
+                       batch_duration=batch_duration)
     vol.commit()
     del m
     eval_ckpts.local(run, ",".join(str(s) for s in range(save_every, max_steps + 1, save_every)), tts,
