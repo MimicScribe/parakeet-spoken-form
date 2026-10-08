@@ -254,18 +254,20 @@ def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: flo
                        kl_weight=kl_weight)
     vol.commit()
     del m
-    eval_ckpts.local(run, ",".join(str(s) for s in range(save_every, max_steps + 1, save_every)), tts)
+    eval_ckpts.local(run, ",".join(str(s) for s in range(save_every, max_steps + 1, save_every)), tts,
+                     reload=False)
 
 
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=3 * 3600)
-def eval_ckpts(run: str, steps: str, tts: str):
+def eval_ckpts(run: str, steps: str, tts: str, reload: bool = True):
     """Score checkpoints, each in a FRESH model: reusing one model across load_state_dict calls
     broke every second checkpoint's decode (one token, then nothing), 2026-10-07."""
     import torch
 
     import ft_eval
 
-    vol.reload()
+    if reload:  # not when called in the training container: its data loaders keep files open
+        vol.reload()
     for step in steps.split(","):
         m = ft_eval.load_model(VOL, "ultra", ultra_path())
         m.load_state_dict(torch.load(f"{VOL}/exp/{run}/step{step}.pt", map_location="cpu"), strict=False)
