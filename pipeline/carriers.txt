@@ -137,3 +137,33 @@ Only {int_small} of them replied.
 She's been here {int_tens} years.
 There were {int_hundreds} applicants.
 We printed {int_4digit} copies.
+# v3: names, abbreviations, acronyms, dictation words (owner rule: everything as said)
+Revenue in {quarter} came in above plan.
+We'll revisit pricing in {quarter}.
+Guidance for {quarter} assumes flat demand.
+Compared to {quarter}, margins improved.
+Let's save ten minutes at the end for {and_acronym}.
+The {and_acronym} team signed off yesterday.
+Our {and_acronym} spend went up again.
+I spoke with {title_name} this morning.
+{title_name} will join the call at {clock}.
+Please send the draft to {title_name}.
+We met {title_name} at the conference.
+The office on Main {abbrev_word} is closing.
+It's {abbrev_word} the same as last year.
+Please reply {abbrev_word}.
+The deck is ready, {abbrev_word}.
+This feels like {roman} all over again.
+They shipped {roman} last week.
+The {acronym} numbers look better this quarter.
+Our {acronym} lead wants a demo.
+Ask the {acronym} team before {date}.
+Can you check the {acronym} before we ship?
+My last name is {spelled}.
+That's spelled {spelled}.
+Then type {dictation} and keep going.
+Put a {dictation} right there.
+Add {dictation} at the end of the line.
+The file name ends in {dictation}.
+We're still waiting on {identifier} support.
+Is {identifier} in the budget?

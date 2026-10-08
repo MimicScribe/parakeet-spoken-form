@@ -114,14 +114,14 @@ def voice_shard(rows: list, out_dir: str) -> list:
 
 
 @app.function(image=tts_image, volumes={VOL: vol}, timeout=3 * 3600)
-def make_tts(name: str, n_rows: int, seed: int = 1, shard: int = 200):
+def make_tts(name: str, n_rows: int, seed: int = 1, shard: int = 200, multi_frac: float = 0.0):
     """Generate rows, voice them in parallel shards, write train/dev manifests under /vol/tts/<name>."""
     import json
     import os
 
     import gen
 
-    rows = list(gen.rows(n_rows, seed))
+    rows = list(gen.rows(n_rows, seed, multi_frac=multi_frac))
     shards = [rows[i:i + shard] for i in range(0, len(rows), shard)]
     out_dir = f"{VOL}/tts/{name}"
     os.makedirs(out_dir, exist_ok=True)

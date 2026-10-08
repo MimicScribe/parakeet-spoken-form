@@ -224,7 +224,7 @@ def k_basis_points(r):
 
 def k_clock(r):
     h, m = r.randint(1, 12), r.randint(0, 59)
-    suffix = _pick(r, [(0.5, ""), (0.25, " pm"), (0.25, " am")])
+    suffix = _pick(r, [(0.5, ""), (0.25, " PM"), (0.25, " AM")])
     if m == 0:
         base = _pick(r, [(0.6, f"{cardinal(h)} o'clock"), (0.4, cardinal(h))])
     elif m < 10:
@@ -369,7 +369,90 @@ def k_identifier(r):
     return r.choice(["COVID nineteen", "Windows eleven", "iPhone sixteen", "Python three", "H two hundred",
                      "A one hundred", "GPT five", "Series B", "Phase three", "Section two thirty",
                      "Title nine", "Route sixty six", "Highway one oh one", "Room four oh two",
-                     "Gate B twelve", "Flight two eighteen", "Interstate five", "Chapter eleven"])
+                     "Gate B twelve", "Flight two eighteen", "Interstate five", "Chapter eleven",
+                     "five G", "four G", "four K", "ten K", "ten Q", "eight K", "B two B", "B two C", "MP three",
+                     "PD one", "W two", "four oh one K", "Tele two", "Web three", "Mark two", "Gen Z",
+                     "three D", "U S B C", "Wi Fi six", "H two O", "C O two", "Formula one", "Catch twenty two"])
+
+
+def k_quarter(r):
+    q = r.choice(["one", "two", "three", "four"])
+    year_tail = _pick(r, [(0.5, ""), (0.3, " " + year(r.randint(2018, 2030))), (0.2, f" fiscal {year(r.randint(2018, 2030))}")])
+    return _pick(r, [(0.45, f"Q {q}{year_tail}"), (0.15, f"H {r.choice(['one', 'two'])}{year_tail}"),
+                     (0.2, f"the {ordinal(['one', 'two', 'three', 'four'].index(q) + 1)} quarter{year_tail}"),
+                     (0.2, f"FY {cardinal(r.randint(18, 30))}")])
+
+
+AND_ACRONYMS = ["Q and A", "M and A", "R and D", "P and L", "AT and T", "S and P", "B and B", "H and R",
+                "G and A", "SG and A", "D and I", "T and E", "rock and roll", "B and Q"]
+
+
+def k_and_acronym(r):
+    a = r.choice(AND_ACRONYMS)
+    return f"S and P five hundred" if a == "S and P" and r.random() < 0.5 else a
+
+
+TITLES = [("mister", "Mister"), ("missus", "Missus"), ("doctor", "Doctor"), ("professor", "Professor"),
+          ("saint", "Saint"), ("senator", "Senator"), ("governor", "Governor"), ("captain", "Captain"),
+          ("lieutenant", "Lieutenant"), ("general", "General"), ("reverend", "Reverend"), ("judge", "Judge"),
+          ("president", "President"), ("sergeant", "Sergeant")]
+SURNAMES = ["Smith", "Patel", "Nguyen", "Garcia", "Okafor", "Kowalski", "Chen", "Johnson", "Rossi", "Haddad",
+            "Murphy", "Tanaka", "Silva", "Novak", "Brown", "Cohen", "Ali", "Fischer", "Moreau", "Lindqvist"]
+
+
+def k_title_name(r):
+    t = r.choice(TITLES)[1]
+    if t == "Saint":
+        return r.choice(["Saint Louis", "Saint Paul", "Saint Patrick", "Saint Petersburg", "Saint Lucia"])
+    name = r.choice(SURNAMES)
+    return f"{t} {name}" + (_pick(r, [(0.85, ""), (0.1, " Junior"), (0.05, " Senior")]))
+
+
+ABBREV_WORDS = ["number", "versus", "et cetera", "approximately", "department", "incorporated", "corporation",
+                "limited", "avenue", "boulevard", "street", "road", "mount", "fort", "miscellaneous", "estimated",
+                "minimum", "maximum", "average", "regarding", "with", "and or", "for example", "that is",
+                "as soon as possible", "for your information", "by the way", "end of day", "week over week",
+                "year over year", "quarter over quarter", "miles per hour", "kilograms", "pounds", "feet",
+                "northeast", "southwest", "January", "February", "Wednesday", "Thursday", "doctorate"]
+
+
+def k_abbrev_word(r):
+    return r.choice(ABBREV_WORDS)
+
+
+def k_roman(r):
+    return _pick(r, [(0.3, f"World War {r.choice(['one', 'two'])}"), (0.2, f"{r.choice(['Henry', 'Louis', 'Elizabeth', 'George', 'Charles'])} the {ordinal(r.randint(1, 16))}"),
+                     (0.2, f"Phase {cardinal(r.randint(1, 4))}"), (0.1, f"Super Bowl {cardinal(r.randint(40, 60))}"),
+                     (0.1, f"Part {cardinal(r.randint(1, 5))}"), (0.1, f"{r.choice(['Rocky', 'Star Wars Episode', 'Final Fantasy', 'Grand Theft Auto'])} {cardinal(r.randint(2, 9))}")])
+
+
+ACRONYMS = ["US", "UK", "EU", "UN", "CDC", "FBI", "CEO", "CFO", "COO", "CTO", "VP", "HR", "IT", "PR", "AI", "API",
+            "SDK", "UI", "UX", "PDF", "URL", "HTML", "CSS", "SQL", "AWS", "GPU", "CPU", "RAM", "SSD", "TV", "DVD",
+            "EBIT", "EBITDA", "EPS", "ARR", "MRR", "KPI", "ROI", "OKR", "SaaS", "B2B", "IPO", "LLC", "IRS", "SEC",
+            "FDA", "NASA", "NATO", "GAAP", "ESG", "CapEx", "OpEx", "YoY", "ETA", "FAQ", "PhD", "MBA", "LLM", "GPT"]
+
+
+def k_acronym(r):
+    a = r.choice([x for x in ACRONYMS if not re.search(r"\d", x)])
+    return a
+
+
+def k_spelled(r):
+    word = r.choice(["Smith", "Nguyen", "Kowalski", "Haddad", "Lindqvist", "Okafor", "Moreau", "Rossi", "Fischer",
+                     "Tanaka", "Siobhan", "Aoife", "Jaqueline"])
+    return " ".join(word.upper())
+
+
+DICTATION = ["comma", "period", "full stop", "colon", "semicolon", "question mark", "exclamation point", "dash",
+             "hyphen", "underscore", "open paren", "close paren", "quote", "unquote", "new line", "new paragraph",
+             "dot py", "dot json", "dot com", "dot txt", "dot swift", "snake case", "camel case", "dash dash force",
+             "slash slash", "backslash", "at sign", "hashtag", "plus", "equals", "less than", "greater than",
+             "asterisk", "ampersand", "percent sign", "dollar sign", "tilde", "pipe"]
+
+
+def k_dictation(r):
+    return r.choice(DICTATION)
+
 
 
 def k_slash(r):
@@ -407,11 +490,16 @@ LETTER_NAMES = dict(zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ",
                         "double-you ex why zee".split()))
 
 
+# Acronyms said as words get a respelling for the synthesizer; other capitals are read as letters.
+SPOKEN = {"EBIT": "ee bit", "EBITDA": "ee bit dah", "YoY": "why oh why", "PhD": "pee aitch dee", "CapEx": "cap ex",
+          "OpEx": "op ex", "SaaS": "sass", "GAAP": "gap", "AT": "ay tee", "B2B": "bee two bee"}
+
+
 def tts_form(slot: str) -> str:
     """What the synthesizer is given for a slot. The target keeps `slot` unchanged; this only
     steers pronunciation (single capitals as letter names, am/pm as letters, x as 'ex')."""
-    s = re.sub(r"\b([A-Z])\b", lambda m: LETTER_NAMES[m.group(1)], slot)
-    s = re.sub(r"\bam$", "A.M.", s)
-    s = re.sub(r"\bpm$", "P.M.", s)
+    s = re.sub(r"\b(" + "|".join(SPOKEN) + r")\b", lambda m: SPOKEN[m.group(1)], slot)
+    s = re.sub(r"\b([A-Z]{2,5})\b", lambda m: m.group(1) if m.group(1) in ("NASA", "NATO") else " ".join(m.group(1)), s)
+    s = re.sub(r"\b([A-Z])\b", lambda m: LETTER_NAMES[m.group(1)], s)
     s = re.sub(r"\bx$", "ex", s)
     return s

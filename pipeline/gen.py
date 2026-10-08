@@ -19,8 +19,14 @@ import readings
 HERE = os.path.dirname(os.path.abspath(__file__))
 SLOT = re.compile(r"\{(\w+)\}")
 
-# Sentences where "one", "point", "second", "quarter", "for", "to" are words, not numbers.
+# Sentences where number-like words are ordinary words, not numbers. The model must not turn
+# them into number words (kill2 heard "EBIT" as "eight").
 CONTROLS = [
+    "I ate before the meeting.", "We want to go too.", "This is for you.", "They won the account.",
+    "Let's queue it up for later.", "I'd like to see the EBIT bridge.", "The tin was empty.",
+    "Wait for the signal.", "Fore! Watch out!", "He was too late to fix it.", "Who won? We did.",
+    "I'm on it.", "Eat first, then we talk.", "Before or after lunch?", "To be honest, it's fine.",
+    "The weight is the issue.", "Our net margin improved.", "Tutor the new hires.", "The freight arrived late.",
     "No one wants to own that service.", "At this point the fix is obvious.",
     "That was a one off, I promise.", "Point taken, let's move on.", "Give me a second to check.",
     "The quarter ended on a high note.", "One of us should write it down.",
@@ -67,7 +73,23 @@ def lead_in(text: str, r: random.Random, p: float = 0.3) -> str:
     return r.choice(LEAD_INS) + text[0].lower() + text[1:]
 
 
-def rows(n: int, seed: int, dev_frac: float = 0.2, control_frac: float = 0.1):
+def rows(n: int, seed: int, dev_frac: float = 0.2, control_frac: float = 0.1, multi_frac: float = 0.0):
+    """`multi_frac` of the rows join two or three sentences, so sentence boundaries occur inside a
+    clip (single-sentence clips taught the model that every clip ends in one period)."""
+    single = _rows(n, seed, dev_frac, control_frac)
+    r = random.Random(seed + 7)
+    for row in single:
+        if r.random() >= multi_frac:
+            yield row
+            continue
+        parts = [row] + [x for x, _ in zip(single, range(r.choice([1, 1, 2])))]
+        parts = [p for p in parts if p["split"] == row["split"]] or [row]
+        yield {"id": row["id"], "split": row["split"], "template": " || ".join(p["template"] for p in parts),
+               "kinds": [k for p in parts for k in p["kinds"]], "text": " ".join(p["text"] for p in parts),
+               "tts_text": " ".join(p["tts_text"] for p in parts)}
+
+
+def _rows(n: int, seed: int, dev_frac: float, control_frac: float):
     r = random.Random(seed)
     carriers = load_carriers()
     for i in range(n):

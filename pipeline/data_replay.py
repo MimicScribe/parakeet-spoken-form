@@ -17,6 +17,29 @@ from common import NUMBER_WORDS, WRITTEN_FORM
 SLR = "https://www.openslr.org/resources"
 HEADING = re.compile(r"\b[A-Z]{2,}\b(?:\s+[A-Z]{2,}\b)+")
 
+# American spelling for the replay labels (Gutenberg books mix in British spellings; one rule).
+US_OUR = ("honour favour labour humour colour neighbour behaviour harbour rumour vapour vigour splendour valour "
+          "odour ardour savour endeavour clamour parlour armour candour fervour rigour tumour saviour").split()
+US_ISE = ("realise recognise organise apologise civilise criticise sympathise emphasise characterise "
+          "authorise memorise surprise").split()
+
+
+def us_spelling(text: str) -> str:
+    def fix(m):
+        w = m.group(0)
+        low = w.lower()
+        for stem in US_OUR:
+            if low.startswith(stem):
+                out = stem[:-3] + "or" + low[len(stem):]
+                return out.capitalize() if w[0].isupper() else out
+        for stem in US_ISE:
+            base = stem[:-3]
+            if stem != "surprise" and low.startswith(base + "is"):
+                out = base + "iz" + low[len(base) + 2:]
+                return out.capitalize() if w[0].isupper() else out
+        return w
+    return re.sub(r"[A-Za-z]+", fix, text)
+
 
 def _fetch_tar(url: str, dest: str) -> None:
     os.makedirs(dest, exist_ok=True)
@@ -45,7 +68,7 @@ def prepare(vol: str, splits=("train-clean-100", "dev-clean")) -> None:
                 dropped += 1
                 continue
             path = f"{ls}/LibriSpeech/{r['audio_filepath']}"
-            rows.append({"audio_filepath": path, "duration": r["duration"], "text": r["text"],
+            rows.append({"audio_filepath": path, "duration": r["duration"], "text": us_spelling(r["text"]),
                          "id": os.path.basename(path)[:-5]})
         missing = sum(not os.path.exists(r["audio_filepath"]) for r in rows[:200])
         print(f"{split}: {len(rows)} rows, {sum(r['duration'] for r in rows) / 3600:.1f} h, "
