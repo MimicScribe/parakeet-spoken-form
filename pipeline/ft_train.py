@@ -227,14 +227,16 @@ def trainable_state(m) -> dict:
 def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_steps: int,
           lr: float = 1e-4, batch_duration: float = 600, warmup: int = 20, freeze_blank_duration: bool = False,
           save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3, spec_augment: bool = True,
-          kl_weight: float = 0.0, kl_replay_only: bool = False, init_from: str = "", kl_terms: str = "blank,dur"):
+          kl_weight: float = 0.0, kl_replay_only: bool = False, init_from: str = "", kl_terms: str = "blank,dur",
+          seed: int = 1):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock)."""
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
     os.makedirs(exp, exist_ok=True)
     replay_texts = set()
-    hours = write_mix(vol, f"{exp}/train_manifest.jsonl", mix, replay_texts=replay_texts)
+    hours = write_mix(vol, f"{exp}/train_manifest.jsonl", mix, seed=seed, replay_texts=replay_texts)
+    pl.seed_everything(seed)
     print(f"train mix: {hours:.2f} h")
 
     m = nemo_asr.models.ASRModel.restore_from(ultra, map_location="cpu")
@@ -246,7 +248,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
             "manifest_filepath": f"{exp}/train_manifest.jsonl", "sample_rate": 16000,
             "use_lhotse": True, "text_field": "text", "batch_duration": batch_duration,
             "max_duration": 20.0, "min_duration": 0.5, "use_bucketing": True, "num_buckets": 10,
-            "bucket_buffer_size": 20000, "shuffle": True, "shuffle_buffer_size": 10000, "seed": 1,
+            "bucket_buffer_size": 20000, "shuffle": True, "shuffle_buffer_size": 10000, "seed": seed,
             "num_workers": 8, "pin_memory": True, "skip_missing_manifest_entries": False})
     m.setup_training_data(m.cfg.train_ds)
     if not spec_augment:
