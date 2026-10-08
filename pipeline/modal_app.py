@@ -264,7 +264,7 @@ def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: flo
         save_every: int = 250, spec_augment: bool = True, kl_weight: float = 0.0,
         kl_replay_only: bool = False, init_from: str = "", tts_h: float = 0.0, batch_duration: float = 600,
         icsi_h: float = 0.0, kl_terms: str = "blank,dur", seed: int = 1,
-        kl_exempt: str = ""):
+        kl_exempt: str = "", icsi_ovl_h: float = 0.0, icsi_ovl_set: str = "icsi_ovl"):
     """Train, then score every saved checkpoint on the evaluation sets. `tts_h` < 0 leaves the TTS
     rows out (replay-only consolidation)."""
     import torch
@@ -278,7 +278,8 @@ def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: flo
                        + [("replay/lspc_train.jsonl", lspc_h),
                           ("replay/lspc_train_numwords.jsonl", numwords_h),
                           ("replay/fleurs_train_multi.jsonl", fleurs_h)]
-                       + ([("replay/icsi_train.jsonl", icsi_h)] if icsi_h else []),
+                       + ([("replay/icsi_train.jsonl", icsi_h)] if icsi_h else [])
+                       + ([(f"replay/{icsi_ovl_set}_train.jsonl", icsi_ovl_h)] if icsi_ovl_h else []),
                        max_steps=max_steps, lr=lr, warmup=warmup, freeze_blank_duration=hold_blank_duration,
                        save_every=save_every, on_save=vol.commit, spec_augment=spec_augment,
                        kl_weight=kl_weight, kl_replay_only=kl_replay_only, init_from=init_from,
