@@ -56,6 +56,17 @@ def fill(carrier: str, r: random.Random):
     return target, tts, kinds
 
 
+# Spoken lead-ins, so carriers do not always start the same way.
+LEAD_INS = ["So ", "Okay, so ", "And ", "Um, ", "Yeah, ", "I think ", "Well, ", "Right, so ", "Uh, ",
+            "Honestly, ", "Basically, "]
+
+
+def lead_in(text: str, r: random.Random, p: float = 0.3) -> str:
+    if r.random() >= p or text[:2].isupper():
+        return text
+    return r.choice(LEAD_INS) + text[0].lower() + text[1:]
+
+
 def rows(n: int, seed: int, dev_frac: float = 0.2, control_frac: float = 0.1):
     r = random.Random(seed)
     carriers = load_carriers()
@@ -67,6 +78,10 @@ def rows(n: int, seed: int, dev_frac: float = 0.2, control_frac: float = 0.1):
             continue
         carrier = r.choice(carriers)
         target, tts, kinds = fill(carrier, r)
+        state = r.getstate()
+        target = lead_in(target, r)
+        r.setstate(state)
+        tts = lead_in(tts, r)
         yield {"id": f"r{seed}_{i}", "split": "dev" if is_dev_template(carrier, dev_frac) else "train",
                "template": carrier, "kinds": kinds, "text": target, "tts_text": tts}
 

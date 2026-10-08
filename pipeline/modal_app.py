@@ -40,7 +40,8 @@ tts_image = (
     .uv_pip_install("kokoro==0.9.4", "misaki[en]>=0.9.4", "transformers>=4.45", "soundfile", "scipy",
                     "numpy", "huggingface_hub", "pip")
     .run_commands("python -m spacy download en_core_web_sm")
-    .env({"HF_HOME": f"{VOL}/hf"})
+    # Per-container cache: parallel shards writing one shared cache read each other's partial files.
+    .env({"HF_HOME": "/root/hf"})
     .add_local_python_source("common", "readings", "gen", "voice")
     .add_local_file("carriers.txt", "/root/carriers.txt")
 )
@@ -138,16 +139,17 @@ def make_tts(name: str, n_rows: int, seed: int = 1, shard: int = 200):
 
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-40GB", cpu=8, memory=32768,
               timeout=2 * 3600)
-def killtest(run: str = "kill1", max_steps: int = 150, tts: str = "smoke", lr: float = 1e-4):
+def killtest(run: str = "kill1", max_steps: int = 150, tts: str = "smoke", lr: float = 1e-4,
+             lspc_h: float = 3.0, numwords_h: float = 0.7, warmup: int = 20):
     """Day-1 kill test: train briefly, then decode E22 number utterances, TTS dev and LS dev."""
     import ft_eval
     import ft_train
 
     vol.reload()
     m = ft_train.train(VOL, ultra_path(), run,
-                       mix=[(f"tts/{tts}/train.jsonl", 0), ("replay/lspc_train.jsonl", 3.0),
-                            ("replay/lspc_train_numwords.jsonl", 0.7)],
-                       max_steps=max_steps, lr=lr)
+                       mix=[(f"tts/{tts}/train.jsonl", 0), ("replay/lspc_train.jsonl", lspc_h),
+                            ("replay/lspc_train_numwords.jsonl", numwords_h)],
+                       max_steps=max_steps, lr=lr, warmup=warmup)
     vol.commit()
     m = m.cuda().eval()
     ft_eval.transcribe_loaded(VOL, m, run, "e22/numbers.jsonl", "e22_numbers")
@@ -157,13 +159,50 @@ def killtest(run: str = "kill1", max_steps: int = 150, tts: str = "smoke", lr: f
 
 
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=3600)
-def baseline(tts: str = "smoke"):
+def baseline(tts: str = "smoke", run: str = "ultra"):
     """Stock Ultra on the same sets as the kill test."""
     import ft_eval
 
     vol.reload()
     m = ft_eval.load_model(VOL, "ultra", ultra_path())
-    ft_eval.transcribe_loaded(VOL, m, "ultra", "e22/numbers.jsonl", "e22_numbers")
-    ft_eval.transcribe_loaded(VOL, m, "ultra", f"tts/{tts}/dev.jsonl", "tts_dev")
-    ft_eval.transcribe_loaded(VOL, m, "ultra", "replay/lspc_dev.jsonl", "lspc_dev", limit=600)
+    ft_eval.transcribe_loaded(VOL, m, run, "e22/numbers.jsonl", "e22_numbers")
+    ft_eval.transcribe_loaded(VOL, m, run, f"tts/{tts}/dev.jsonl", "tts_dev")
+    ft_eval.transcribe_loaded(VOL, m, run, "replay/lspc_dev.jsonl", "lspc_dev", limit=600)
     vol.commit()
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, cpu=4, memory=16384, timeout=1800)
+def export_weights(run: str = "ultra"):
+    """Decoder + joint tensors (fp32, NeMo names) as safetensors, for swap_weights.py."""
+    import os
+
+    import torch
+    from safetensors.torch import save_file
+
+    vol.reload()
+    if run == "ultra":
+        sd = torch.load(ultra_state(), map_location="cpu")
+    else:
+        sd = torch.load(f"{VOL}/exp/{run}/decoder_joint.pt", map_location="cpu")
+    keep = {k: v.float().contiguous() for k, v in sd.items() if k.startswith(("decoder.", "joint."))}
+    os.makedirs(f"{VOL}/export/{run}", exist_ok=True)
+    save_file(keep, f"{VOL}/export/{run}/decoder_joint.safetensors")
+    print(run, len(keep), "tensors", sum(v.numel() for v in keep.values()), "params")
+    vol.commit()
+
+
+def ultra_state() -> str:
+    """Ultra's own decoder + joint, extracted once from the .nemo."""
+    import os
+    import tarfile
+
+    import torch
+
+    path = f"{VOL}/export/ultra/state.pt"
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with tarfile.open(ultra_path()) as t:
+            member = next(m for m in t.getmembers() if m.name.endswith("model_weights.ckpt"))
+            sd = torch.load(t.extractfile(member), map_location="cpu")
+        torch.save({k: v for k, v in sd.items() if k.startswith(("decoder.", "joint."))}, path)
+    return path

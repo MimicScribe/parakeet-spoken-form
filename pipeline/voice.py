@@ -8,10 +8,12 @@ import numpy as np
 import soundfile as sf
 from scipy.signal import resample_poly
 
-# Grade C+ or better (Kokoro VOICES.md). Two held out for dev.
-TRAIN_VOICES = ["af_heart", "af_bella", "af_nicole", "af_aoede", "af_kore", "am_fenrir",
-                "am_michael", "bf_emma"]
-DEV_VOICES = ["af_sarah", "am_puck"]
+# Kokoro English voices (VOICES.md). Three held out for dev, never trained on.
+TRAIN_VOICES = ["af_heart", "af_bella", "af_nicole", "af_aoede", "af_kore", "af_alloy", "af_nova",
+                "af_jessica", "af_sky", "am_fenrir", "am_michael", "am_adam", "am_echo", "am_eric",
+                "am_liam", "am_onyx", "bf_emma", "bf_isabella", "bf_alice", "bf_lily", "bm_george",
+                "bm_lewis", "bm_daniel"]
+DEV_VOICES = ["af_sarah", "am_puck", "bm_fable"]
 
 _pipes = {}
 
