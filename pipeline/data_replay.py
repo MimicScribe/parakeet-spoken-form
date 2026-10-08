@@ -45,6 +45,11 @@ def us_spelling(text: str) -> str:
     return re.sub(r"[A-Za-z]+", fix, text)
 
 
+def _fetch_tar(url: str, dest: str) -> None:
+    os.makedirs(dest, exist_ok=True)
+    subprocess.run(f"wget -q --tries=5 -O - '{url}' | tar xz -C '{dest}'", shell=True, check=True)
+
+
 def prepare(vol: str, splits=("train-clean-100", "dev-clean")) -> None:
     root = f"{vol}/replay"
     ls = f"{vol}/librispeech"
