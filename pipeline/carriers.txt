@@ -217,3 +217,18 @@ So the number to remember is {any}.
 They asked about {any} twice.
 The email said {any}.
 Right, {any}, and then we move on.
+# Titles and "X and Y" names failed the owner's spoken check on v3 (~2% of rows): more carriers.
+Thanks, {title_name}, that's helpful.
+{title_name} asked about the timeline.
+Can you loop in {title_name} on this?
+According to {title_name}, it's on track.
+I'll forward it to {title_name} tonight.
+{title_name} and {title_name} both signed off.
+We had a call with {title_name} yesterday.
+Let me hand it over to {title_name}.
+The {and_acronym} session ran long.
+Do we have time for {and_acronym}?
+After the {and_acronym}, let's wrap up.
+That's a question for the {and_acronym} folks.
+Our {and_acronym} budget is flat this year.
+They moved the {and_acronym} to Friday.

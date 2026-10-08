@@ -237,7 +237,7 @@ def filter_tts(name: str):
               timeout=3 * 3600)
 def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: float = 14.0,
         numwords_h: float = 5.0, fleurs_h: float = 3.0, warmup: int = 50, hold_blank_duration: bool = False,
-        save_every: int = 250, spec_augment: bool = True):
+        save_every: int = 250, spec_augment: bool = True, kl_weight: float = 0.0):
     """Train, then score every saved checkpoint on the evaluation sets."""
     import torch
 
@@ -250,7 +250,8 @@ def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: flo
                             ("replay/lspc_train_numwords.jsonl", numwords_h),
                             ("replay/fleurs_train_multi.jsonl", fleurs_h)],
                        max_steps=max_steps, lr=lr, warmup=warmup, freeze_blank_duration=hold_blank_duration,
-                       save_every=save_every, on_save=vol.commit, spec_augment=spec_augment)
+                       save_every=save_every, on_save=vol.commit, spec_augment=spec_augment,
+                       kl_weight=kl_weight)
     vol.commit()
     del m
     eval_ckpts.local(run, ",".join(str(s) for s in range(save_every, max_steps + 1, save_every)), tts)

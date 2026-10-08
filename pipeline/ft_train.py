@@ -10,6 +10,7 @@ import time
 
 import lightning.pytorch as pl
 import torch
+import torch.utils.checkpoint
 from omegaconf import OmegaConf, open_dict
 
 
@@ -65,6 +66,84 @@ class HoldRows(pl.Callback):
         self.lin.bias[self.idx.to(dev)] = self.b.to(dev, self.lin.bias.dtype)
 
 
+def add_blank_duration_kl(m, weight: float, sub_batch: int = 2):
+    """Keep the model's emit-or-wait behaviour close to stock Ultra's.
+
+    Extra loss: KL(teacher || student) over (a) blank vs not-blank and (b) the five TDT durations,
+    at every (frame, label) point of the lattice, teacher = a frozen copy of the stock prediction
+    network + joint on the same frozen encoder output. Both terms ignore WHICH token is emitted, so
+    the student can still learn spoken forms (stock would emit a digit, the student a word: both
+    "not blank"). Fine-tuning without it lowered blank confidence and the app's windowed path then
+    dropped more words."""
+    import copy
+
+    teacher_dec, teacher_joint = copy.deepcopy(m.decoder).eval(), copy.deepcopy(m.joint).eval()
+    for p in list(teacher_dec.parameters()) + list(teacher_joint.parameters()):
+        p.requires_grad_(False)
+    m._kl_teacher = (teacher_dec, teacher_joint)  # attribute (not a submodule): not saved
+    orig_step = m.training_step
+
+    def training_step(batch, batch_idx):
+        out = orig_step(batch, batch_idx)
+        signal, signal_len, tokens, tokens_len = batch[:4]
+        tdec, tjoint = m._kl_teacher
+        tdec.to(signal.device), tjoint.to(signal.device)
+        with torch.no_grad():
+            feats, feats_len = m.preprocessor(input_signal=signal, length=signal_len)  # no SpecAugment
+            enc, enc_len = m.encoder(audio_signal=feats, length=feats_len)
+            t_g, _, _ = tdec(targets=tokens, target_length=tokens_len)
+        # Dropout off for this term (gradients still flow): with it on, the student differs from the
+        # teacher even at step 0 (KL ~0.35) and the term would chase noise, not drift.
+        dec_was = m.decoder.training
+        m.decoder.eval()
+        s_g, _, _ = m.decoder(targets=tokens, target_length=tokens_len)
+        m.decoder.train(dec_was)
+        f = enc.transpose(1, 2)
+        nb = 8193  # 8192 tokens + blank; the last 5 outputs are durations
+
+        def chunk_kl(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl):
+            # eval() inside the checkpointed function, so the backward recompute also runs it
+            # without dropout.
+            joint_was = m.joint.training
+            m.joint.eval()
+            s_logits = m.joint.joint(f_sl, s_sl).float()
+            m.joint.train(joint_was)
+            with torch.no_grad():
+                t_logits = tjoint.joint(f_sl, t_sl).float()
+            T, U = s_logits.shape[1], s_logits.shape[2]
+            mask = ((torch.arange(T, device=f_sl.device)[None, :, None] < enc_len_sl[:, None, None])
+                    & (torch.arange(U, device=f_sl.device)[None, None, :] <= tok_len_sl[:, None, None]))
+            s_lb = s_logits[..., nb - 1] - s_logits[..., :nb].logsumexp(-1)
+            t_lb = t_logits[..., nb - 1] - t_logits[..., :nb].logsumexp(-1)
+            s_lnb = torch.log1p(-s_lb.exp().clamp(max=1 - 1e-6))
+            t_lnb = torch.log1p(-t_lb.exp().clamp(max=1 - 1e-6))
+            kl_blank = t_lb.exp() * (t_lb - s_lb) + t_lnb.exp() * (t_lnb - s_lnb)
+            s_dur, t_dur = s_logits[..., nb:].log_softmax(-1), t_logits[..., nb:].log_softmax(-1)
+            kl_dur = (t_dur.exp() * (t_dur - s_dur)).sum(-1)
+            return ((kl_blank + kl_dur) * mask).sum(), mask.sum()
+
+        total, count = 0.0, 0
+        for i in range(0, f.shape[0], sub_batch):
+            sl = slice(i, i + sub_batch)
+            u = int(tokens_len[sl].max()) + 1
+            t = int(enc_len[sl].max())
+            # Checkpointed: the [b, T, U, 8198] logits are rebuilt during backward instead of
+            # being held for every sub-batch at once (that ran out of memory at batch 600 s).
+            part, n = torch.utils.checkpoint.checkpoint(
+                chunk_kl, f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
+                enc_len[sl], tokens_len[sl], use_reentrant=False)
+            total = total + part
+            count += int(n)
+        kl = total / max(count, 1)
+        m.log("kl_blank_dur", kl.detach(), prog_bar=False)
+        out["loss"] = out["loss"] + weight * kl
+        if batch_idx % 10 == 0:
+            print(f"kl_blank_dur {kl.item():.4f}", flush=True)
+        return out
+
+    m.training_step = training_step
+
+
 class StepLog(pl.Callback):
     def __init__(self):
         self.t0 = time.time()
@@ -106,7 +185,8 @@ def trainable_state(m) -> dict:
 
 def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_steps: int,
           lr: float = 1e-4, batch_duration: float = 600, warmup: int = 20, freeze_blank_duration: bool = False,
-          save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3, spec_augment: bool = True):
+          save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3, spec_augment: bool = True,
+          kl_weight: float = 0.0):
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
@@ -133,6 +213,9 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         m.spec_augmentation = None
         print("SpecAugment off")
     m.encoder.freeze()
+    if kl_weight:
+        add_blank_duration_kl(m, kl_weight)
+        print(f"blank/duration KL to stock, weight {kl_weight}")
     extra = []
     if freeze_blank_duration:
         n = m.joint.joint_net[-1].weight.shape[0]

@@ -68,7 +68,8 @@ def dev_carriers(carriers: list[str], dev_frac: float) -> set[str]:
 
 GENERIC_KINDS = ["int_small", "int_tens", "int_hundreds", "int_4digit", "year", "big", "decimal", "money",
                  "percent", "clock", "date", "ordinal", "range", "fraction", "measure", "quarter", "and_acronym",
-                 "title_name", "roman", "acronym", "identifier", "version", "code", "alnum", "multiplier"]
+                 "title_name", "roman", "acronym", "identifier", "version", "code", "alnum", "multiplier",
+                 "title_name", "and_acronym", "title_name", "and_acronym"]  # weighted: v3 under-learned these
 
 
 def fill(carrier: str, r: random.Random):
