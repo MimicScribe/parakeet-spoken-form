@@ -24,6 +24,47 @@ class KeepEncoderFrozen(pl.Callback):
         m.encoder.eval()
 
 
+class SaveEvery(pl.Callback):
+    """Keep the trainable weights every `every` steps (no full checkpoints: 18M params, ~70 MB)."""
+
+    def __init__(self, exp: str, every: int, on_save):
+        self.exp, self.every, self.on_save = exp, every, on_save
+
+    def on_train_batch_end(self, trainer, m, outputs, batch, idx):
+        step = trainer.global_step
+        if step and step % self.every == 0:
+            torch.save(trainable_state(m), f"{self.exp}/step{step}.pt")
+            self.on_save()
+
+
+class HoldRows(pl.Callback):
+    """Hold the joint's output rows `rows` at their original values: gradients are zeroed and the
+    rows are copied back after every step (AdamW's decoupled weight decay would still move them).
+    Rows 8192-8197 are blank + the five TDT durations: keeping them anchors when the decoder emits
+    nothing and how far it skips, which the app's blank-gap and duration heuristics are tuned on.
+    The shared hidden layers still train, so this limits the drift rather than removing it."""
+
+    def __init__(self, m, rows: range):
+        self.lin = m.joint.joint_net[-1]
+        self.idx = torch.tensor(list(rows))
+        self.w = self.lin.weight.detach()[self.idx].clone()
+        self.b = self.lin.bias.detach()[self.idx].clone()
+
+        def hook(g):
+            g = g.clone()
+            g[self.idx.to(g.device)] = 0
+            return g
+
+        self.lin.weight.register_hook(hook)
+        self.lin.bias.register_hook(hook)
+
+    @torch.no_grad()
+    def on_train_batch_end(self, trainer, m, outputs, batch, idx):
+        dev = self.lin.weight.device
+        self.lin.weight[self.idx.to(dev)] = self.w.to(dev, self.lin.weight.dtype)
+        self.lin.bias[self.idx.to(dev)] = self.b.to(dev, self.lin.bias.dtype)
+
+
 class StepLog(pl.Callback):
     def __init__(self):
         self.t0 = time.time()
@@ -64,7 +105,8 @@ def trainable_state(m) -> dict:
 
 
 def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_steps: int,
-          lr: float = 1e-4, batch_duration: float = 600, warmup: int = 20):
+          lr: float = 1e-4, batch_duration: float = 600, warmup: int = 20, freeze_blank_duration: bool = False,
+          save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3):
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
@@ -85,6 +127,11 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
             "num_workers": 8, "pin_memory": True, "skip_missing_manifest_entries": False})
     m.setup_training_data(m.cfg.train_ds)
     m.encoder.freeze()
+    extra = []
+    if freeze_blank_duration:
+        n = m.joint.joint_net[-1].weight.shape[0]
+        extra.append(HoldRows(m, range(n - 6, n)))
+        print(f"holding joint rows {n - 6}..{n - 1} (blank + durations)")
     groups = {}
     for n, p in m.named_parameters():
         if p.requires_grad:
@@ -96,10 +143,11 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
                          limit_train_batches=max_steps, limit_val_batches=0, num_sanity_val_steps=0,
                          use_distributed_sampler=False, gradient_clip_val=1.0, logger=False,
                          enable_checkpointing=False, enable_progress_bar=False,
-                         callbacks=[KeepEncoderFrozen(), StepLog()])
+                         callbacks=[KeepEncoderFrozen(), StepLog()] + extra
+                         + ([SaveEvery(exp, save_every, on_save)] if save_every else []))
     m.set_trainer(trainer)
     m.setup_optimization(OmegaConf.create({
-        "name": "adamw", "lr": lr, "betas": [0.9, 0.98], "weight_decay": 1e-3,
+        "name": "adamw", "lr": lr, "betas": [0.9, 0.98], "weight_decay": weight_decay,
         "sched": {"name": "CosineAnnealing", "warmup_steps": warmup, "min_lr": lr / 10,
                   "max_steps": max_steps}}))
     t0 = time.time()

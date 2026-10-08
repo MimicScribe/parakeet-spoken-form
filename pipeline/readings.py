@@ -264,7 +264,7 @@ LETTERS = "A B C D E F G H J K M N P Q R S T V W X Z".split()
 
 
 def k_alnum(r):
-    pre = " ".join(r.choice(LETTERS) for _ in range(r.choice([1, 1, 2, 3])))
+    pre = "".join(r.choice(LETTERS) for _ in range(r.choice([1, 1, 2, 3])))
     n = r.randint(1, 9999)
     num = _pick(r, [(0.4, digits(str(n), oh=r.random() < 0.5)), (0.4, cardinal(n) if n < 100 else pair(n) if n >= 1000 else cardinal(n)),
                     (0.2, digits(str(n)))])
@@ -372,7 +372,7 @@ def k_identifier(r):
                      "Gate B twelve", "Flight two eighteen", "Interstate five", "Chapter eleven",
                      "five G", "four G", "four K", "ten K", "ten Q", "eight K", "B two B", "B two C", "MP three",
                      "PD one", "W two", "four oh one K", "Tele two", "Web three", "Mark two", "Gen Z",
-                     "three D", "U S B C", "Wi Fi six", "H two O", "C O two", "Formula one", "Catch twenty two"])
+                     "three D", "USB C", "WiFi six", "H two O", "CO two", "Formula one", "Catch twenty two"])
 
 
 def k_quarter(r):
@@ -392,7 +392,7 @@ def k_and_acronym(r):
     return f"S and P five hundred" if a == "S and P" and r.random() < 0.5 else a
 
 
-TITLES = [("mister", "Mister"), ("missus", "Missus"), ("doctor", "Doctor"), ("professor", "Professor"),
+TITLES = [("mister", "Mister"), ("missus", "Missus"), ("ms", "Ms"), ("doctor", "Doctor"), ("professor", "Professor"),
           ("saint", "Saint"), ("senator", "Senator"), ("governor", "Governor"), ("captain", "Captain"),
           ("lieutenant", "Lieutenant"), ("general", "General"), ("reverend", "Reverend"), ("judge", "Judge"),
           ("president", "President"), ("sergeant", "Sergeant")]
@@ -406,18 +406,6 @@ def k_title_name(r):
         return r.choice(["Saint Louis", "Saint Paul", "Saint Patrick", "Saint Petersburg", "Saint Lucia"])
     name = r.choice(SURNAMES)
     return f"{t} {name}" + (_pick(r, [(0.85, ""), (0.1, " Junior"), (0.05, " Senior")]))
-
-
-ABBREV_WORDS = ["number", "versus", "et cetera", "approximately", "department", "incorporated", "corporation",
-                "limited", "avenue", "boulevard", "street", "road", "mount", "fort", "miscellaneous", "estimated",
-                "minimum", "maximum", "average", "regarding", "with", "and or", "for example", "that is",
-                "as soon as possible", "for your information", "by the way", "end of day", "week over week",
-                "year over year", "quarter over quarter", "miles per hour", "kilograms", "pounds", "feet",
-                "northeast", "southwest", "January", "February", "Wednesday", "Thursday", "doctorate"]
-
-
-def k_abbrev_word(r):
-    return r.choice(ABBREV_WORDS)
 
 
 def k_roman(r):
@@ -492,7 +480,8 @@ LETTER_NAMES = dict(zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ",
 
 # Acronyms said as words get a respelling for the synthesizer; other capitals are read as letters.
 SPOKEN = {"EBIT": "ee bit", "EBITDA": "ee bit dah", "YoY": "why oh why", "PhD": "pee aitch dee", "CapEx": "cap ex",
-          "OpEx": "op ex", "SaaS": "sass", "GAAP": "gap", "AT": "ay tee", "B2B": "bee two bee"}
+          "OpEx": "op ex", "SaaS": "sass", "GAAP": "gap", "AT": "ay tee", "B2B": "bee two bee", "Ms": "Miz",
+          "WiFi": "why fye"}
 
 
 def tts_form(slot: str) -> str:

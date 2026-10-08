@@ -49,7 +49,30 @@ def is_dev_template(text: str, dev_frac: float) -> bool:
     return (zlib.crc32(text.encode()) % 1000) / 1000 < dev_frac
 
 
+def dev_carriers(carriers: list[str], dev_frac: float) -> set[str]:
+    """Held-out carriers: the hash split, then adjusted so every slot kind has at least one
+    carrier in train and one in dev (a pure hash split left some kinds untrained or unscored)."""
+    dev = {c for c in carriers if is_dev_template(c, dev_frac)}
+    kinds = sorted({k for c in carriers for k in SLOT.findall(c)})
+    crc = lambda c: zlib.crc32(c.encode())  # noqa: E731
+    for k in kinds:
+        with_k = sorted((c for c in carriers if "{" + k + "}" in c), key=crc)
+        if len(with_k) < 2:
+            raise ValueError(f"slot kind {k!r} needs at least two carriers")
+        if all(c in dev for c in with_k):
+            dev.discard(with_k[0])
+        if not any(c in dev for c in with_k):
+            dev.add(next(c for c in with_k if sum(c2 not in dev for c2 in with_k) > 1))
+    return dev
+
+
+GENERIC_KINDS = ["int_small", "int_tens", "int_hundreds", "int_4digit", "year", "big", "decimal", "money",
+                 "percent", "clock", "date", "ordinal", "range", "fraction", "measure", "quarter", "and_acronym",
+                 "title_name", "roman", "acronym", "identifier", "version", "code", "alnum", "multiplier"]
+
+
 def fill(carrier: str, r: random.Random):
+    carrier = carrier.replace("{any}", "{" + r.choice(GENERIC_KINDS) + "}")
     target, tts, kinds = carrier, carrier, []
     for m in list(SLOT.finditer(carrier)):
         kind = m.group(1)
@@ -63,8 +86,9 @@ def fill(carrier: str, r: random.Random):
 
 
 # Spoken lead-ins, so carriers do not always start the same way.
-LEAD_INS = ["So ", "Okay, so ", "And ", "Um, ", "Yeah, ", "I think ", "Well, ", "Right, so ", "Uh, ",
-            "Honestly, ", "Basically, "]
+# No "Um,"/"Uh,": the synthesizer voices them as "Ah", so the label would not match the audio.
+LEAD_INS = ["So ", "Okay, so ", "And ", "Yeah, ", "I think ", "Well, ", "Right, so ", "Honestly, ",
+            "Basically, ", "Look, ", "Now, "]
 
 
 def lead_in(text: str, r: random.Random, p: float = 0.3) -> str:
@@ -92,6 +116,7 @@ def rows(n: int, seed: int, dev_frac: float = 0.2, control_frac: float = 0.1, mu
 def _rows(n: int, seed: int, dev_frac: float, control_frac: float):
     r = random.Random(seed)
     carriers = load_carriers()
+    dev = dev_carriers(carriers, dev_frac)
     for i in range(n):
         if r.random() < control_frac:
             text = r.choice(CONTROLS)
@@ -104,7 +129,7 @@ def _rows(n: int, seed: int, dev_frac: float, control_frac: float):
         target = lead_in(target, r)
         r.setstate(state)
         tts = lead_in(tts, r)
-        yield {"id": f"r{seed}_{i}", "split": "dev" if is_dev_template(carrier, dev_frac) else "train",
+        yield {"id": f"r{seed}_{i}", "split": "dev" if carrier in dev else "train",
                "template": carrier, "kinds": kinds, "text": target, "tts_text": tts}
 
 

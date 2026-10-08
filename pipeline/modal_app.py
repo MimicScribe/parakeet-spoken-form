@@ -30,7 +30,7 @@ nemo_image = (
         "hf_transfer",
     )
     .env({"HF_HOME": f"{VOL}/hf", "HF_HUB_ENABLE_HF_TRANSFER": "1"})
-    .add_local_python_source("common", "data_e22", "data_replay", "ft_train", "ft_eval")
+    .add_local_python_source("common", "data_e22", "data_replay", "data_fleurs", "ft_train", "ft_eval")
 )
 
 tts_image = (
@@ -104,6 +104,14 @@ def prep_replay():
     vol.commit()
 
 
+@app.function(image=nemo_image, volumes={VOL: vol}, cpu=8, memory=32768, timeout=3 * 3600)
+def prep_fleurs(hours_per_lang: float = 0.4):
+    import data_fleurs
+
+    data_fleurs.prepare(VOL, hours_per_lang)
+    vol.commit()
+
+
 @app.function(image=tts_image, volumes={VOL: vol}, gpu="L4", timeout=3600)
 def voice_shard(rows: list, out_dir: str) -> list:
     import voice
@@ -159,12 +167,16 @@ def killtest(run: str = "kill1", max_steps: int = 150, tts: str = "smoke", lr: f
 
 
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=3600)
-def baseline(tts: str = "smoke", run: str = "ultra"):
-    """Stock Ultra on the same sets as the kill test."""
+def baseline(tts: str = "smoke", run: str = "ultra", full: bool = False):
+    """Stock Ultra on the same sets as the kill test (full=True: the run() sets)."""
     import ft_eval
 
     vol.reload()
     m = ft_eval.load_model(VOL, "ultra", ultra_path())
+    if full:
+        ft_eval.eval_sets(VOL, m, run, tts)
+        vol.commit()
+        return
     ft_eval.transcribe_loaded(VOL, m, run, "e22/numbers.jsonl", "e22_numbers")
     ft_eval.transcribe_loaded(VOL, m, run, f"tts/{tts}/dev.jsonl", "tts_dev")
     ft_eval.transcribe_loaded(VOL, m, run, "replay/lspc_dev.jsonl", "lspc_dev", limit=600)
@@ -206,3 +218,41 @@ def ultra_state() -> str:
             sd = torch.load(t.extractfile(member), map_location="cpu")
         torch.save({k: v for k, v in sd.items() if k.startswith(("decoder.", "joint."))}, path)
     return path
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=3600)
+def filter_tts(name: str):
+    import ft_eval
+
+    vol.reload()
+    m = ft_eval.load_model(VOL, "ultra", ultra_path())
+    ft_eval.filter_tts(VOL, m, name)
+    vol.commit()
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-40GB", cpu=8, memory=32768,
+              timeout=3 * 3600)
+def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: float = 14.0,
+        numwords_h: float = 5.0, fleurs_h: float = 3.0, warmup: int = 50, hold_blank_duration: bool = False,
+        save_every: int = 250):
+    """Train, then score every saved checkpoint on the evaluation sets."""
+    import torch
+
+    import ft_eval
+    import ft_train
+
+    vol.reload()
+    m = ft_train.train(VOL, ultra_path(), run,
+                       mix=[(f"tts/{tts}/train_ok.jsonl", 0), ("replay/lspc_train.jsonl", lspc_h),
+                            ("replay/lspc_train_numwords.jsonl", numwords_h),
+                            ("replay/fleurs_train_multi.jsonl", fleurs_h)],
+                       max_steps=max_steps, lr=lr, warmup=warmup, freeze_blank_duration=hold_blank_duration,
+                       save_every=save_every, on_save=vol.commit)
+    vol.commit()
+    m = m.cuda().eval()
+    exp = f"{VOL}/exp/{run}"
+    for step in range(save_every, max_steps + 1, save_every):
+        state = torch.load(f"{exp}/step{step}.pt", map_location="cpu")
+        m.load_state_dict(state, strict=False)
+        ft_eval.eval_sets(VOL, m.cuda().eval(), run, tts, suffix=f"@{step}")
+        vol.commit()
