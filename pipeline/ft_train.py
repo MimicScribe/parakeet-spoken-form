@@ -87,7 +87,7 @@ class NoDropout:
         self.saved = []
 
 
-def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None):
+def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None, terms: str = "blank,dur"):
     """Keep the model's emit-or-wait behaviour close to stock Ultra's.
 
     Extra loss: KL(teacher || student) over (a) blank vs not-blank and (b) the five TDT durations,
@@ -99,7 +99,11 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None)
 
     `only_texts`: apply the term only to utterances whose label is in this set (the real-speech
     replay rows), so TTS rows learn spoken form freely. The batch carries no source tag, so rows
-    are matched by their token ids."""
+    are matched by their token ids.
+
+    `terms`: "dur" anchors only the duration distribution. The seam sim showed the extra deletions
+    come from timing: un-anchored fine-tunes emit ~10% of words one encoder frame early (shorter
+    durations), and the app's merge then drops words the windows did decode."""
     import copy
 
     teacher_dec, teacher_joint = copy.deepcopy(m.decoder).eval(), copy.deepcopy(m.joint).eval()
@@ -141,7 +145,8 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None)
             kl_blank = t_lb.exp() * (t_lb - s_lb) + t_lnb.exp() * (t_lnb - s_lnb)
             s_dur, t_dur = s_logits[..., nb:].log_softmax(-1), t_logits[..., nb:].log_softmax(-1)
             kl_dur = (t_dur.exp() * (t_dur - s_dur)).sum(-1)
-            return ((kl_blank + kl_dur) * mask).sum(), mask.sum()
+            kl = (kl_blank if "blank" in terms else 0) + (kl_dur if "dur" in terms else 0)
+            return (kl * mask).sum(), mask.sum()
 
         rows = list(range(f.shape[0]))
         if keep is not None:
@@ -222,7 +227,7 @@ def trainable_state(m) -> dict:
 def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_steps: int,
           lr: float = 1e-4, batch_duration: float = 600, warmup: int = 20, freeze_blank_duration: bool = False,
           save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3, spec_augment: bool = True,
-          kl_weight: float = 0.0, kl_replay_only: bool = False, init_from: str = ""):
+          kl_weight: float = 0.0, kl_replay_only: bool = False, init_from: str = "", kl_terms: str = "blank,dur"):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock)."""
     import nemo.collections.asr as nemo_asr
 
@@ -252,8 +257,8 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         print("SpecAugment off")
     m.encoder.freeze()
     if kl_weight:
-        add_blank_duration_kl(m, kl_weight, only_texts=replay_texts if kl_replay_only else None)
-        print(f"blank/duration KL to stock, weight {kl_weight}"
+        add_blank_duration_kl(m, kl_weight, only_texts=replay_texts if kl_replay_only else None, terms=kl_terms)
+        print(f"KL to stock ({kl_terms}), weight {kl_weight}"
               + (f", replay rows only ({len(replay_texts)} labels)" if kl_replay_only else ""))
     if init_from:
         src, _, step = init_from.partition("@")
