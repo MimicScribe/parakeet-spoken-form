@@ -87,7 +87,8 @@ class NoDropout:
         self.saved = []
 
 
-def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None, terms: str = "blank,dur"):
+def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None, terms: str = "blank,dur",
+                          blank_scale: float = 1.0):
     """Keep the model's emit-or-wait behaviour close to stock Ultra's.
 
     Extra loss: KL(teacher || student) over (a) blank vs not-blank and (b) the five TDT durations,
@@ -145,33 +146,45 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
             kl_blank = t_lb.exp() * (t_lb - s_lb) + t_lnb.exp() * (t_lnb - s_lnb)
             s_dur, t_dur = s_logits[..., nb:].log_softmax(-1), t_logits[..., nb:].log_softmax(-1)
             kl_dur = (t_dur.exp() * (t_dur - s_dur)).sum(-1)
-            if "gated" in terms:
-                # One-sided: only where stock confidently emits (P(non-blank) > 0.9) — holds against
-                # the student skipping words there, leaves new spoken-form emissions free elsewhere.
-                kl_blank = kl_blank * (t_lnb.exp() > 0.9)
-            kl = (kl_blank if "blank" in terms else 0) + (kl_dur if "dur" in terms else 0)
-            return (kl * mask).sum(), mask.sum()
+            tset = {x.strip() for x in terms.split(",")}
+            gate = mask & (t_lnb.exp() > 0.9)  # computed in every mode: the pass rate is logged
+            bmask = mask
+            if "gated" in tset or "gnorm" in tset:
+                # Only where stock confidently emits (P(non-blank) > 0.9). "gated" (v5gated, 2026-10-08)
+                # divides by ALL lattice points, which dilutes the blank term by the gate's pass rate;
+                # "gnorm" divides by the points that pass the gate (Gemini review 2026-10-08).
+                bmask = gate
+            zero = torch.zeros((), device=f_sl.device)
+            b_sum = (kl_blank * bmask).sum() if "blank" in tset else zero
+            d_sum = (kl_dur * mask).sum() if "dur" in tset else zero
+            b_n = (mask if "gated" in tset else bmask).sum()
+            return b_sum, b_n, d_sum, mask.sum(), gate.sum()
 
         rows = list(range(f.shape[0]))
         if keep is not None:
             rows = [i for i in rows if tuple(tokens[i, :int(tokens_len[i])].tolist()) in keep]
-        total, count = 0.0, 0
+        zero = torch.zeros((), device=f.device)
+        b_tot = d_tot = b_cnt = count = passed = zero
         for j in range(0, len(rows), sub_batch):
             sl = torch.tensor(rows[j:j + sub_batch], device=f.device)
             u = int(tokens_len[sl].max()) + 1
             t = int(enc_len[sl].max())
             # Checkpointed: the [b, T, U, 8198] logits are rebuilt during backward instead of
             # being held for every sub-batch at once (that ran out of memory at batch 600 s).
-            part, n = torch.utils.checkpoint.checkpoint(
+            b_sum, b_n, d_sum, n, n_pass = torch.utils.checkpoint.checkpoint(
                 chunk_kl, f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
                 enc_len[sl], tokens_len[sl], use_reentrant=False)
-            total = total + part
-            count += int(n)
-        kl = total / max(count, 1) if count else torch.zeros((), device=f.device)
+            # Kept as tensors: no GPU→CPU sync per sub-batch (Gemini review).
+            b_tot, d_tot = b_tot + b_sum, d_tot + d_sum
+            b_cnt, count, passed = b_cnt + b_n, count + n, passed + n_pass
+        kl_b = blank_scale * b_tot / b_cnt.clamp(min=1)
+        kl_d = d_tot / count.clamp(min=1)
+        kl = kl_b + kl_d
         m.log("kl_blank_dur", kl.detach(), prog_bar=False)
         out["loss"] = out["loss"] + weight * kl
         if batch_idx % 10 == 0:
-            print(f"kl_blank_dur {kl.item():.4f} rows {len(rows)}/{f.shape[0]}", flush=True)
+            print(f"kl_blank_dur {kl.item():.4f} (blank {kl_b.item():.4f} dur {kl_d.item():.4f}) "
+                  f"rows {len(rows)}/{f.shape[0]} gate-pass {int(passed)}/{int(count)}", flush=True)
         return out
 
     m.training_step = training_step
@@ -244,7 +257,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           lr: float = 1e-4, batch_duration: float = 600, warmup: int = 20, freeze_blank_duration: bool = False,
           save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3, spec_augment: bool = True,
           kl_weight: float = 0.0, kl_replay_only: bool = False, init_from: str = "", kl_terms: str = "blank,dur",
-          seed: int = 1, kl_exempt: str = ""):
+          seed: int = 1, kl_exempt: str = "", kl_blank_scale: float = 1.0):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock)."""
     import nemo.collections.asr as nemo_asr
 
@@ -276,7 +289,8 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         print("SpecAugment off")
     m.encoder.freeze()
     if kl_weight:
-        add_blank_duration_kl(m, kl_weight, only_texts=replay_texts if kl_replay_only else None, terms=kl_terms)
+        add_blank_duration_kl(m, kl_weight, only_texts=replay_texts if kl_replay_only else None, terms=kl_terms,
+                              blank_scale=kl_blank_scale)
         print(f"KL to stock ({kl_terms}), weight {kl_weight}"
               + (f", replay rows only ({len(replay_texts)} labels)" if kl_replay_only else ""))
     if init_from:
