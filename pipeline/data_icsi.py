@@ -102,14 +102,14 @@ def by_turns(toks):
     """Cross-talk label, both speakers: phrases (pause > 1.5 s splits a phrase) in start order; a short
     backchannel (≤ 2 words) that starts inside another speaker's phrase goes right after that phrase
     instead of splicing it mid-clause (Gemini review 2026-10-08)."""
-    out = []
+    out = []  # (phrase tokens incl. attached backchannels, the phrase's own start, its own end, its own words)
     for p in phrases_of(toks, 1.5):
-        host = next((q for q in reversed(out) if q[0][2] != p[0][2] and q[0][0] <= p[0][0] <= q[-1][1]), None)
-        if host is not None and n_words(p) <= 2 < n_words(host):
-            host.extend(p)
+        host = next((q for q in reversed(out) if q[0][0][2] != p[0][2] and q[1] <= p[0][0] <= q[2]), None)
+        if host is not None and n_words(p) <= 2 < host[3]:
+            host[0].extend(p)  # the host keeps its own span: an attached backchannel does not shrink it (Gemini)
         else:
-            out.append(list(p))
-    return [t for p in out for t in p]
+            out.append((list(p), p[0][0], p[-1][1], n_words(p)))
+    return [t for q in out for t in q[0]]
 
 
 def dominant(toks):
