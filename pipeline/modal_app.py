@@ -256,3 +256,21 @@ def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: flo
         m.load_state_dict(state, strict=False)
         ft_eval.eval_sets(VOL, m.cuda().eval(), run, tts, suffix=f"@{step}")
         vol.commit()
+
+
+@app.function(image=tts_image, volumes={VOL: vol}, timeout=600)
+def merge_tts(name: str, parts: str):
+    """Concatenate filtered TTS sets (`parts` comma-separated) into /vol/tts/<name>/{train,dev}_ok.jsonl."""
+    import os
+
+    vol.reload()
+    os.makedirs(f"{VOL}/tts/{name}", exist_ok=True)
+    for split in ("train", "dev"):
+        n = 0
+        with open(f"{VOL}/tts/{name}/{split}_ok.jsonl", "w") as out:
+            for p in parts.split(","):
+                for line in open(f"{VOL}/tts/{p}/{split}_ok.jsonl"):
+                    out.write(line)
+                    n += 1
+        print(f"{name}/{split}_ok: {n} clips")
+    vol.commit()
