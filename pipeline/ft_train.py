@@ -66,6 +66,27 @@ class HoldRows(pl.Callback):
         self.lin.bias[self.idx.to(dev)] = self.b.to(dev, self.lin.bias.dtype)
 
 
+class NoDropout:
+    """Zero every dropout rate in `module` while staying in train mode (cuDNN's LSTM backward
+    refuses eval mode)."""
+
+    def __init__(self, module):
+        self.module, self.saved = module, []
+
+    def __enter__(self):
+        for mod in self.module.modules():
+            if isinstance(mod, torch.nn.Dropout) or isinstance(mod, torch.nn.LSTM):
+                self.saved.append((mod, "p" if isinstance(mod, torch.nn.Dropout) else "dropout"))
+        self.values = [getattr(mod, attr) for mod, attr in self.saved]
+        for mod, attr in self.saved:
+            setattr(mod, attr, 0.0)
+
+    def __exit__(self, *exc):
+        for (mod, attr), v in zip(self.saved, self.values):
+            setattr(mod, attr, v)
+        self.saved = []
+
+
 def add_blank_duration_kl(m, weight: float, sub_batch: int = 2):
     """Keep the model's emit-or-wait behaviour close to stock Ultra's.
 
@@ -92,22 +113,17 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2):
             feats, feats_len = m.preprocessor(input_signal=signal, length=signal_len)  # no SpecAugment
             enc, enc_len = m.encoder(audio_signal=feats, length=feats_len)
             t_g, _, _ = tdec(targets=tokens, target_length=tokens_len)
-        # Dropout off for this term (gradients still flow): with it on, the student differs from the
-        # teacher even at step 0 (KL ~0.35) and the term would chase noise, not drift.
-        dec_was = m.decoder.training
-        m.decoder.eval()
-        s_g, _, _ = m.decoder(targets=tokens, target_length=tokens_len)
-        m.decoder.train(dec_was)
+        # Dropout off for this term: with it on, the student differs from the teacher even at
+        # step 0 (KL ~0.35) and the term would chase noise, not drift.
+        with NoDropout(m.decoder):
+            s_g, _, _ = m.decoder(targets=tokens, target_length=tokens_len)
         f = enc.transpose(1, 2)
         nb = 8193  # 8192 tokens + blank; the last 5 outputs are durations
 
         def chunk_kl(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl):
-            # eval() inside the checkpointed function, so the backward recompute also runs it
-            # without dropout.
-            joint_was = m.joint.training
-            m.joint.eval()
-            s_logits = m.joint.joint(f_sl, s_sl).float()
-            m.joint.train(joint_was)
+            # Dropout zeroed inside the checkpointed function, so the backward recompute matches.
+            with NoDropout(m.joint):
+                s_logits = m.joint.joint(f_sl, s_sl).float()
             with torch.no_grad():
                 t_logits = tjoint.joint(f_sl, t_sl).float()
             T, U = s_logits.shape[1], s_logits.shape[2]
