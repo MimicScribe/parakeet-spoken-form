@@ -265,7 +265,7 @@ def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: flo
         kl_replay_only: bool = False, init_from: str = "", tts_h: float = 0.0, batch_duration: float = 600,
         icsi_h: float = 0.0, kl_terms: str = "blank,dur", seed: int = 1,
         kl_exempt: str = "", icsi_ovl_h: float = 0.0, icsi_ovl_set: str = "icsi_ovl",
-        kl_blank_scale: float = 1.0):
+        kl_blank_scale: float = 1.0, kl_punct: float = 0.0):
     """Train, then score every saved checkpoint on the evaluation sets. `tts_h` < 0 leaves the TTS
     rows out (replay-only consolidation)."""
     import torch
@@ -285,7 +285,7 @@ def run(run: str, tts: str, max_steps: int = 1000, lr: float = 1e-4, lspc_h: flo
                        save_every=save_every, on_save=vol.commit, spec_augment=spec_augment,
                        kl_weight=kl_weight, kl_replay_only=kl_replay_only, init_from=init_from,
                        batch_duration=batch_duration, kl_terms=kl_terms, seed=seed, kl_exempt=kl_exempt,
-                       kl_blank_scale=kl_blank_scale)
+                       kl_blank_scale=kl_blank_scale, kl_punct=kl_punct)
     vol.commit()
     del m
     eval_ckpts.local(run, ",".join(str(s) for s in range(save_every, max_steps + 1, save_every)), tts,

@@ -88,7 +88,7 @@ class NoDropout:
 
 
 def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None, terms: str = "blank,dur",
-                          blank_scale: float = 1.0):
+                          blank_scale: float = 1.0, punct_weight: float = 0.0):
     """Keep the model's emit-or-wait behaviour close to stock Ultra's.
 
     Extra loss: KL(teacher || student) over (a) blank vs not-blank and (b) the five TDT durations,
@@ -115,6 +115,17 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
     assert "blank" in tset0 or not tset0 & {"gated", "gnorm", "g2", "tri"}, f"{terms}: gate/tri modes need 'blank'"
     assert len(tset0 & {"gated", "gnorm", "g2"}) <= 1, f"{terms}: gated, gnorm and g2 are mutually exclusive"
     keep = {tuple(m.tokenizer.text_to_ids(t)) for t in only_texts} if only_texts is not None else None
+    # Sentence-terminal pieces (". ? !" with or without the word-boundary marker). `punct_weight` adds a binary KL on
+    # {terminal punctuation vs any other non-blank token} to stock at every lattice point of EVERY row (TTS included):
+    # fine-tunes over-split sentences (E22 sentence-end precision 89.5 -> 84, INV-PUNCT +29 false terminals, 2026-10-08)
+    # while number words — "other non-blank" — stay free.
+    spm = m.tokenizer.tokenizer
+    term_ids = [i for i in range(spm.get_piece_size())
+                if spm.id_to_piece(i).lstrip("\u2581") in {".", "?", "!", "...", "\u2026"}]
+    term_t = torch.tensor(term_ids)  # moved to the device once, in the first step
+    if punct_weight:
+        assert term_ids, "no terminal punctuation pieces found"
+        print(f"punctuation anchor on {len(term_ids)} pieces: {[spm.id_to_piece(i) for i in term_ids]}, weight {punct_weight}")
     orig_step = m.training_step
 
     def training_step(batch, batch_idx):
@@ -190,6 +201,39 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
             b_n = (mask if "gated" in tset else bmask).sum()
             return b_sum, b_n, d_sum, mask.sum(), gate.sum(), zero, zero
 
+        if punct_weight:
+            tid = term_t.to(f.device)
+
+            def chunk_punct(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl):
+                with NoDropout(m.joint):
+                    s_logits = m.joint.joint(f_sl, s_sl).float()
+                with torch.no_grad():
+                    t_logits = tjoint.joint(f_sl, t_sl).float()
+                T, U = s_logits.shape[1], s_logits.shape[2]
+                mask = ((torch.arange(T, device=f_sl.device)[None, :, None] < enc_len_sl[:, None, None])
+                        & (torch.arange(U, device=f_sl.device)[None, None, :] <= tok_len_sl[:, None, None]))
+                s_nb, t_nb = s_logits[..., :nb - 1], t_logits[..., :nb - 1]
+                s_lt = s_nb[..., tid].logsumexp(-1) - s_nb.logsumexp(-1)
+                t_lt = t_nb[..., tid].logsumexp(-1) - t_nb.logsumexp(-1)
+                s_lo = torch.log((1 - s_lt.exp()).clamp(min=1e-7))  # keeps a gradient near saturation (Gemini)
+                t_lo = torch.log((1 - t_lt.exp()).clamp(min=1e-7))
+                kl = t_lt.exp() * (t_lt - s_lt) + t_lo.exp() * (t_lo - s_lo)
+                return (kl * mask).sum(), mask.sum()
+
+            p_tot = p_cnt = torch.zeros((), device=f.device)
+            for j in range(0, f.shape[0], sub_batch):
+                sl = torch.arange(j, min(j + sub_batch, f.shape[0]), device=f.device)
+                u = int(tokens_len[sl].max()) + 1
+                t = int(enc_len[sl].max())
+                ps, pn = torch.utils.checkpoint.checkpoint(
+                    chunk_punct, f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
+                    enc_len[sl], tokens_len[sl], use_reentrant=False)
+                p_tot, p_cnt = p_tot + ps, p_cnt + pn
+            kl_p = p_tot / p_cnt.clamp(min=1)
+            out["loss"] = out["loss"] + punct_weight * kl_p
+            m.log("kl_punct", kl_p.detach(), prog_bar=False)
+            if batch_idx % 10 == 0:
+                print(f"kl_punct {kl_p.item():.5f}", flush=True)
         rows = list(range(f.shape[0]))
         if keep is not None:
             rows = [i for i in rows if tuple(tokens[i, :int(tokens_len[i])].tolist()) in keep]
@@ -291,7 +335,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           lr: float = 1e-4, batch_duration: float = 600, warmup: int = 20, freeze_blank_duration: bool = False,
           save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3, spec_augment: bool = True,
           kl_weight: float = 0.0, kl_replay_only: bool = False, init_from: str = "", kl_terms: str = "blank,dur",
-          seed: int = 1, kl_exempt: str = "", kl_blank_scale: float = 1.0):
+          seed: int = 1, kl_exempt: str = "", kl_blank_scale: float = 1.0, kl_punct: float = 0.0):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock)."""
     import nemo.collections.asr as nemo_asr
 
@@ -322,9 +366,9 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         m.spec_augmentation = None
         print("SpecAugment off")
     m.encoder.freeze()
-    if kl_weight:
+    if kl_weight or kl_punct:
         add_blank_duration_kl(m, kl_weight, only_texts=replay_texts if kl_replay_only else None, terms=kl_terms,
-                              blank_scale=kl_blank_scale)
+                              blank_scale=kl_blank_scale, punct_weight=kl_punct)
         print(f"KL to stock ({kl_terms}), weight {kl_weight}"
               + (f", replay rows only ({len(replay_texts)} labels)" if kl_replay_only else ""))
     if init_from:
