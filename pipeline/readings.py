@@ -191,9 +191,10 @@ CUR = [("dollar", "dollars", "cent", "cents"), ("euro", "euros", "cent", "cents"
        ("pound", "pounds", "penny", "pence"),
        # v10 (2026-10-09): real calls leak "EUR"/"EU" before euro amounts and synthetic euro rows leaked 14 of 20;
        # money was 80% dollars. More currencies, and dollars down to 55%.
-       ("yen", "yen", "sen", "sen"), ("yuan", "yuan", "fen", "fen"), ("rupee", "rupees", "paisa", "paise"),
-       ("franc", "francs", "centime", "centimes"), ("krona", "kronor", "ore", "ore"),
-       ("zloty", "zloty", "grosz", "groszy"), ("peso", "pesos", "centavo", "centavos")]
+       # Sub-units only where people still say them (Gemini data review: nobody says "thirty sen").
+       ("yen", "yen", None, None), ("yuan", "yuan", None, None), ("rupee", "rupees", None, None),
+       ("franc", "francs", None, None), ("krona", "kronor", None, None),
+       ("zloty", "zlotys", None, None), ("peso", "pesos", "centavo", "centavos")]
 
 
 def k_money(r):
@@ -206,12 +207,12 @@ def k_money(r):
     d = r.randint(1, 9999) if r.random() < 0.7 else r.randint(1, 99)
     unit = one if d == 1 else many
     dw = "a" if d == 1 and r.random() < 0.5 else cardinal(d)
-    if r.random() < 0.3:
+    if sub1 and r.random() < 0.3:
         c = r.randint(1, 99)
         cw = cardinal(c)
         return _pick(r, [(0.5, f"{dw} {unit} and {cw} {sub1 if c == 1 else subs}"),
                          (0.3, f"{cardinal(d)} {cw}"), (0.2, f"{dw} {unit} {cw}")])
-    if d < 100 and r.random() < 0.15:
+    if sub1 and d < 100 and r.random() < 0.15:
         return f"{cardinal(d)} {sub1 if d == 1 else subs}"
     if many == "dollars" and r.random() < 0.05:
         return f"{cardinal(d)} bucks"
@@ -368,7 +369,7 @@ def k_measure(r):
 def k_negative(r):
     sign = _pick(r, [(0.7, 'minus'), (0.3, 'negative')])
     if r.random() < 0.35:  # "minus point two five": a signed decimal, as said
-        return f"{sign} {_decimal(r, max_int=9)}"
+        return f"{sign} {_decimal(r, max_int=9).removeprefix('oh ')}"
     return f"{sign} {cardinal(r.randint(1, 99))}"
 
 
@@ -413,11 +414,11 @@ TITLES = [("mister", "Mister"), ("missus", "Missus"), ("ms", "Ms"), ("doctor", "
           ("president", "President"), ("sergeant", "Sergeant")]
 SURNAMES = ["Smith", "Patel", "Nguyen", "Garcia", "Okafor", "Kowalski", "Chen", "Johnson", "Rossi", "Haddad",
             "Murphy", "Tanaka", "Silva", "Novak", "Brown", "Cohen", "Ali", "Fischer", "Moreau", "Lindqvist",
-            "Freight", "Brady", "Clement", "Francisco", "Wutkling", "Osei", "Ramirez", "Kaur", "Dubois", "Yilmaz",
+            "Walsh", "Bennett", "Foster", "Reyes", "Larsen", "Osei", "Ramirez", "Kaur", "Dubois", "Yilmaz",
             "Sato", "Hughes", "Mbeki", "Andersson", "O'Brien", "Kim", "Romano", "Petrov", "Lambert", "Ito"]
-# v10: real speech puts a first name between title and surname ("Mister Brendan Freight"); the synthetic rows only
+# v10: real speech puts a first name between title and surname ("Mister <first> <surname>"); names from held-out sets removed (Gemini data review); the synthetic rows only
 # had surnames and titles transferred 61% synthetic vs 4% real (Opus mining 2026-10-09).
-FIRST_NAMES = ["Brendan", "Todd", "Maureen", "Ryan", "Aisha", "Wei", "Priya", "Carlos", "Fatima", "Jonas", "Elena",
+FIRST_NAMES = ["Daniel", "Laura", "Maureen", "Ryan", "Aisha", "Wei", "Priya", "Carlos", "Fatima", "Jonas", "Elena",
                "Kwame", "Sofia", "Hiroshi", "Grace", "Omar", "Ingrid", "Marcus", "Leila", "Patrick"]
 
 
@@ -428,7 +429,9 @@ def k_title_name(r):
     name = r.choice(SURNAMES)
     if r.random() < 0.45:
         name = f"{r.choice(FIRST_NAMES)} {name}"
-    return f"{t} {name}" + (_pick(r, [(0.85, ""), (0.1, " Junior"), (0.05, " Senior")]))
+    # Junior / Senior only after Mister (Gemini data review: "Missus ... Junior").
+    suffix = _pick(r, [(0.85, ""), (0.1, " Junior"), (0.05, " Senior")]) if t == "Mister" else ""
+    return f"{t} {name}{suffix}"
 
 
 def k_roman(r):

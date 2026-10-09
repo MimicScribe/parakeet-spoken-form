@@ -287,3 +287,10 @@ Error rates came in at {decimal}.
 That's {year}, if I remember right.
 Twenty twenty one was a hard year for us.
 We expect growth in {year} and {year}.
+# v10: number slots that OPEN a sentence, so the "Okay. " lead-ins put a capitalized number right after a full stop.
+{decimal} was the number we landed on.
+{money} is what it costs per seat.
+{percent} of the team said yes.
+{decimal} percent is still the target.
+{money} went out the door last quarter.
+{percent} came in above plan.
