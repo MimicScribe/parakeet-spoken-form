@@ -30,7 +30,7 @@ nemo_image = (
         "hf_transfer",
     )
     .env({"HF_HOME": f"{VOL}/hf", "HF_HUB_ENABLE_HF_TRANSFER": "1"})
-    .add_local_python_source("common", "data_e22", "data_replay", "data_fleurs", "ft_train", "ft_eval")
+    .add_local_python_source("common", "data_e22", "data_replay", "data_fleurs", "ft_train", "ft_eval", "rescore")
 )
 
 tts_image = (
@@ -309,6 +309,20 @@ def eval_ckpts(run: str, steps: str, tts: str, reload: bool = True):
         vol.commit()
         del m
         torch.cuda.empty_cache()
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=3600)
+def rescore_dryrun(run: str = "v9pr30", clips: str = "rescore/clips"):
+    """Number re-check dry run (rescore.py): one-edit alternatives of every spoken number, scored by the
+    candidate and stock decoder+joint on the same audio. Writes /vol/rescore/<run>.json."""
+    import os
+
+    import rescore
+
+    vol.reload()
+    os.makedirs(f"{VOL}/rescore", exist_ok=True)
+    rescore.run(VOL, run, ultra_path(), f"{VOL}/{clips}", f"{VOL}/rescore/{run}.json")
+    vol.commit()
 
 
 @app.function(image=tts_image, volumes={VOL: vol}, timeout=600)
