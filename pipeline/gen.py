@@ -92,10 +92,21 @@ LEAD_INS = ["So ", "Okay, so ", "And ", "Yeah, ", "I think ", "Well, ", "Right, 
             "Basically, ", "Look, ", "Now, "]
 
 
+# A short sentence before the carrier, so the number OPENS a second sentence and keeps its capital
+# ("Okay. Two point seven five ..."). Without these no label had a number word right after a full stop,
+# and the fine-tune wrote "Okay. two point seven five" (2026-10-09 census, both arms).
+SENTENCE_LEAD_INS = ["Okay. ", "Right. ", "Sure. ", "Got it. ", "Yes. ", "Thanks. ", "Good. "]
+
+
 def lead_in(text: str, r: random.Random, p: float = 0.3) -> str:
-    if r.random() >= p or text[:2].isupper():
+    if r.random() >= p:
         return text
-    return r.choice(LEAD_INS) + text[0].lower() + text[1:]
+    pick = r.choice(LEAD_INS + SENTENCE_LEAD_INS)
+    if pick.endswith(". "):
+        return pick + text
+    if text[:2].isupper():
+        return text
+    return pick + text[0].lower() + text[1:]
 
 
 def rows(n: int, seed: int, dev_frac: float = 0.2, control_frac: float = 0.1, multi_frac: float = 0.0):
