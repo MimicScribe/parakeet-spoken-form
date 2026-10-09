@@ -88,7 +88,7 @@ class NoDropout:
 
 
 def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None, terms: str = "blank,dur",
-                          blank_scale: float = 1.0, punct_weight: float = 0.0):
+                          blank_scale: float = 1.0, punct_weight: float = 0.0, punct_rows: str = "all"):
     """Keep the model's emit-or-wait behaviour close to stock Ultra's.
 
     Extra loss: KL(teacher || student) over (a) blank vs not-blank and (b) the five TDT durations,
@@ -221,8 +221,13 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
                 return (kl * mask).sum(), mask.sum()
 
             p_tot = p_cnt = torch.zeros((), device=f.device)
-            for j in range(0, f.shape[0], sub_batch):
-                sl = torch.arange(j, min(j + sub_batch, f.shape[0]), device=f.device)
+            # "replay": only the real-speech rows (TTS rows free) — with "all", the anchor on TTS rows cost spoken form
+            # (v9p30 TTS exact 84 -> 76.5%, leaks 70 -> 175; 2026-10-08).
+            p_rows = list(range(f.shape[0]))
+            if punct_rows == "replay" and keep is not None:
+                p_rows = [i for i in p_rows if tuple(tokens[i, :int(tokens_len[i])].tolist()) in keep]
+            for j in range(0, len(p_rows), sub_batch):
+                sl = torch.tensor(p_rows[j:j + sub_batch], device=f.device)
                 u = int(tokens_len[sl].max()) + 1
                 t = int(enc_len[sl].max())
                 ps, pn = torch.utils.checkpoint.checkpoint(
@@ -335,7 +340,8 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           lr: float = 1e-4, batch_duration: float = 600, warmup: int = 20, freeze_blank_duration: bool = False,
           save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3, spec_augment: bool = True,
           kl_weight: float = 0.0, kl_replay_only: bool = False, init_from: str = "", kl_terms: str = "blank,dur",
-          seed: int = 1, kl_exempt: str = "", kl_blank_scale: float = 1.0, kl_punct: float = 0.0):
+          seed: int = 1, kl_exempt: str = "", kl_blank_scale: float = 1.0, kl_punct: float = 0.0,
+          kl_punct_rows: str = "all"):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock)."""
     import nemo.collections.asr as nemo_asr
 
@@ -368,7 +374,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     m.encoder.freeze()
     if kl_weight or kl_punct:
         add_blank_duration_kl(m, kl_weight, only_texts=replay_texts if kl_replay_only else None, terms=kl_terms,
-                              blank_scale=kl_blank_scale, punct_weight=kl_punct)
+                              blank_scale=kl_blank_scale, punct_weight=kl_punct, punct_rows=kl_punct_rows)
         print(f"KL to stock ({kl_terms}), weight {kl_weight}"
               + (f", replay rows only ({len(replay_texts)} labels)" if kl_replay_only else ""))
     if init_from:
