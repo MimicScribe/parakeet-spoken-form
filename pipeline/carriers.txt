@@ -232,3 +232,58 @@ After the {and_acronym}, let's wrap up.
 That's a question for the {and_acronym} folks.
 Our {and_acronym} budget is flat this year.
 They moved the {and_acronym} to Friday.
+# v10 (2026-10-09): carrier DIVERSITY for kinds that had one train + one dev carrier (Opus mining: 201 of 532
+# held-out slot failures were written-form leaks, mostly on thin kinds), and real-call shapes.
+The landing page is {url} if you want to look.
+They moved everything over to {url} last month.
+Can you check whether {url} is still up?
+I bookmarked {url} for the team.
+Our status page lives at {url}, by the way.
+Send the deck to {email} before Friday.
+I think the right contact is {email}.
+Her address changed to {email} last week.
+Reply all, but also copy {email}.
+We had a long Q and A after the demo.
+Let's open it up for {and_acronym} now.
+The {and_acronym} line was flat versus last year.
+Most of the savings came from {and_acronym}.
+I want a separate review of {and_acronym} costs.
+We're cutting {and_acronym} by about ten percent.
+It's more of a {slash} thing for us.
+Please pick {slash} on the form.
+This is the {roman} edition, I believe.
+We watched {roman} on the flight.
+It's spelled {spelled}, with two of the last letter.
+Could you spell that? Sure, {spelled}.
+Throughput went up {multiplier} after the rewrite.
+It's roughly {multiplier} cheaper than the old setup.
+Spreads tightened by {basis_points} this week.
+That's a move of {basis_points} in one day.
+The balance dropped to {negative} overnight.
+We ended the quarter at {negative} on that metric.
+The game finished {score}.
+They lost {score} in the final.
+His offer was {thousands_k}, which seemed low.
+She's asking for {thousands_k} plus a bonus.
+The contract is worth {money} over three years.
+We booked {money} in the region last quarter.
+Revenue in Europe came to {money}.
+They paid {money} for the license in Japan.
+The deal closed at {money}, give or take.
+Please welcome {title_name} to the call.
+Next question comes from {title_name}.
+Thank you, {title_name}, go ahead.
+I'll turn it over to {title_name} now.
+My cell is {phone}, call any time.
+Write this down, {phone}.
+The reference code is {code}, then press pound.
+Use {code} as the access code.
+Your ticket is {alnum}, keep it handy.
+The part number is {alnum}, not the older one.
+We are back on {version} until the fix lands.
+Upgrade everyone to {version} this week.
+The margin was {decimal} percent, slightly lower.
+Error rates came in at {decimal}.
+That's {year}, if I remember right.
+Twenty twenty one was a hard year for us.
+We expect growth in {year} and {year}.

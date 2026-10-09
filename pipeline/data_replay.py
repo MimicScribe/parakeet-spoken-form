@@ -45,6 +45,16 @@ def us_spelling(text: str) -> str:
     return re.sub(r"[A-Za-z]+", fix, text)
 
 
+# A title before a name is written as the TTS rows write it (owner rule 2026-10-09: verbalized, capitalized:
+# "Mister Smith"); LibriSpeech-PC writes "mister smith"-style lowercase titles 1,026 times, a label conflict.
+# Only before a capitalized word, so "the doctor said" stays. "misses" is left alone: "she misses Anne" is a verb.
+TITLE = re.compile(r"\b(mister|missus|doctor)(\s+)(?=[A-Z])")
+
+
+def title_case(text: str) -> str:
+    return TITLE.sub(lambda m: m.group(1).capitalize() + m.group(2), text)
+
+
 def _fetch_tar(url: str, dest: str) -> None:
     os.makedirs(dest, exist_ok=True)
     subprocess.run(f"wget -q --tries=5 -O - '{url}' | tar xz -C '{dest}'", shell=True, check=True)
@@ -72,7 +82,7 @@ def prepare(vol: str, splits=("train-clean-100", "dev-clean")) -> None:
                 dropped += 1
                 continue
             path = f"{ls}/LibriSpeech/{r['audio_filepath']}"
-            rows.append({"audio_filepath": path, "duration": r["duration"], "text": us_spelling(r["text"]),
+            rows.append({"audio_filepath": path, "duration": r["duration"], "text": title_case(us_spelling(r["text"])),
                          "id": os.path.basename(path)[:-5]})
         missing = sum(not os.path.exists(r["audio_filepath"]) for r in rows[:200])
         print(f"{split}: {len(rows)} rows, {sum(r['duration'] for r in rows) / 3600:.1f} h, "

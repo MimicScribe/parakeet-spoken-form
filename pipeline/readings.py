@@ -172,9 +172,14 @@ def _decimal(r, max_int=999):
     i = r.randint(0, max_int) if r.random() < 0.7 else r.randint(0, 9)
     frac = str(r.randint(1, 999)).rstrip("0") or "5"
     frac = frac[: r.choice([1, 1, 2, 2, 3])]
-    tail = f"point {digits(frac)}"
+    # Fractions with a leading zero ("point oh five", "point zero zero one"): none were generated before, and
+    # the model then wrote "point zero five" for a spoken "point oh five" (adversarial test 2026-10-09).
+    if r.random() < 0.3:
+        frac = "0" * r.choice([1, 1, 2]) + frac[:2]
+    tail = f"point {digits(frac, oh=r.random() < 0.4)}"
     if i == 0:
-        return _pick(r, [(0.6, f"zero {tail}"), (0.3, tail), (0.1, f"oh {tail}")])
+        # As said (owner 2026-10-09): a bare "point nine" is as common as "zero point nine".
+        return _pick(r, [(0.4, f"zero {tail}"), (0.45, tail), (0.15, f"oh {tail}")])
     return f"{cardinal(i)} {tail}"
 
 
@@ -183,11 +188,16 @@ def k_decimal(r):
 
 
 CUR = [("dollar", "dollars", "cent", "cents"), ("euro", "euros", "cent", "cents"),
-       ("pound", "pounds", "penny", "pence")]
+       ("pound", "pounds", "penny", "pence"),
+       # v10 (2026-10-09): real calls leak "EUR"/"EU" before euro amounts and synthetic euro rows leaked 14 of 20;
+       # money was 80% dollars. More currencies, and dollars down to 55%.
+       ("yen", "yen", "sen", "sen"), ("yuan", "yuan", "fen", "fen"), ("rupee", "rupees", "paisa", "paise"),
+       ("franc", "francs", "centime", "centimes"), ("krona", "kronor", "ore", "ore"),
+       ("zloty", "zloty", "grosz", "groszy"), ("peso", "pesos", "centavo", "centavos")]
 
 
 def k_money(r):
-    one, many, sub1, subs = CUR[0] if r.random() < 0.8 else r.choice(CUR[1:])
+    one, many, sub1, subs = CUR[0] if r.random() < 0.55 else (CUR[1] if r.random() < 0.5 else r.choice(CUR[2:]))
     if r.random() < 0.3:
         scale = r.choice(["thousand", "million", "billion"])
         amt = f"{cardinal(r.randint(1, 999))} point {digits(str(r.randint(1, 9)))}" if r.random() < 0.4 \
@@ -356,7 +366,10 @@ def k_measure(r):
 
 
 def k_negative(r):
-    return f"{_pick(r, [(0.7, 'minus'), (0.3, 'negative')])} {cardinal(r.randint(1, 99))}"
+    sign = _pick(r, [(0.7, 'minus'), (0.3, 'negative')])
+    if r.random() < 0.35:  # "minus point two five": a signed decimal, as said
+        return f"{sign} {_decimal(r, max_int=9)}"
+    return f"{sign} {cardinal(r.randint(1, 99))}"
 
 
 def k_score(r):
@@ -370,7 +383,7 @@ def k_identifier(r):
                      "A one hundred", "GPT five", "Series B", "Phase three", "Section two thirty",
                      "Title nine", "Route sixty six", "Highway one oh one", "Room four oh two",
                      "Gate B twelve", "Flight two eighteen", "Interstate five", "Chapter eleven",
-                     "five G", "four G", "four K", "ten K", "ten Q", "eight K", "B two B", "B two C", "MP three",
+                     "five G", "four G", "four K", "ten K", "ten Q", "eight K", "B to B", "B to C", "D to C", "MP three",
                      "PD one", "W two", "four oh one K", "Tele two", "Web three", "Mark two", "Gen Z",
                      "three D", "USB C", "WiFi six", "H two O", "CO two", "Formula one", "Catch twenty two"])
 
@@ -384,7 +397,9 @@ def k_quarter(r):
 
 
 AND_ACRONYMS = ["Q and A", "M and A", "R and D", "P and L", "AT and T", "S and P", "B and B", "H and R",
-                "G and A", "SG and A", "D and I", "T and E", "rock and roll", "B and Q"]
+                "G and A", "SG and A", "D and I", "T and E", "rock and roll", "B and Q",
+                # v10: forms real earnings calls use, written in mixed forms by v9pr30 (pinned-57, E22)
+                "O and M", "IT and S", "E and P", "P and C", "L and D", "C and I", "A and R"]
 
 
 def k_and_acronym(r):
@@ -397,7 +412,13 @@ TITLES = [("mister", "Mister"), ("missus", "Missus"), ("ms", "Ms"), ("doctor", "
           ("lieutenant", "Lieutenant"), ("general", "General"), ("reverend", "Reverend"), ("judge", "Judge"),
           ("president", "President"), ("sergeant", "Sergeant")]
 SURNAMES = ["Smith", "Patel", "Nguyen", "Garcia", "Okafor", "Kowalski", "Chen", "Johnson", "Rossi", "Haddad",
-            "Murphy", "Tanaka", "Silva", "Novak", "Brown", "Cohen", "Ali", "Fischer", "Moreau", "Lindqvist"]
+            "Murphy", "Tanaka", "Silva", "Novak", "Brown", "Cohen", "Ali", "Fischer", "Moreau", "Lindqvist",
+            "Freight", "Brady", "Clement", "Francisco", "Wutkling", "Osei", "Ramirez", "Kaur", "Dubois", "Yilmaz",
+            "Sato", "Hughes", "Mbeki", "Andersson", "O'Brien", "Kim", "Romano", "Petrov", "Lambert", "Ito"]
+# v10: real speech puts a first name between title and surname ("Mister Brendan Freight"); the synthetic rows only
+# had surnames and titles transferred 61% synthetic vs 4% real (Opus mining 2026-10-09).
+FIRST_NAMES = ["Brendan", "Todd", "Maureen", "Ryan", "Aisha", "Wei", "Priya", "Carlos", "Fatima", "Jonas", "Elena",
+               "Kwame", "Sofia", "Hiroshi", "Grace", "Omar", "Ingrid", "Marcus", "Leila", "Patrick"]
 
 
 def k_title_name(r):
@@ -405,6 +426,8 @@ def k_title_name(r):
     if t == "Saint":
         return r.choice(["Saint Louis", "Saint Paul", "Saint Patrick", "Saint Petersburg", "Saint Lucia"])
     name = r.choice(SURNAMES)
+    if r.random() < 0.45:
+        name = f"{r.choice(FIRST_NAMES)} {name}"
     return f"{t} {name}" + (_pick(r, [(0.85, ""), (0.1, " Junior"), (0.05, " Senior")]))
 
 

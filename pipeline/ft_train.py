@@ -180,6 +180,13 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
             s_dur, t_dur = s_logits[..., nb:].log_softmax(-1), t_logits[..., nb:].log_softmax(-1)
             kl_dur = (t_dur.exp() * (t_dur - s_dur)).sum(-1)
             gate = mask & (t_lnb.exp() > 0.9)  # computed in every mode: the pass rate is logged
+            # "durgate" (v10 probe, Gemini review 2026-10-09): the duration anchor only where stock emits
+            # (P(non-blank) > 0.9), normalized by those points. The ungated "dur" pulls every lattice point toward
+            # stock's durations; stock writes a spoken year as ONE digit run, so its duration targets skip the
+            # onset of a repeated number word ("twenty twenty one" → "two twenty one": collapse 0.7–1.4% without
+            # the KL, 3.6–6.5% with it, on 138 E22 years).
+            dur_on = "dur" in tset or "durgate" in tset
+            dmask = gate if "durgate" in tset else mask
             bmask = mask
             if "g2" in tset:
                 # Two-sided gate (Fable review): the emit gate as gnorm PLUS, as a separately normalized term, the points
@@ -188,7 +195,7 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
                 wait = mask & (t_lb.exp() > 0.95)
                 zero = torch.zeros((), device=f_sl.device)
                 w_sum = (kl_blank * wait).sum() if "blank" in tset else zero
-                return ((kl_blank * gate).sum(), gate.sum(), (kl_dur * mask).sum() if "dur" in tset else zero,
+                return ((kl_blank * gate).sum(), gate.sum(), (kl_dur * dmask).sum() if dur_on else zero,
                         mask.sum(), gate.sum(), w_sum, wait.sum())
             if "gated" in tset or "gnorm" in tset:
                 # Only where stock confidently emits (P(non-blank) > 0.9). "gated" (v5gated, 2026-10-08)
@@ -197,7 +204,7 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
                 bmask = gate
             zero = torch.zeros((), device=f_sl.device)
             b_sum = (kl_blank * bmask).sum() if "blank" in tset else zero
-            d_sum = (kl_dur * mask).sum() if "dur" in tset else zero
+            d_sum = (kl_dur * dmask).sum() if dur_on else zero
             b_n = (mask if "gated" in tset else bmask).sum()
             return b_sum, b_n, d_sum, mask.sum(), gate.sum(), zero, zero
 
@@ -260,7 +267,7 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
             b_cnt, count, passed = b_cnt + b_n, count + n, passed + n_pass
             w_tot, w_cnt = w_tot + w_sum, w_cnt + w_n
         kl_b = blank_scale * (b_tot / b_cnt.clamp(min=1) + w_tot / w_cnt.clamp(min=1))
-        kl_d = d_tot / count.clamp(min=1)
+        kl_d = d_tot / (passed if "durgate" in tset0 else count).clamp(min=1)
         kl = kl_b + kl_d
         m.log("kl_blank_dur", kl.detach(), prog_bar=False)
         out["loss"] = out["loss"] + weight * kl
