@@ -5,7 +5,11 @@ Run from the repo root, e.g.:
     modal run --detach pipeline/modal_app.py::killtest
 """
 
+import os
+
 import modal
+
+CARRIERS_FILE = os.path.join(os.path.dirname(__file__), "carriers.txt")
 
 app = modal.App("parakeet-spoken-form")
 vol = modal.Volume.from_name("parakeet-spoken-form", create_if_missing=True, version=2)
@@ -30,7 +34,7 @@ nemo_image = (
         "hf_transfer",
     )
     .env({"HF_HOME": f"{VOL}/hf", "HF_HUB_ENABLE_HF_TRANSFER": "1"})
-    .add_local_python_source("common", "data_e22", "data_replay", "data_fleurs", "ft_train", "ft_eval", "rescore")
+    .add_local_python_source("common", "data_e22", "data_replay", "data_fleurs", "ft_train", "ft_eval", "rescore", "preflight")
 )
 
 tts_image = (
@@ -43,7 +47,7 @@ tts_image = (
     # Per-container cache: parallel shards writing one shared cache read each other's partial files.
     .env({"HF_HOME": "/root/hf"})
     .add_local_python_source("common", "readings", "gen", "voice")
-    .add_local_file("carriers.txt", "/root/carriers.txt")
+    .add_local_file(CARRIERS_FILE, "/root/carriers.txt")
 )
 
 
@@ -387,3 +391,19 @@ def shift_blank(run: str, step: int, deltas: str = "0.5,1.0,1.5"):
         torch.save(out, f"{VOL}/exp/{run}_b{d}/step{step}.pt")
         print(f"{run}_b{d}: blank bias {float(sd['joint.joint_net.2.bias'][8192]):.3f} -> {float(b[8192]):.3f}")
     vol.commit()
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=1800)
+def preflight(run: str, kl_weight: float = 7.0, tts: str = "", steps: int = 0, lr: float = 1e-4,
+              terms: str = "blank,gnorm,durspan", lspc_h: float = 0.25, numwords_h: float = 0.5,
+              fleurs_h: float = 0.25, tts_h: float = 0.25, seed: int = 1):
+    """v10b pre-flight (about 3-4 min on an L4 with steps=0): span-mask audit + blank/duration
+    drift of the existing checkpoint against stock (stage A); with steps>0 a micro-train with
+    the v10b loss from the checkpoint plus year/money decodes (stage B, exp/<run>_pf)."""
+    import preflight as pf
+
+    vol.reload()
+    pf.main(VOL, ultra_path(), run, kl_weight, tts=tts, steps=steps, lr=lr, terms=terms,
+            lspc_h=lspc_h, numwords_h=numwords_h, fleurs_h=fleurs_h, tts_h=tts_h, seed=seed)
+    vol.commit()
+

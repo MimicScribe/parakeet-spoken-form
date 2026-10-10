@@ -13,6 +13,8 @@ import torch
 import torch.utils.checkpoint
 from omegaconf import OmegaConf, open_dict
 
+from common import number_span
+
 
 class KeepEncoderFrozen(pl.Callback):
     """Lightning calls model.train() at epoch start; keep the frozen encoder's BatchNorm and
@@ -114,6 +116,10 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
     tset0 = {x.strip() for x in terms.split(",")}
     assert "blank" in tset0 or not tset0 & {"gated", "gnorm", "g2", "tri"}, f"{terms}: gate/tri modes need 'blank'"
     assert len(tset0 & {"gated", "gnorm", "g2"}) <= 1, f"{terms}: gated, gnorm and g2 are mutually exclusive"
+    assert len(tset0 & {"dur", "durgate", "durspan"}) <= 1, \
+        f"{terms}: dur, durgate and durspan pick one duration mask"
+    assert "durspan" not in tset0 or only_texts is not None, \
+        "durspan needs kl_replay_only (the TTS rows must stay free)"
     keep = {tuple(m.tokenizer.text_to_ids(t)) for t in only_texts} if only_texts is not None else None
     # Sentence-terminal pieces (". ? !" with or without the word-boundary marker). `punct_weight` adds a binary KL on
     # {terminal punctuation vs any other non-blank token} to stock at every lattice point of EVERY row (TTS included):
@@ -144,7 +150,7 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
         f = enc.transpose(1, 2)
         nb = 8193  # 8192 tokens + blank; the last 5 outputs are durations
 
-        def chunk_kl(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, lab_sl):
+        def chunk_kl(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, lab_sl, span_sl):
             # Dropout zeroed inside the checkpointed function, so the backward recompute matches.
             with NoDropout(m.joint):
                 s_logits = m.joint.joint(f_sl, s_sl).float()
@@ -160,10 +166,6 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
             kl_blank = t_lb.exp() * (t_lb - s_lb) + t_lnb.exp() * (t_lnb - s_lnb)
             tset = {x.strip() for x in terms.split(",")}
             if "tri" in tset:
-                # Three-way KL over {blank, the reference's next label, any other token} (RNN-T distillation in the
-                # Panchapagesan style; Fable review 2026-10-08): also anchors substitutions. Replay labels are the same
-                # for teacher and student, so the label term cannot fight spoken form. Where no next label exists
-                # (u == label length) the two-way blank KL is kept.
                 lab = torch.zeros(s_logits.shape[0], U, dtype=torch.long, device=f_sl.device)
                 lab[:, :U - 1] = lab_sl[:, :U - 1]
                 idx = lab[:, None, :, None].expand(-1, T, -1, 1)
@@ -172,41 +174,35 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
                 s_lr = torch.log1p(-torch.logsumexp(torch.stack([s_lb, s_ll]), 0).exp().clamp(max=1 - 1e-4))
                 t_lr = torch.log1p(-torch.logsumexp(torch.stack([t_lb, t_ll]), 0).exp().clamp(max=1 - 1e-4))
                 kl3 = (t_lb.exp() * (t_lb - s_lb) + t_ll.exp() * (t_ll - s_ll) + t_lr.exp() * (t_lr - s_lr))
-                # Only where a next label exists AND stock itself favours the reference label (P > 0.5): where stock
-                # would write "2" for a spoken "two", the label term would pull the student back to digits (Gemini).
                 valid = (mask & (torch.arange(U, device=f_sl.device)[None, None, :] < tok_len_sl[:, None, None])
                          & (t_ll.exp() > 0.5))
                 kl_blank = torch.where(valid, kl3, kl_blank)
             s_dur, t_dur = s_logits[..., nb:].log_softmax(-1), t_logits[..., nb:].log_softmax(-1)
             kl_dur = (t_dur.exp() * (t_dur - s_dur)).sum(-1)
             gate = mask & (t_lnb.exp() > 0.9)  # computed in every mode: the pass rate is logged
-            # "durgate" (v10 probe, Gemini review 2026-10-09): the duration anchor only where stock emits
-            # (P(non-blank) > 0.9), normalized by those points. The ungated "dur" pulls every lattice point toward
-            # stock's durations; stock writes a spoken year as ONE digit run, so its duration targets skip the
-            # onset of a repeated number word ("twenty twenty one" → "two twenty one": collapse 0.7–1.4% without
-            # the KL, 3.6–6.5% with it, on 138 E22 years).
-            dur_on = "dur" in tset or "durgate" in tset
-            dmask = gate if "durgate" in tset else mask
+            dur_on = "dur" in tset or "durgate" in tset or "durspan" in tset
+            if "durgate" in tset:
+                dmask = gate
+            elif "durspan" in tset:
+                dmask = mask & ~span_sl[:, None, :]
+            else:
+                dmask = mask
             bmask = mask
             if "g2" in tset:
-                # Two-sided gate (Fable review): the emit gate as gnorm PLUS, as a separately normalized term, the points
-                # where stock is confident it waits (P(blank) > 0.95), so the student is also held against emitting
-                # there. Separate normalization keeps the anti-deletion term at gnorm strength (Gemini review).
                 wait = mask & (t_lb.exp() > 0.95)
                 zero = torch.zeros((), device=f_sl.device)
                 w_sum = (kl_blank * wait).sum() if "blank" in tset else zero
+                d_n = dmask.sum() if dur_on else zero
                 return ((kl_blank * gate).sum(), gate.sum(), (kl_dur * dmask).sum() if dur_on else zero,
-                        mask.sum(), gate.sum(), w_sum, wait.sum())
+                        d_n, mask.sum(), gate.sum(), w_sum, wait.sum())
             if "gated" in tset or "gnorm" in tset:
-                # Only where stock confidently emits (P(non-blank) > 0.9). "gated" (v5gated, 2026-10-08)
-                # divides by ALL lattice points, which dilutes the blank term by the gate's pass rate;
-                # "gnorm" divides by the points that pass the gate (Gemini review 2026-10-08).
                 bmask = gate
             zero = torch.zeros((), device=f_sl.device)
             b_sum = (kl_blank * bmask).sum() if "blank" in tset else zero
             d_sum = (kl_dur * dmask).sum() if dur_on else zero
             b_n = (mask if "gated" in tset else bmask).sum()
-            return b_sum, b_n, d_sum, mask.sum(), gate.sum(), zero, zero
+            d_n = dmask.sum() if dur_on else zero
+            return b_sum, b_n, d_sum, d_n, mask.sum(), gate.sum(), zero, zero
 
         if punct_weight:
             tid = term_t.to(f.device)
@@ -222,14 +218,12 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
                 s_nb, t_nb = s_logits[..., :nb - 1], t_logits[..., :nb - 1]
                 s_lt = s_nb[..., tid].logsumexp(-1) - s_nb.logsumexp(-1)
                 t_lt = t_nb[..., tid].logsumexp(-1) - t_nb.logsumexp(-1)
-                s_lo = torch.log((1 - s_lt.exp()).clamp(min=1e-7))  # keeps a gradient near saturation (Gemini)
+                s_lo = torch.log((1 - s_lt.exp()).clamp(min=1e-7))
                 t_lo = torch.log((1 - t_lt.exp()).clamp(min=1e-7))
                 kl = t_lt.exp() * (t_lt - s_lt) + t_lo.exp() * (t_lo - s_lo)
                 return (kl * mask).sum(), mask.sum()
 
             p_tot = p_cnt = torch.zeros((), device=f.device)
-            # "replay": only the real-speech rows (TTS rows free) — with "all", the anchor on TTS rows cost spoken form
-            # (v9p30 TTS exact 84 -> 76.5%, leaks 70 -> 175; 2026-10-08).
             p_rows = list(range(f.shape[0]))
             if punct_rows == "replay" and keep is not None:
                 p_rows = [i for i in p_rows if tuple(tokens[i, :int(tokens_len[i])].tolist()) in keep]
@@ -247,37 +241,68 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
             if batch_idx % 10 == 0:
                 print(f"kl_punct {kl_p.item():.5f}", flush=True)
         rows = list(range(f.shape[0]))
+        spans = None
         if keep is not None:
-            rows = [i for i in rows if tuple(tokens[i, :int(tokens_len[i])].tolist()) in keep]
+            row_toks = [tokens[i, :int(tokens_len[i])].tolist() for i in rows]
+            rows = [i for i, t in zip(rows, row_toks) if tuple(t) in keep]
+            if "durspan" in tset0:
+                spans = span_mask(m.tokenizer.tokenizer, [(i, row_toks[i]) for i in rows],
+                                  tokens.shape[0], int(tokens_len.max()), f.device)
         zero = torch.zeros((), device=f.device)
-        b_tot = d_tot = b_cnt = count = passed = w_tot = w_cnt = zero
+        b_tot = d_tot = b_cnt = d_cnt = count = passed = w_tot = w_cnt = zero
         for j in range(0, len(rows), sub_batch):
             sl = torch.tensor(rows[j:j + sub_batch], device=f.device)
             u = int(tokens_len[sl].max()) + 1
             t = int(enc_len[sl].max())
-            # Checkpointed: the [b, T, U, 8198] logits are rebuilt during backward instead of
-            # being held for every sub-batch at once (that ran out of memory at batch 600 s).
             lab_sl = torch.zeros(len(sl), u, dtype=torch.long, device=f.device)
             lab_sl[:, :u - 1] = tokens[sl, :u - 1]
-            b_sum, b_n, d_sum, n, n_pass, w_sum, w_n = torch.utils.checkpoint.checkpoint(
+            span_sl = spans[sl, :u] if spans is not None else None
+            b_sum, b_n, d_sum, d_n, n, n_pass, w_sum, w_n = torch.utils.checkpoint.checkpoint(
                 chunk_kl, f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
-                enc_len[sl], tokens_len[sl], lab_sl, use_reentrant=False)
-            # Kept as tensors: no GPU→CPU sync per sub-batch (Gemini review).
+                enc_len[sl], tokens_len[sl], lab_sl, span_sl, use_reentrant=False)
             b_tot, d_tot = b_tot + b_sum, d_tot + d_sum
-            b_cnt, count, passed = b_cnt + b_n, count + n, passed + n_pass
+            b_cnt, d_cnt, count, passed = b_cnt + b_n, d_cnt + d_n, count + n, passed + n_pass
             w_tot, w_cnt = w_tot + w_sum, w_cnt + w_n
         kl_b = blank_scale * (b_tot / b_cnt.clamp(min=1) + w_tot / w_cnt.clamp(min=1))
-        kl_d = d_tot / (passed if "durgate" in tset0 else count).clamp(min=1)
+        kl_d = d_tot / (d_cnt if "durspan" in tset0 else (passed if "durgate" in tset0 else count)).clamp(min=1)
         kl = kl_b + kl_d
         m.log("kl_blank_dur", kl.detach(), prog_bar=False)
         out["loss"] = out["loss"] + weight * kl
         if batch_idx % 10 == 0:
             print(f"kl_blank_dur {kl.item():.4f} (blank {kl_b.item():.4f} dur {kl_d.item():.4f}) "
-                  f"rows {len(rows)}/{f.shape[0]} gate-pass {int(passed)}/{int(count)} wait-pass {int(w_cnt)}",
+                  f"rows {len(rows)}/{f.shape[0]} gate-pass {int(passed)}/{int(count)} wait-pass {int(w_cnt)}"
+                  + (f" span-free {int(count - d_cnt)}/{int(count)}" if "durspan" in tset0 else ""),
                   flush=True)
         return out
 
     m.training_step = training_step
+
+
+def row_words(spm, ids) -> list[tuple[str, int, int]]:
+    """The row's words as (text, first token index, last token index). A piece without the
+    word-boundary marker continues the previous word, so a word may span several pieces."""
+    out = []
+    for j, tid in enumerate(ids):
+        piece = spm.id_to_piece(int(tid))
+        if piece.startswith("\u2581") or not out:
+            out.append([piece.lstrip("\u2581"), j, j])
+        else:
+            out[-1][0] += piece
+            out[-1][2] = j
+    return [(w, a, b) for w, a, b in out]
+
+
+def span_mask(spm, pairs, batch, width, device):
+    """(batch, width + 1) bool: True at (i, j) when label position j of row i sits inside a
+    spoken number (common.number_span over row_words). `pairs`: (row index, token ids).
+    Position len(ids) — the trailing wait — and the padding stay False: those are anchored."""
+    span = torch.zeros(batch, width + 1, dtype=torch.bool)
+    for i, ids in pairs:
+        words = row_words(spm, ids)
+        for (w, a, b), flag in zip(words, number_span([w for w, _, _ in words])):
+            if flag:
+                span[i, a:b + 1] = True
+    return span.to(device)
 
 
 class StepLog(pl.Callback):
@@ -386,10 +411,11 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
               + (f", replay rows only ({len(replay_texts)} labels)" if kl_replay_only else ""))
     if init_from:
         src, _, step = init_from.partition("@")
+        path = f"{vol}/exp/{src}/step{step}.pt" if step else f"{vol}/exp/{src}/decoder_joint.pt"
         missing, unexpected = m.load_state_dict(
-            torch.load(f"{vol}/exp/{src}/step{step}.pt", map_location="cpu"), strict=False)
+            torch.load(path, map_location="cpu"), strict=False)
         assert not unexpected and not [k for k in missing if k.startswith(("decoder.", "joint."))], missing
-        print(f"initialized from {init_from}")
+        print(f"initialized from {init_from} ({path})")
     extra = []
     if freeze_blank_duration:
         n = m.joint.joint_net[-1].weight.shape[0]
