@@ -161,11 +161,25 @@ def k_year(r):
 def k_big(r):
     scale = r.choice(["thousand", "million", "million", "billion", "billion", "trillion"])
     m = r.randint(1, 999) if r.random() < 0.7 else r.randint(1, 9)
+    if scale != "thousand" and r.random() < SUB_ONE_P:
+        return f"{_sub_one(r)} {scale}"
     if r.random() < 0.3:
         s = f"{cardinal(m)} point {digits(str(r.randint(1, 9)))} {scale}"
     else:
         s = f"{cardinal(m)} {scale}"
     return _maybe_a(s, r, 0.2)
+
+
+# Share of scaled amounts and percents below one ("zero point two million", "point five percent"). None were
+# generated before v10b, and v10a/v11 wrote "increased two million dollars" for a spoken "zero point two million"
+# (seam clip 4320211, 2026-10-09). make_tts(sub_one=True) sets it to 1 for a supplement set.
+SUB_ONE_P = 0.1
+
+
+def _sub_one(r):
+    frac = str(r.randint(1, 9)) if r.random() < 0.7 else r.choice([str(r.randint(11, 99)), "0" + str(r.randint(1, 9))])
+    tail = f"point {digits(frac.rstrip('0') or '5', oh=r.random() < 0.4)}"
+    return _pick(r, [(0.4, f"zero {tail}"), (0.45, tail), (0.15, f"oh {tail}")])
 
 
 def _decimal(r, max_int=999):
@@ -203,6 +217,8 @@ def k_money(r):
         scale = r.choice(["thousand", "million", "billion"])
         amt = f"{cardinal(r.randint(1, 999))} point {digits(str(r.randint(1, 9)))}" if r.random() < 0.4 \
             else cardinal(r.randint(1, 999))
+        if scale != "thousand" and r.random() < SUB_ONE_P:
+            amt = _sub_one(r)
         return f"{amt} {scale} {many}"
     d = r.randint(1, 9999) if r.random() < 0.7 else r.randint(1, 99)
     unit = one if d == 1 else many
@@ -220,7 +236,9 @@ def k_money(r):
 
 
 def k_percent(r):
-    if r.random() < 0.3:
+    if r.random() < SUB_ONE_P:
+        n = _sub_one(r)
+    elif r.random() < 0.3:
         n = _decimal(r, 99)
     elif r.random() < 0.1:
         n = f"{cardinal(r.randint(1, 20))} and a half"

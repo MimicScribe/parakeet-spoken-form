@@ -126,14 +126,19 @@ def voice_shard(rows: list, out_dir: str) -> list:
 
 
 @app.function(image=tts_image, volumes={VOL: vol}, timeout=3 * 3600)
-def make_tts(name: str, n_rows: int, seed: int = 1, shard: int = 200, multi_frac: float = 0.0):
-    """Generate rows, voice them in parallel shards, write train/dev manifests under /vol/tts/<name>."""
+def make_tts(name: str, n_rows: int, seed: int = 1, shard: int = 200, multi_frac: float = 0.0, slots: str = "",
+             sub_one: bool = False, control_frac: float = 0.1):
+    """Generate rows, voice them in parallel shards, write train/dev manifests under /vol/tts/<name>.
+    `slots` + `sub_one`: a targeted supplement (only those carriers; every scaled amount/percent below one)."""
     import json
     import os
 
     import gen
+    import readings
 
-    rows = list(gen.rows(n_rows, seed, multi_frac=multi_frac))
+    if sub_one:
+        readings.SUB_ONE_P = 1.0
+    rows = list(gen.rows(n_rows, seed, multi_frac=multi_frac, slots=slots, control_frac=control_frac))
     shards = [rows[i:i + shard] for i in range(0, len(rows), shard)]
     out_dir = f"{VOL}/tts/{name}"
     os.makedirs(out_dir, exist_ok=True)
@@ -231,6 +236,28 @@ def soup(src: str, alphas: str, name: str):
               for k, v in ft.items()}
         torch.save(sd, f"{VOL}/exp/{name}/step{round(100 * a)}.pt")
         print(f"{name}: alpha {a} -> step{round(100 * a)}.pt")
+    vol.commit()
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, cpu=4, memory=16384, timeout=1800)
+def seedsoup(srcs: str, name: str, step: int = 1500, weights: str = ""):
+    """Weighted average (uniform by default) of several checkpoints: "v10a,v10as2" (each at `step`) or
+    "v10a@1000,v10a@1500"; saved as exp/<name>/step<step>.pt so `eval_ckpts` and `export_weights` take it."""
+    import os
+
+    import torch
+
+    vol.reload()
+    items = [x.partition("@") for x in srcs.split(",")]
+    sds = [torch.load(f"{VOL}/exp/{r}/step{s or step}.pt", map_location="cpu") for r, _, s in items]
+    assert all(set(sd) == set(sds[0]) for sd in sds), "checkpoints differ in keys"
+    w = [float(x) for x in weights.split(",")] if weights else [1.0 / len(sds)] * len(sds)
+    assert len(w) == len(sds) and abs(sum(w) - 1) < 1e-6, w
+    out = {k: sum(wi * sd[k].float() for wi, sd in zip(w, sds)).to(sds[0][k].dtype)
+           if sds[0][k].is_floating_point() else sds[0][k] for k in sds[0]}
+    os.makedirs(f"{VOL}/exp/{name}", exist_ok=True)
+    torch.save(out, f"{VOL}/exp/{name}/step{step}.pt")
+    print(f"{name}: {srcs} weights {w} -> step{step}.pt")
     vol.commit()
 
 

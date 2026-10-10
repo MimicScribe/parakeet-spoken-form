@@ -109,10 +109,11 @@ def lead_in(text: str, r: random.Random, p: float = 0.3) -> str:
     return pick + text[0].lower() + text[1:]
 
 
-def rows(n: int, seed: int, dev_frac: float = 0.2, control_frac: float = 0.1, multi_frac: float = 0.0):
+def rows(n: int, seed: int, dev_frac: float = 0.2, control_frac: float = 0.1, multi_frac: float = 0.0,
+         slots: str = ""):
     """`multi_frac` of the rows join two or three sentences, so sentence boundaries occur inside a
     clip (single-sentence clips taught the model that every clip ends in one period)."""
-    single = _rows(n, seed, dev_frac, control_frac)
+    single = _rows(n, seed, dev_frac, control_frac, slots)
     r = random.Random(seed + 7)
     for row in single:
         if r.random() >= multi_frac:
@@ -125,10 +126,15 @@ def rows(n: int, seed: int, dev_frac: float = 0.2, control_frac: float = 0.1, mu
                "tts_text": " ".join(p["tts_text"] for p in parts)}
 
 
-def _rows(n: int, seed: int, dev_frac: float, control_frac: float):
+def _rows(n: int, seed: int, dev_frac: float, control_frac: float, slots: str = ""):
+    """`slots` ("big,money,percent"): only carriers with one of these slots (a targeted supplement set); the
+    train/dev carrier split is computed on ALL carriers first, so it matches the full sets."""
     r = random.Random(seed)
     carriers = load_carriers()
     dev = dev_carriers(carriers, dev_frac)
+    if slots:
+        want = {"{" + k + "}" for k in slots.split(",")}
+        carriers = [c for c in carriers if any(w in c for w in want)]
     for i in range(n):
         if r.random() < control_frac:
             text = r.choice(CONTROLS)
