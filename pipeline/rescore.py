@@ -163,3 +163,33 @@ def score_texts(vol: str, run: str, ultra: str, items_path: str, out_path: str) 
         print(o["id"], "| greedy:", o["greedy"])
         for t, v in sorted(o["scores"].items(), key=lambda kv: kv[1]):
             print(f"   {v:9.2f}  {t}")
+
+
+def greedy_vs_beam(vol: str, run: str, ultra: str, items_path: str, out_path: str, beam: int = 4) -> None:
+    """Decode the same clips with greedy and with transducer beam search (beam `beam`); write both hypotheses."""
+    import copy
+    from omegaconf import open_dict
+
+    import ft_eval
+
+    m = ft_eval.load_model(vol, run, ultra).cuda().eval()
+    items = json.load(open(items_path))
+    paths = [f"{vol}/{it['wav']}" for it in items]
+    g = ft_eval.decode(m, paths, batch_size=16)
+    cfg = copy.deepcopy(m.cfg.decoding)
+    used = None
+    for strat in ("beam", "maes", "malsd_batch"):
+        try:
+            with open_dict(cfg):
+                cfg.strategy = strat
+                cfg.beam.beam_size = beam
+                cfg.beam.return_best_hypothesis = True
+            m.change_decoding_strategy(cfg)
+            b = ft_eval.decode(m, paths[:2], batch_size=1)
+            used = strat
+            break
+        except Exception as e:  # strategy not supported for TDT in this NeMo
+            print("beam strategy", strat, "failed:", repr(e)[:200])
+    b = ft_eval.decode(m, paths, batch_size=1)
+    print("beam strategy used:", used)
+    json.dump([{**it, "greedy": x["text"], "beam": y["text"]} for it, x, y in zip(items, g, b)], open(out_path, "w"), indent=1)

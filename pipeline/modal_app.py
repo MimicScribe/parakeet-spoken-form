@@ -272,6 +272,16 @@ def score_texts(run: str = "v10pt", items: str = "yeardrop/items.json"):
     vol.commit()
 
 
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=3600)
+def year_beam(run: str = "v10pt", items: str = "yearbeam/items.json", beam: int = 4):
+    """Greedy vs beam on the same clips (rescore.greedy_vs_beam)."""
+    import rescore
+
+    vol.reload()
+    rescore.greedy_vs_beam(VOL, run, ultra_path(), f"{VOL}/{items}", f"{VOL}/yearbeam/{run}_b{beam}.json", beam)
+    vol.commit()
+
+
 def ultra_state() -> str:
     """Ultra's own decoder + joint, extracted once from the .nemo."""
     import os
