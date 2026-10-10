@@ -261,6 +261,17 @@ def seedsoup(srcs: str, name: str, step: int = 1500, weights: str = ""):
     vol.commit()
 
 
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=1800)
+def score_texts(run: str = "v10pt", items: str = "yeardrop/items.json"):
+    """Greedy hypothesis + TDT likelihood of candidate texts per clip (rescore.score_texts)."""
+    import rescore
+
+    vol.reload()
+    for r in run.split(","):
+        rescore.score_texts(VOL, r, ultra_path(), f"{VOL}/{items}", f"{VOL}/yeardrop/scores_{r}.json")
+    vol.commit()
+
+
 def ultra_state() -> str:
     """Ultra's own decoder + joint, extracted once from the .nemo."""
     import os

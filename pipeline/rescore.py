@@ -121,3 +121,45 @@ def run(vol: str, cand_run: str, ultra: str, clips_dir: str, out_path: str) -> N
             res[os.path.basename(p)[:-4]] = row
     json.dump(res, open(out_path, "w"), indent=1)
     print(f"{len(res)} clips, {sum(len(r['alts']) for r in res.values())} alternatives")
+
+
+def score_texts(vol: str, run: str, ultra: str, items_path: str, out_path: str) -> None:
+    """Greedy hypothesis + full-clip TDT negative log-likelihood (sigma 0) of given candidate texts per clip, under `run`.
+    items: [{"id", "wav" (path on the volume), "texts": [...]}]. Discriminates a greedy search error (a candidate
+    scores better than the greedy output) from a model preference (the greedy output scores best)."""
+    import torch
+    import librosa
+    from nemo.collections.asr.losses.rnnt import RNNTLoss
+
+    import ft_eval
+
+    m = ft_eval.load_model(vol, run, ultra).cuda().eval()
+    durations = list(m.cfg.model_defaults.tdt_durations)
+    loss_fn = RNNTLoss(num_classes=m.joint.num_classes_with_blank - 1, reduction="sum", loss_name="tdt",
+                       loss_kwargs={"durations": durations, "sigma": 0.0, "omega": 0.0})
+    items = json.load(open(items_path))
+    greedy = ft_eval.decode(m, [f"{vol}/{it['wav']}" for it in items], batch_size=8)
+    out = []
+    with torch.no_grad():
+        for it, g in zip(items, greedy):
+            x, _ = librosa.load(f"{vol}/{it['wav']}", sr=16000)
+            sig = torch.tensor(x, device="cuda")[None]
+            feats, feats_len = m.preprocessor(input_signal=sig, length=torch.tensor([sig.shape[1]], device="cuda"))
+            enc, enc_len = m.encoder(audio_signal=feats, length=feats_len)
+            f = enc.transpose(1, 2)
+
+            def nll(text):
+                ids = m.tokenizer.text_to_ids(text)
+                tok = torch.tensor([ids], device="cuda")
+                tl = torch.tensor([len(ids)], device="cuda")
+                gg, _, _ = m.decoder(targets=tok, target_length=tl)
+                logits = m.joint.joint(f, gg.transpose(1, 2)).float()
+                return float(loss_fn(log_probs=logits, targets=tok, input_lengths=enc_len, target_lengths=tl))
+
+            texts = [g["text"]] + [t for t in it["texts"] if t != g["text"]]
+            out.append({"id": it["id"], "greedy": g["text"], "scores": {t: nll(t) for t in texts}})
+    json.dump(out, open(out_path, "w"), indent=1)
+    for o in out:
+        print(o["id"], "| greedy:", o["greedy"])
+        for t, v in sorted(o["scores"].items(), key=lambda kv: kv[1]):
+            print(f"   {v:9.2f}  {t}")
