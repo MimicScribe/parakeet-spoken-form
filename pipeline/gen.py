@@ -110,10 +110,10 @@ def lead_in(text: str, r: random.Random, p: float = 0.3) -> str:
 
 
 def rows(n: int, seed: int, dev_frac: float = 0.2, control_frac: float = 0.1, multi_frac: float = 0.0,
-         slots: str = ""):
+         slots: str = "", carriers: str = "carriers.txt"):
     """`multi_frac` of the rows join two or three sentences, so sentence boundaries occur inside a
     clip (single-sentence clips taught the model that every clip ends in one period)."""
-    single = _rows(n, seed, dev_frac, control_frac, slots)
+    single = _rows(n, seed, dev_frac, control_frac, slots, carriers)
     r = random.Random(seed + 7)
     for row in single:
         if r.random() >= multi_frac:
@@ -126,11 +126,11 @@ def rows(n: int, seed: int, dev_frac: float = 0.2, control_frac: float = 0.1, mu
                "tts_text": " ".join(p["tts_text"] for p in parts)}
 
 
-def _rows(n: int, seed: int, dev_frac: float, control_frac: float, slots: str = ""):
+def _rows(n: int, seed: int, dev_frac: float, control_frac: float, slots: str = "", carriers_file: str = "carriers.txt"):
     """`slots` ("big,money,percent"): only carriers with one of these slots (a targeted supplement set); the
     train/dev carrier split is computed on ALL carriers first, so it matches the full sets."""
     r = random.Random(seed)
-    carriers = load_carriers()
+    carriers = load_carriers(os.path.join(HERE, carriers_file))
     dev = dev_carriers(carriers, dev_frac)
     if slots:
         want = {"{" + k + "}" for k in slots.split(",")}

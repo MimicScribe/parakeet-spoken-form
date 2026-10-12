@@ -514,6 +514,43 @@ def k_thousands_k(r):
     return f"{cardinal(r.randint(1, 999))} {_pick(r, [(0.6, 'K'), (0.4, 'grand')])}"
 
 
+# --- v12 spoken-year supplement (2026-10-11): "two thousand twenty X" at fast rates ---------------
+# D1 (number-fidelity plan): v10pt drops the tail of "two thousand twenty X" at fast speech (1% at
+# 180 wpm, 12-21% at 240-300) while "twenty X" holds; training had 24 such rows vs 215 "twenty X".
+
+
+def k_year_any(r):
+    """A year in the forms speakers use, weighted toward the under-trained "two thousand (and) X"."""
+    x = r.random()
+    if x < 0.05:
+        return "two thousand"
+    if x < 0.25:
+        y = r.randint(2001, 2009)
+        return _pick(r, [(0.6, cardinal(y)), (0.25, cardinal(y, use_and=True)), (0.15, f"twenty oh {ONES[y - 2000]}")])
+    y = r.randint(2010, 2039) if r.random() < 0.3 else r.randint(2018, 2029)
+    return _pick(r, [(0.5, cardinal(y)), (0.15, cardinal(y, use_and=True)), (0.35, pair(y))])
+
+
+def k_two_k_qty(r):
+    """Quantities that START like a year ("two thousand people"): contrast rows, so the tail is not invented."""
+    return _pick(r, [(0.3, "two thousand"), (0.15, cardinal(r.choice([2100, 2200, 2400, 2500, 2800]))),
+                     (0.1, cardinal(r.randint(2001, 2999))), (0.1, cardinal(r.randint(2001, 2999), use_and=True)),
+                     (0.1, f"{cardinal(r.randint(21, 29))} hundred"), (0.1, "twenty thousand"),
+                     (0.1, cardinal(r.randint(2, 9)) + " thousand"), (0.05, "two thousand or so")])
+
+
+def k_year_bal(r):
+    """v12b: k_year_any rebalanced toward "twenty X" (attempt 1 shifted " two" onto spoken "twenty twenty two")."""
+    x = r.random()
+    if x < 0.04:
+        return "two thousand"
+    if x < 0.16:
+        y = r.randint(2001, 2009)
+        return _pick(r, [(0.6, cardinal(y)), (0.25, cardinal(y, use_and=True)), (0.15, f"twenty oh {ONES[y - 2000]}")])
+    y = r.randint(2021, 2029) if r.random() < 0.5 else r.randint(2010, 2039)
+    return _pick(r, [(0.25, cardinal(y)), (0.1, cardinal(y, use_and=True)), (0.65, pair(y))])
+
+
 KINDS = {name[2:]: fn for name, fn in globals().items() if name.startswith("k_")}
 
 

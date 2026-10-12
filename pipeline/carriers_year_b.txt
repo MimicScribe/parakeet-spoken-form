@@ -1,0 +1,46 @@
+# v12 spoken-year supplement (2026-10-11). Voiced at fast rates. No E21/eval phrasing ("conference call",
+# "comparable store sales", "kind of", "run rate", "margins grew"). {year_bal} / {two_k_qty} in readings.py.
+Sales in Q two of {year_bal} were up slightly.
+Our full year {year_bal} outlook has not changed.
+In fiscal {year_bal} we expect costs to come down.
+Since {year_bal} the team has doubled in size.
+Through {year_bal} we plan to keep spending flat.
+Versus {year_bal}, the backlog is much stronger.
+Compared to {year_bal}, churn came down a lot.
+For {year_bal} we are guiding to modest growth.
+The opening months of {year_bal} were tougher than expected.
+That project wrapped up in {year_bal}.
+We'll revisit the pricing in {year_bal}.
+Looking ahead to {year_bal}, demand looks healthy.
+The numbers for {year_bal} include the acquisition.
+Our {year_bal} targets are still on track.
+The lease runs out late in {year_bal}.
+We hired most of them during {year_bal}.
+Let's compare {year_bal} with {year_bal} before we decide.
+Our fourth quarter {year_bal} results were solid overall.
+We closed the books on {year_bal} last month.
+Most of the growth in {year_bal} came from new customers.
+That was the plan for {year_bal}.
+We expect that to land in {year_bal}.
+Exiting {year_bal}, inventory was in good shape.
+I think {year_bal} will be a better year for us.
+Q three of fiscal {year_bal} had fewer selling days.
+In {year_bal} and {year_bal} the pattern was the same.
+Prices were reset in {year_bal}, and again last spring.
+{year_bal} was a big year for the platform.
+So {year_bal} guidance assumes a flat market.
+Q three {year_bal} bookings came in above plan.
+{two_k_qty} people signed up last week.
+We shipped {two_k_qty} units in the quarter.
+The bill came to {two_k_qty} dollars.
+We have about {two_k_qty} customers on the new plan.
+Roughly {two_k_qty} stores carry the product now.
+It's capped at {two_k_qty} per account.
+We're under {two_k_qty} right now.
+Around {two_k_qty} of them renewed early.
+The waitlist is at {two_k_qty} and growing.
+We need {two_k_qty} more seats before launch.
+{any} is the number I keep coming back to.
+We landed at {any} by the end of it.
+I'd put it at {any}, give or take.
+The update said {any}, if I read it right.

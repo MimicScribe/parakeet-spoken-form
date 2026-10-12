@@ -40,7 +40,7 @@ def voice_rows(rows: list[dict], out_dir: str) -> list[dict]:
         seed = int(hashlib.md5(row["id"].encode()).hexdigest()[:8], 16)
         r = random.Random(seed)
         voice = r.choice(DEV_VOICES if row["split"] == "dev" else TRAIN_VOICES)
-        speed = round(r.uniform(0.85, 1.3), 2)
+        speed = round(r.uniform(row.get("speed_lo", 0.85), row.get("speed_hi", 1.3)), 2)
         audio24 = synth(row["tts_text"], voice, speed)
         if len(audio24) < 2400:
             print("empty audio", row["id"])
