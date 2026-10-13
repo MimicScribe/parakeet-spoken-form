@@ -1119,15 +1119,17 @@ def soup3(run: str, steps: str = "3500,3750,4000", alphas: str = "1.0,0.85,0.7,0
 
 # Screening arms (R3.12.4 + R3.14: S-D dropped). Each is a full 4000-step cosine run evaluated at step 1000; the winner
 # continues as final seed 1.
-R3_ARMS = {"S-A": dict(wf_weight=1.0, l2sp_c=0.3, lr=1e-4), "S-B": dict(wf_weight=3.0, l2sp_c=0.3, lr=1e-4),
-           "S-C": dict(wf_weight=1.0, l2sp_c=0.0, lr=1e-4), "S-E": dict(wf_weight=1.0, l2sp_c=0.3, lr=5e-5)}
+# c = 1 (owner 2026-10-13, reviews: c = 0.3 pulled back < 3% of the drift by step 1000, so S-A ~ S-C); S-C is the c = 0
+# contrast. Duration KL on KL rows on (dur_weight = the blank-KL weight; owner 2026-10-13).
+R3_ARMS = {"S-A": dict(wf_weight=1.0, l2sp_c=1.0, lr=1e-4), "S-B": dict(wf_weight=3.0, l2sp_c=1.0, lr=1e-4),
+           "S-C": dict(wf_weight=1.0, l2sp_c=0.0, lr=1e-4), "S-E": dict(wf_weight=1.0, l2sp_c=1.0, lr=5e-5)}
 
 
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-40GB", cpu=8, memory=32768, timeout=24 * 3600,
               retries=modal.Retries(max_retries=2, initial_delay=30.0))
 def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, save_every: int = 250,
              en_weight: float = 1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
-             dur_weight: float = 0.0):
+             dur_weight: float = 10.0):
     """One retrain-3 run (R3.13): r3 losses, decoupled L2-SP to v10pt@1500, 200 s x 2 accumulated batches.
     Rehearsal (E2) = a small max_steps. Resumes from exp/<run>/last.ckpt after a preemption."""
     import json
