@@ -1126,7 +1126,8 @@ R3_ARMS = {"S-A": dict(wf_weight=1.0, l2sp_c=0.3, lr=1e-4), "S-B": dict(wf_weigh
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-40GB", cpu=8, memory=32768, timeout=24 * 3600,
               retries=modal.Retries(max_retries=2, initial_delay=30.0))
 def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, save_every: int = 250,
-             en_weight: float = 1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False):
+             en_weight: float = 1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
+             dur_weight: float = 0.0):
     """One retrain-3 run (R3.13): r3 losses, decoupled L2-SP to v10pt@1500, 200 s x 2 accumulated batches.
     Rehearsal (E2) = a small max_steps. Resumes from exp/<run>/last.ckpt after a preemption."""
     import json
@@ -1151,7 +1152,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
                    init_from="v10pt@1500", batch_duration=200, accumulate=2, spec_augment=False, kl_weight=10.0,
                    kl_punct=30.0, kl_tok=1.0, save_every=save_every, on_save=vol.commit, stage_dir="/tmp/stage",
                    r3=True, wf_weight=cfg["wf_weight"], en_weight=en_weight, l2sp_c=cfg["l2sp_c"],
-                   l2sp_anchor=f"{VOL}/exp/v10pt/step1500.pt")
+                   l2sp_anchor=f"{VOL}/exp/v10pt/step1500.pt", dur_weight=dur_weight)
     vol.commit()
 
 

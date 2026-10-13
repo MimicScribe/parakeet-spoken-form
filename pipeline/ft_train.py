@@ -495,7 +495,8 @@ def prefix_len(spm, ids) -> int:
 
 
 def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: float = 30.0, tok_weight: float = 1.0,
-                  wf_weight: float = 1.0, en_weight: float = 1.0, sub_batch: int = 2, emit_p: float = 0.1):
+                  wf_weight: float = 1.0, en_weight: float = 1.0, sub_batch: int = 2, emit_p: float = 0.1,
+                  dur_weight: float = 0.0):
     import copy
 
     teacher_dec, teacher_joint = copy.deepcopy(m.decoder).eval(), copy.deepcopy(m.joint).eval()
@@ -575,6 +576,10 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             s_lo = torch.log((1 - s_lt.exp()).clamp(min=1e-7))
             t_lo = torch.log((1 - t_lt.exp()).clamp(min=1e-7))
             kl_p = t_lt.exp() * (t_lt - s_lt) + t_lo.exp() * (t_lo - s_lo)
+            # TDT duration head (the outputs after the 8193 token+blank logits): KL to stock where KL applies
+            s_ld, t_ld = s_logits[..., nb:].log_softmax(-1), t_logits[..., nb:].log_softmax(-1)
+            kl_d = (t_ld.exp() * (t_ld - s_ld)).sum(-1)
+            dmask = kmask & (t_lnb.exp() > emit_p)
             # token KL (non-English rows): over the non-blank distribution at the teacher's emitting cells; averaged over
             # all T x U cells it was ~95% blank and inert (retrain-2 diagnosis; both retrain-3 reviews)
             tmask = mask & nonen_sl[:, None, None] & (t_lnb.exp() > emit_p)
@@ -599,9 +604,10 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             en_s, en_n = pen(en, nonen_sl) if len(en) else (torch.zeros((), device=dev),) * 2
             th_s, th_n = pen(th, yr_sl, yrcol_sl)
             return ((kl_blank * bmask).sum(), bmask.sum(), (kl_p * kmask).sum(), kmask.sum(),
-                    (kl_t * tmask).sum(), tmask.sum(), wf_s, wf_n.float(), en_s, en_n.float(), th_s, th_n.float())
+                    (kl_t * tmask).sum(), tmask.sum(), wf_s, wf_n.float(), en_s, en_n.float(), th_s, th_n.float(),
+                    (kl_d * dmask).sum(), dmask.sum())
 
-        acc = [torch.zeros((), device=dev) for _ in range(12)]
+        acc = [torch.zeros((), device=dev) for _ in range(14)]
         for j in range(0, B, sub_batch):
             sl = torch.arange(j, min(B, j + sub_batch), device=dev)
             u = int(tokens_len[sl].max()) + 1
@@ -616,11 +622,12 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
         wf_pen = acc[6] / acc[7].clamp(min=1)
         en_pen = acc[8] / acc[9].clamp(min=1)
         th_pen = acc[10] / acc[11].clamp(min=1)
+        kl_d = acc[12] / acc[13].clamp(min=1)
         aux = (kl_weight * kl_b + punct_weight * kl_p + tok_weight * kl_t + wf_weight * wf_pen + en_weight * en_pen
-               + wf_weight * th_pen)
+               + wf_weight * th_pen + dur_weight * kl_d)
         m._r3_parts = {"rnnt": out["loss"].detach(), "kl_b": kl_b.detach(), "kl_p": kl_p.detach(),
                        "kl_t": kl_t.detach(), "wf": wf_pen.detach(), "en": en_pen.detach(),
-                       "th": th_pen.detach()}
+                       "th": th_pen.detach(), "kl_d": kl_d.detach()}
         if os.environ.get("R3_GRADSHARE") and batch_idx % 50 == 0:
             # E2 acceptance (R3.12.3): each term's gradient on the joint's last layer, overall and on the written-form
             # output rows (wf_pen must reach >= 10% of the RNNT gradient there)
@@ -789,7 +796,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           seed: int = 1, kl_exempt: str = "", kl_blank_scale: float = 1.0, kl_punct: float = 0.0,
           kl_punct_rows: str = "all", kl_tok: float = 0.0, resume: bool = True, stage_dir: str = "",
           r3: bool = False, wf_weight: float = 1.0, en_weight: float = 1.0, l2sp_c: float = 0.0,
-          l2sp_anchor: str = "", accumulate: int = 1):
+          l2sp_anchor: str = "", accumulate: int = 1, dur_weight: float = 0.0):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
     entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists."""
@@ -860,7 +867,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
             for t in tagged.get(tag, ()):
                 row_tags[ids(t)] = tag
         add_r3_losses(m, row_tags, kl_weight=kl_weight, punct_weight=kl_punct, tok_weight=kl_tok,
-                      wf_weight=wf_weight, en_weight=en_weight)
+                      wf_weight=wf_weight, en_weight=en_weight, dur_weight=dur_weight)
         if l2sp_c:
             last_layer = m.joint.joint_net[-1].weight.shape[0]
             exempt = [i for i in wf_piece_ids(m.tokenizer.tokenizer) if i < last_layer]
