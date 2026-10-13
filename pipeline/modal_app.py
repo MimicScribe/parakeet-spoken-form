@@ -33,8 +33,10 @@ nemo_image = (
         "soundfile",
         "hf_transfer",
     )
+    .uv_pip_install("langid", "transformers")
     .env({"HF_HOME": f"{VOL}/hf", "HF_HUB_ENABLE_HF_TRANSFER": "1"})
-    .add_local_python_source("common", "data_e22", "data_replay", "data_fleurs", "ft_train", "ft_eval", "rescore", "preflight")
+    .add_local_python_source("common", "data_e22", "data_replay", "data_fleurs", "ft_train", "ft_eval", "rescore", "preflight",
+                              "labeller", "readings", "label_gpu", "harvest")
 )
 
 tts_image = (
@@ -50,6 +52,7 @@ tts_image = (
     .add_local_file(CARRIERS_FILE, "/root/carriers.txt")
     .add_local_file(os.path.join(os.path.dirname(__file__), "carriers_year.txt"), "/root/carriers_year.txt")
     .add_local_file(os.path.join(os.path.dirname(__file__), "carriers_year_b.txt"), "/root/carriers_year_b.txt")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "carriers_d9.txt"), "/root/carriers_d9.txt")
 )
 
 
@@ -554,3 +557,77 @@ def s3_fetch(lang: str = "en", limit: int = 0):
         tot_h += st.get("h", 0)
         print(json.dumps(st))
     print(f"fetched {tot} rows, {tot_h:.1f} h")
+
+
+@app.cls(image=nemo_image, volumes={VOL: vol}, secrets=[hf_secret], gpu="L4", timeout=3 * 3600, max_containers=8,
+         retries=1)
+class Labeller:
+    @modal.enter()
+    def load(self):
+        import label_gpu
+
+        vol.reload()
+        self.sc = label_gpu.Scorer(VOL, ultra_path())
+
+    @modal.method()
+    def shard(self, man: str, tag: str, keep_audio: bool = True) -> dict:
+        import os
+
+        import label_gpu
+
+        if os.path.exists(f"{VOL}/d1/crops/{tag}.jsonl"):
+            return {"shard": tag, "skipped": True}
+        st = label_gpu.label_shard(VOL, self.sc, man, tag, keep_audio)
+        vol.commit()
+        return st
+
+
+@app.function(image=scan_image, volumes={VOL: vol}, timeout=12 * 3600)
+def s3_label(lang: str = "en", limit: int = 0, only: str = ""):
+    """Relabel every fetched English shard (S3); `only` = comma list of shard tags."""
+    import glob
+    import json
+    import os
+
+    vol.reload()
+    mans = sorted(glob.glob(f"{VOL}/yodas/{lang}/manifests/*.jsonl"))
+    if only:
+        mans = [m for m in mans if os.path.basename(m)[:-6] in only.split(",")]
+    mans = mans[: limit or None]
+    print(f"{len(mans)} shards")
+    tot = {"rows": 0, "crops": 0, "crop_h": 0.0, "dropped": 0}
+    for st in Labeller().shard.starmap([(m, os.path.basename(m)[:-6]) for m in mans], return_exceptions=True):
+        if isinstance(st, Exception):
+            print("FAIL", repr(st)[:400])
+            continue
+        print(json.dumps(st))
+        for k in tot:
+            tot[k] += st.get(k, 0)
+    print("TOTAL", json.dumps(tot))
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, secrets=[hf_secret], gpu="L4", timeout=4 * 3600, max_containers=8,
+              retries=1)
+def d2_harvest_lang(lang: str, digit_h: float = 1.2, plain_h: float = 1.2) -> dict:
+    import ft_eval
+    import harvest
+
+    vol.reload()
+    m = ft_eval.load_model(VOL, "ultra", ultra_path())
+    st = harvest.harvest(VOL, m, lang, digit_h, plain_h)
+    vol.commit()
+    return st
+
+
+@app.function(image=scan_image, volumes={VOL: vol}, timeout=8 * 3600)
+def d2_harvest(langs: str = "bg,cs,da,de,el,es,et,fi,fr,hr,hu,it,lt,lv,nl,pl,pt,ro,ru,sk,sl,sv,uk"):
+    import json
+
+    tot = 0.0
+    for st in d2_harvest_lang.map(langs.split(","), return_exceptions=True):
+        if isinstance(st, Exception):
+            print("FAIL", repr(st)[:400])
+            continue
+        tot += st["digit_h"]
+        print(json.dumps(st))
+    print(f"digit hours total {tot:.1f}")

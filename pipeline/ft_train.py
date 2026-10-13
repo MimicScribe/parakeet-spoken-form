@@ -30,13 +30,17 @@ class KeepEncoderFrozen(pl.Callback):
 class SaveEvery(pl.Callback):
     """Keep the trainable weights every `every` steps (no full checkpoints: 18M params, ~70 MB)."""
 
-    def __init__(self, exp: str, every: int, on_save):
-        self.exp, self.every, self.on_save = exp, every, on_save
+    def __init__(self, exp: str, every: int, on_save, last: str = ""):
+        self.exp, self.every, self.on_save, self.last = exp, every, on_save, last
 
     def on_train_batch_end(self, trainer, m, outputs, batch, idx):
         step = trainer.global_step
-        if step and step % self.every == 0:
+        if step and step % self.every == 0 and not os.path.exists(f"{self.exp}/step{step}.pt.done"):
             torch.save(trainable_state(m), f"{self.exp}/step{step}.pt")
+            if self.last:  # full state (optimizer, scheduler, step) for a resume after preemption
+                trainer.save_checkpoint(self.last + ".tmp")
+                os.replace(self.last + ".tmp", self.last)
+            open(f"{self.exp}/step{step}.pt.done", "w").close()
             self.on_save()
 
 
@@ -90,7 +94,8 @@ class NoDropout:
 
 
 def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None, terms: str = "blank,dur",
-                          blank_scale: float = 1.0, punct_weight: float = 0.0, punct_rows: str = "all"):
+                          blank_scale: float = 1.0, punct_weight: float = 0.0, punct_rows: str = "all",
+                          span_texts=None, nonen_texts=None, tok_weight: float = 0.0):
     """Keep the model's emit-or-wait behaviour close to stock Ultra's.
 
     Extra loss: KL(teacher || student) over (a) blank vs not-blank and (b) the five TDT durations,
@@ -120,7 +125,17 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
         f"{terms}: dur, durgate and durspan pick one duration mask"
     assert "durspan" not in tset0 or only_texts is not None, \
         "durspan needs kl_replay_only (the TTS rows must stay free)"
-    keep = {tuple(m.tokenizer.text_to_ids(t)) for t in only_texts} if only_texts is not None else None
+    # Real-speech retrain (2026-10-12): `span_texts` = English real number rows: anchored like replay rows except INSIDE
+    # the number span when terms has "blankspan" (the labels change there by design). `nonen_texts` = non-English rows:
+    # anchored like replay rows, plus (tok_weight) a full-distribution token KL to stock, the anti-leak term (stock
+    # writes digits there; the student must not drift to English number words).
+    ids = lambda ts: {tuple(m.tokenizer.text_to_ids(t)) for t in ts}  # noqa: E731
+    span_keep = ids(span_texts) if span_texts else set()
+    nonen_keep = ids(nonen_texts) if nonen_texts else set()
+    keep = ids(only_texts) | span_keep | nonen_keep if only_texts is not None else None
+    assert "blankspan" not in tset0 or span_keep, "blankspan needs span_texts"
+    if keep is not None:
+        print(f"KL rows: anchor {len(only_texts)} span {len(span_keep)} non-en {len(nonen_keep)} labels")
     # Sentence-terminal pieces (". ? !" with or without the word-boundary marker). `punct_weight` adds a binary KL on
     # {terminal punctuation vs any other non-blank token} to stock at every lattice point of EVERY row (TTS included):
     # fine-tunes over-split sentences (E22 sentence-end precision 89.5 -> 84, INV-PUNCT +29 false terminals, 2026-10-08)
@@ -197,10 +212,14 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
                         d_n, mask.sum(), gate.sum(), w_sum, wait.sum())
             if "gated" in tset or "gnorm" in tset:
                 bmask = gate
+            if "blankspan" in tset and span_sl is not None:
+                bmask = bmask & ~span_sl[:, None, :]
             zero = torch.zeros((), device=f_sl.device)
             b_sum = (kl_blank * bmask).sum() if "blank" in tset else zero
             d_sum = (kl_dur * dmask).sum() if dur_on else zero
             b_n = (mask if "gated" in tset else bmask).sum()
+            if "blankspan" in tset and span_sl is not None and "gated" in tset:
+                b_n = (mask & ~span_sl[:, None, :]).sum()
             d_n = dmask.sum() if dur_on else zero
             return b_sum, b_n, d_sum, d_n, mask.sum(), gate.sum(), zero, zero
 
@@ -240,6 +259,34 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
             m.log("kl_punct", kl_p.detach(), prog_bar=False)
             if batch_idx % 10 == 0:
                 print(f"kl_punct {kl_p.item():.5f}", flush=True)
+        if tok_weight and nonen_keep:
+            def chunk_tok(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl):
+                with NoDropout(m.joint):
+                    s_logits = m.joint.joint(f_sl, s_sl).float()
+                with torch.no_grad():
+                    t_logits = tjoint.joint(f_sl, t_sl).float()
+                T, U = s_logits.shape[1], s_logits.shape[2]
+                mask = ((torch.arange(T, device=f_sl.device)[None, :, None] < enc_len_sl[:, None, None])
+                        & (torch.arange(U, device=f_sl.device)[None, None, :] <= tok_len_sl[:, None, None]))
+                s_lp = s_logits[..., :nb].log_softmax(-1)
+                t_lp = t_logits[..., :nb].log_softmax(-1)
+                kl = (t_lp.exp() * (t_lp - s_lp)).sum(-1)
+                return (kl * mask).sum(), mask.sum()
+
+            n_rows = [i for i in range(f.shape[0]) if tuple(tokens[i, :int(tokens_len[i])].tolist()) in nonen_keep]
+            k_tot = k_cnt = torch.zeros((), device=f.device)
+            for j in range(0, len(n_rows), sub_batch):
+                sl = torch.tensor(n_rows[j:j + sub_batch], device=f.device)
+                u = int(tokens_len[sl].max()) + 1
+                t = int(enc_len[sl].max())
+                ks, kn = torch.utils.checkpoint.checkpoint(
+                    chunk_tok, f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
+                    enc_len[sl], tokens_len[sl], use_reentrant=False)
+                k_tot, k_cnt = k_tot + ks, k_cnt + kn
+            kl_t = k_tot / k_cnt.clamp(min=1)
+            out["loss"] = out["loss"] + tok_weight * kl_t
+            if batch_idx % 10 == 0:
+                print(f"kl_tok {kl_t.item():.5f} rows {len(n_rows)}", flush=True)
         rows = list(range(f.shape[0]))
         spans = None
         if keep is not None:
@@ -247,6 +294,9 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
             rows = [i for i, t in zip(rows, row_toks) if tuple(t) in keep]
             if "durspan" in tset0:
                 spans = span_mask(m.tokenizer.tokenizer, [(i, row_toks[i]) for i in rows],
+                                  tokens.shape[0], int(tokens_len.max()), f.device)
+            elif "blankspan" in tset0:
+                spans = span_mask(m.tokenizer.tokenizer, [(i, row_toks[i]) for i in rows if tuple(row_toks[i]) in span_keep],
                                   tokens.shape[0], int(tokens_len.max()), f.device)
         zero = torch.zeros((), device=f.device)
         b_tot = d_tot = b_cnt = d_cnt = count = passed = w_tot = w_cnt = zero
@@ -324,13 +374,15 @@ class StepLog(pl.Callback):
             print(f"step {trainer.global_step} loss {loss:.4f} {time.time() - self.t0:.0f}s", flush=True)
 
 
-def write_mix(vol: str, out: str, parts: list[tuple[str, float]], seed: int = 1, replay_texts=None,
-              kl_exempt: str = "") -> float:
+def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_texts=None,
+              kl_exempt: str = "", tagged: dict | None = None) -> float:
     """Concatenate manifests, taking `hours` from each (all if hours <= 0). Labels of rows from
     `replay/` manifests are added to `replay_texts` when given."""
     r = random.Random(seed)
     rows, exempt = [], set()
-    for path, hours in parts:
+    for part in parts:
+        path, hours = part[0], part[1]
+        tag = part[2] if len(part) > 2 else None
         src = [json.loads(l) for l in open(f"{vol}/{path}")]
         r.shuffle(src)
         if hours > 0:
@@ -342,7 +394,11 @@ def write_mix(vol: str, out: str, parts: list[tuple[str, float]], seed: int = 1,
                 acc += x["duration"]
             src = keep
         print(f"mix {path}: {len(src)} rows, {sum(x['duration'] for x in src) / 3600:.2f} h")
-        if replay_texts is not None and path.startswith("replay/"):
+        if tag is not None and tagged is not None:
+            # explicit KL treatment: "anchor" | "span" | "nonen" | "free"
+            if tag != "free":
+                tagged.setdefault(tag, set()).update(x["text"] for x in src)
+        elif replay_texts is not None and path.startswith("replay/"):
             if kl_exempt and kl_exempt in path:
                 exempt.update(x["text"] for x in src)
             else:
@@ -373,15 +429,26 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3, spec_augment: bool = True,
           kl_weight: float = 0.0, kl_replay_only: bool = False, init_from: str = "", kl_terms: str = "blank,dur",
           seed: int = 1, kl_exempt: str = "", kl_blank_scale: float = 1.0, kl_punct: float = 0.0,
-          kl_punct_rows: str = "all"):
-    """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock)."""
+          kl_punct_rows: str = "all", kl_tok: float = 0.0, resume: bool = True):
+    """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
+    Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
+    entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists."""
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
     os.makedirs(exp, exist_ok=True)
     replay_texts = set()
+    tagged: dict = {}
     hours = write_mix(vol, f"{exp}/train_manifest.jsonl", mix, seed=seed, replay_texts=replay_texts,
-                      kl_exempt=kl_exempt)
+                      kl_exempt=kl_exempt, tagged=tagged)
+    if tagged:
+        replay_texts |= tagged.get("anchor", set())
+        # a label in two tags keeps the stricter one: anchor > nonen > span
+        span_texts = tagged.get("span", set()) - replay_texts
+        nonen_texts = tagged.get("nonen", set()) - replay_texts
+        print(f"tagged KL labels: anchor {len(replay_texts)} span {len(span_texts)} non-en {len(nonen_texts)}")
+    else:
+        span_texts = nonen_texts = None
     pl.seed_everything(seed)
     print(f"train mix: {hours:.2f} h")
 
@@ -406,10 +473,13 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     m.encoder.freeze()
     if kl_weight or kl_punct:
         add_blank_duration_kl(m, kl_weight, only_texts=replay_texts if kl_replay_only else None, terms=kl_terms,
-                              blank_scale=kl_blank_scale, punct_weight=kl_punct, punct_rows=kl_punct_rows)
+                              blank_scale=kl_blank_scale, punct_weight=kl_punct, punct_rows=kl_punct_rows,
+                              span_texts=span_texts, nonen_texts=nonen_texts, tok_weight=kl_tok)
         print(f"KL to stock ({kl_terms}), weight {kl_weight}"
               + (f", replay rows only ({len(replay_texts)} labels)" if kl_replay_only else ""))
-    if init_from:
+    last = f"{exp}/last.ckpt"
+    resuming = resume and os.path.exists(last)
+    if init_from and not resuming:
         src, _, step = init_from.partition("@")
         path = f"{vol}/exp/{src}/step{step}.pt" if step else f"{vol}/exp/{src}/decoder_joint.pt"
         missing, unexpected = m.load_state_dict(
@@ -433,14 +503,16 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
                          use_distributed_sampler=False, gradient_clip_val=1.0, logger=False,
                          enable_checkpointing=False, enable_progress_bar=False,
                          callbacks=[KeepEncoderFrozen(), StepLog()] + extra
-                         + ([SaveEvery(exp, save_every, on_save)] if save_every else []))
+                         + ([SaveEvery(exp, save_every, on_save, last)] if save_every else []))
     m.set_trainer(trainer)
     m.setup_optimization(OmegaConf.create({
         "name": "adamw", "lr": lr, "betas": [0.9, 0.98], "weight_decay": weight_decay,
         "sched": {"name": "CosineAnnealing", "warmup_steps": warmup, "min_lr": lr / 10,
                   "max_steps": max_steps}}))
     t0 = time.time()
-    trainer.fit(m)
+    if resuming:
+        print(f"RESUMING from {last}")
+    trainer.fit(m, ckpt_path=last if resuming else None)
     print(f"trained {max_steps} steps in {time.time() - t0:.0f}s")
     torch.save(trainable_state(m), f"{exp}/decoder_joint.pt")
     return m

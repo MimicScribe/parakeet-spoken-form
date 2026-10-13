@@ -1,0 +1,31 @@
+# 2026-10-12 supplement: far years and disfluent numbers. No E21/E22/eval phrasing.
+The lease runs until {year_far}.
+By {year_far} the fleet should be fully electric.
+They set a net zero target for {year_far}.
+Our forecast goes out to {year_far}, which feels a bit optimistic.
+The bond matures in {year_far}.
+Population could double by {year_far}.
+The building should last well past {year_far}.
+We modeled demand through {year_far} as well.
+That patent expires in {year_far}, I think.
+Some of these kids will be working in {year_far}.
+{year_far} is the year the plan really kicks in.
+The mortgage will be paid off in {year_far}.
+I put {year_far} on the slide, but we can change it.
+In {year_far} the contract can be renewed.
+They want carbon neutrality by {year_far}, not earlier.
+We moved the office in {disfluent}, I'm pretty sure.
+The budget came in at {disfluent} in the end.
+It went up by {disfluent} last time we checked.
+We hired {disfluent} people over the summer.
+I think it was {disfluent} or so.
+The ticket was {disfluent}, roughly.
+Revenue grew {disfluent} year over year.
+She joined in {disfluent}, right after the move.
+That release shipped in {disfluent}, if I remember right.
+We had {disfluent} customers on the waitlist.
+Let's say {disfluent} for now.
+The quote was {disfluent} including shipping.
+Churn was about {disfluent} for the quarter.
+He started here in {disfluent}.
+We lost {disfluent} on that deal.

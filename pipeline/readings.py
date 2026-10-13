@@ -551,6 +551,41 @@ def k_year_bal(r):
     return _pick(r, [(0.25, cardinal(y)), (0.1, cardinal(y, use_and=True)), (0.65, pair(y))])
 
 
+# --- 2026-10-12 real-speech retrain supplements (D.4) ---------------------------------------------------------------
+# k_year capped at 2039 and the model had never seen 2040+ ("twenty forty", "twenty one hundred"); disfluent numbers
+# (self-corrections, restarts, repeats) had no rows at all. Both are tiny TTS supplements; real speech covers the rest.
+
+
+def k_year_far(r):
+    x = r.random()
+    if x < 0.15:
+        return _pick(r, [(0.6, "twenty one hundred"), (0.4, "two thousand one hundred")])
+    if x < 0.25:
+        y = r.randint(2101, 2199)
+        return pair(y) if y % 100 >= 10 else f"twenty one oh {ONES[y % 100]}"
+    y = r.randint(2040, 2099)
+    return _pick(r, [(0.6, pair(y)), (0.3, cardinal(y)), (0.1, cardinal(y, use_and=True))])
+
+
+_DISFLUENT_KINDS = [lambda r: year(r.randint(2001, 2035)), lambda r: cardinal(r.randint(2, 99)),
+                    lambda r: f"{cardinal(r.randint(2, 20))} percent", lambda r: f"{cardinal(r.randint(2, 900))} dollars"]
+
+
+def k_disfluent(r):
+    """A number said with a correction, restart or repeat; the label keeps every word said."""
+    kind = r.choice(_DISFLUENT_KINDS)
+    a, b = kind(r), kind(r)
+    w = a.split()
+    x = r.random()
+    if x < 0.35:
+        return f"{a}, {r.choice(['no', 'sorry', 'I mean', 'actually'])}, {b}"
+    if x < 0.65 and len(w) > 1:
+        return f"{' '.join(w[:max(1, len(w) // 2)])}, {a}"
+    if x < 0.85:
+        return f"{w[0]}, {w[0]} {' '.join(w[1:])}".strip()
+    return f"{a}, or maybe {b}"
+
+
 KINDS = {name[2:]: fn for name, fn in globals().items() if name.startswith("k_")}
 
 
