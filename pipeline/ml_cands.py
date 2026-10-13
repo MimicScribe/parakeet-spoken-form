@@ -187,10 +187,21 @@ def _card_variants(ws: list[str], lang: str, n: int, year: bool) -> list[list[st
             v.append(["duas" if w == "dois" else w for w in ws])
         if any(w.endswith("entos") for w in ws):  # duzentos .. novecentos, quinhentos
             v.append([w[:-2] + "as" if w.endswith("entos") else w for w in ws])
-        # the grammar spells European Portuguese; Brazilian speech (FLEURS pt_br, YODAS) says/writes these
-        br = {"dezasseis": "dezesseis", "dezassete": "dezessete", "dezanove": "dezenove", "catorze": "quatorze"}
-        if any(w in br for w in ws):
-            v.append([br.get(w, w) for w in ws])
+        # the grammar spells Brazilian Portuguese (app 3030976f8: BR teens + short scale); European speech (VoxPopuli)
+        # says/writes these. "catorze"/"quatorze" are both Brazilian.
+        eu = {"dezesseis": "dezasseis", "dezessete": "dezassete", "dezenove": "dezanove", "catorze": "quatorze"}
+        if any(w in eu for w in ws):
+            v.append([eu.get(w, w) for w in ws])
+        if any(w in ("bilhão", "bilhões") for w in ws):  # PT_PT 10^9 = "mil milhões" ("um bilhão" -> "mil milhões")
+            out, i = [], 0
+            while i < len(ws):
+                if i + 1 < len(ws) and ws[i] == "um" and ws[i + 1] == "bilhão":
+                    out += ["mil", "milhões"]
+                    i += 2
+                    continue
+                out += ["mil", "milhões"] if ws[i] in ("bilhão", "bilhões") else [ws[i]]
+                i += 1
+            v.append(out)
     elif lang == "it":
         if last == "uno":
             v += [ws[:-1] + ["un"], ws[:-1] + ["una"]]
