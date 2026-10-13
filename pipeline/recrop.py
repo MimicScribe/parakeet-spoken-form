@@ -5,10 +5,8 @@ edge had no quiet 20 ms frame in its outer 160 ms: 5,376 of 10,672 crops, and ne
 D1 was 0.12 h). Here a crop may only start or end at a gap whose quietest frame is below 0.3x the row's speech level,
 so edges are quiet by construction and fast rows keep every gap they do have.
 
-Also relaxes the decide rule for single-reading CODE spans ("F one", "Q one", "RM eight"): the exact-fit check
-failed on the letter part (wav2vec2 spells a spoken letter as its name, "EF"), 596 of 769 code spans undecided.
-With one candidate there is no reading to choose; the stock-value precheck and the row CER guard still apply.
-Multi-reading code spans still need the CTC margin and an exact fit of their number words.
+v2 (retrain-3): crops come from the relabel (d1/rows3); decisions are the labeller's (the v1 code-span relaxation
+made corrupt labels and is gone); number-onset sub-crops added (D-5).
 """
 
 import json
@@ -106,56 +104,59 @@ class W2VScorer(Scorer):
             return self.w2v(iv).logits.float().log_softmax(-1)[0]
 
 
-def code_decided(s: dict) -> bool:
-    if s["kind"] != "code" or s.get("decided") or not s.get("pre"):
-        return bool(s.get("decided"))
-    return len(s["cands"]) == 1 or bool(s.get("ok", True) and s.get("num_fit"))
+def onset_crops(cuts, bad, tok_span, out, rnd, p=0.3, max_s=8.0, min_s=2.0):
+    """D-5: for kept crops, extra 2-8 s sub-crops that START at the quiet cut right before a number span (left-edge /
+    u = 0 exposure: 8.9% of retrain-2 D1 crops started with a number word)."""
+    extra = []
+    for i, j in out:
+        for k in range(i, j):
+            if not tok_span[k] or (k > 0 and tok_span[k - 1] == tok_span[k]) or cuts[k] is None or k == i:
+                continue
+            if rnd.random() >= p:
+                continue
+            want = rnd.uniform(min_s, max_s)
+            ends = [e for e in range(k + 1, j + 1) if cuts[e] is not None and (cuts[e] - cuts[k]) * 0.02 <= want
+                    and not any(bad[k:e])]
+            if ends and (cuts[ends[-1]] - cuts[k]) * 0.02 >= min_s:
+                extra.append((k, ends[-1]))
+    return extra
 
 
-def recrop_shard(vol: str, sc, tag: str, keep_audio: bool = True) -> dict:
+def recrop_shard(vol: str, sc, tag: str, keep_audio: bool = True, rows_dir: str = "d1/rows3",
+                 out_dir: str = "d1/crops3", wav_root: str = "d1/wav3") -> dict:
+    """Quiet-gap crops from the retrain-3 relabel (rows3): labels, spans and decisions come from the rows; nothing is
+    re-decided here."""
     import soundfile as sf
 
     man = {}
     for line in open(f"{vol}/yodas/en/manifests/{tag}.jsonl"):
         r = json.loads(line)
         man[r["utt_id"]] = r
-    recs = {}
-    for suf in ("", "_pct"):  # percent-pass labels replace the first pass (Opus B2)
-        p = f"{vol}/d1/rows/{tag}{suf}.jsonl"
-        if os.path.exists(p):
-            for line in open(p):
-                rec = json.loads(line)
-                if rec["kind"] != "plain":
-                    recs[rec["utt_id"]] = rec
-    wav_dir = f"{vol}/d1/wav2/{tag}"
+    recs = [json.loads(line) for line in open(f"{vol}/{rows_dir}/{tag}.jsonl")]
+    wav_dir = f"{vol}/{wav_root}/{tag}"
     os.makedirs(wav_dir, exist_ok=True)
     rnd = random.Random(tag)
-    out, st = [], {"rows": 0, "code_redecided": 0, "no_label": 0, "align": 0, "no_cut": 0}
-    for uid, rec in recs.items():
-        if rec.get("drop") == "cer" or "label" not in rec or uid not in man:
-            st["no_label"] += 1
+    out, st = [], {"rows": 0, "skipped": 0, "align": 0, "no_cut": 0, "onset": 0}
+    for rec in recs:
+        uid = rec["utt_id"]
+        if rec["kind"] == "plain" or rec.get("drop") or "label" not in rec or uid not in man:
+            st["skipped"] += 1
             continue
         r = man[uid]
         sp = L.spans(rec["caption"])
         if len(sp) != len(rec["spans"]):
-            st["no_label"] += 1
+            st["skipped"] += 1
             continue
+        choice = [so["pick"] for so in rec["spans"]]
+        label, ranges = L.render_ranges(rec["caption"], sp, choice)
+        if label != rec["label"]:
+            st["skipped"] += 1
+            continue
+        decided = [bool(so["decided"]) for so in rec["spans"]]
         x, _ = sf.read(r["audio_filepath"], dtype="float32")
         if x.ndim > 1:
             x = x.mean(1)
         lp = sc.w2v_lp(x)
-        w2v = norm_ctc(sc.greedy_w2v(lp)).split()
-        decided = []
-        for s in rec["spans"]:
-            if s["kind"] == "code" and not s.get("decided") and len(s["cands"]) > 1:
-                nums = [w for w in norm_ctc(s["cands"][s["pick"]]).split() if NUMBER_WORDS.search(w.lower()) or w in ("ONE", "O")]
-                s["num_fit"] = bool(nums) and fits(nums, w2v)
-            d = code_decided(s)
-            st["code_redecided"] += d and not s.get("decided")
-            decided.append(d)
-        if not any(decided):
-            continue
-        label = rec["label"]
         toks = label.split()
         starts, pos = [], 0
         for t in toks:
@@ -163,17 +164,13 @@ def recrop_shard(vol: str, sc, tag: str, keep_audio: bool = True) -> dict:
             starts.append(k)
             pos = k + len(t)
         tok_span, bad = [0] * len(toks), [False] * len(toks)
-        shift = 0
-        for j, (s, so) in enumerate(zip(sp, rec["spans"]), 1):
-            c = so["pick"]
-            a = s.start + shift
-            b = a + len(s.cands[c])
-            shift += len(s.cands[c]) - (s.end - s.start)
+        for j, (ra, rb) in enumerate(ranges, 1):
             for ti, s0 in enumerate(starts):
-                if a <= s0 < b or (s0 < a < s0 + len(toks[ti])):
+                if ra <= s0 < rb or (s0 < ra < s0 + len(toks[ti])):
                     tok_span[ti] = j
                     if not decided[j - 1]:
                         bad[ti] = True
+        bad = [b or "\x00" in t for b, t in zip(bad, toks)]
         times = sc.align(lp, label)
         if times is None:
             st["align"] += 1
@@ -182,8 +179,10 @@ def recrop_shard(vol: str, sc, tag: str, keep_audio: bool = True) -> dict:
         times = [(tm[0] if tm[0] is not None else 0.0, tm[1] if tm[1] is not None else 0.0) for tm in times]
         cuts = gap_cuts(times, tok_span, x)
         st["rows"] += 1
+        base = quiet_crops(cuts, bad, rnd)
+        ons = onset_crops(cuts, bad, tok_span, [c for c in base], rnd)
         got = 0
-        for ci, (a, b) in enumerate(quiet_crops(cuts, bad, rnd)):
+        for ci, (a, b) in enumerate(base + ons):
             if not any(tok_span[a:b]):
                 continue
             txt = " ".join(toks[a:b])
@@ -196,11 +195,12 @@ def recrop_shard(vol: str, sc, tag: str, keep_audio: bool = True) -> dict:
             out.append({"audio_filepath": wav, "duration": round(d, 3), "text": txt, "src": uid,
                         "wps": round(len(txt.split()) / max(d, 0.1), 2),
                         "kinds": sorted({sp[j - 1].kind for j in set(tok_span[a:b]) if j}),
-                        "video": r["original_audio_id"], "quiet": True})
+                        "video": r["original_audio_id"], "onset": bool(tok_span[a]) and ci >= len(base)})
             got += 1
+            st["onset"] += ci >= len(base)
         st["no_cut"] += got == 0
-    os.makedirs(f"{vol}/d1/crops2", exist_ok=True)
-    with open(f"{vol}/d1/crops2/{tag}.jsonl", "w") as fo:
+    os.makedirs(f"{vol}/{out_dir}", exist_ok=True)
+    with open(f"{vol}/{out_dir}/{tag}.jsonl", "w") as fo:
         for c in out:
             fo.write(json.dumps(c, ensure_ascii=False) + "\n")
     st.update(shard=tag, crops=len(out), crop_h=round(sum(c["duration"] for c in out) / 3600, 3))

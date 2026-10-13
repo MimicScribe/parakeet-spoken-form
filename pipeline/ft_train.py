@@ -3,7 +3,9 @@
 Saves only the trainable weights (decoder + joint, ~18M params) to /vol/exp/<run>/decoder_joint.pt.
 """
 
+import collections
 import json
+import re
 import os
 import random
 import time
@@ -442,6 +444,188 @@ def span_mask(spm, pairs, batch, width, device):
     return span.to(device)
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# RETRAIN-3 auxiliary losses (plan R3.12.3 / R3.12.1 N1-N4 / review #4). One joint pass per sub-batch over EVERY row:
+#   tag      English  blank+gnorm KL      punct KL         token KL  wf_pen  en_pen
+#   anchor   yes      full                full             -         yes     -
+#   anchor_num yes    -  (v10pt numwords exemption)  -     -         yes     -
+#   span     yes      prefix only (u < first number word - 1 word: the teacher, forced on the student's spoken
+#                     number tokens, is off-distribution after them)   prefix only  -  yes  -
+#   nonen    no       full                full             yes       -       yes
+#   free     yes      -                   -                -         yes     -
+# wf_pen / en_pen: -log(1 - P(set | non-blank)) at the student's emitting cells (P(non-blank) > 0.1, detached),
+# averaged per row over that row's emitting cells, then over rows: conditioned on non-blank so it never moves the blank
+# logit, per-row so it does not scale with T x U.
+WF_CHARS = re.compile(r"[0-9$€£¥¢₹₩₽%#/+°⁇²³¹½¼¾⅓⅔]")
+EN_NUM_WORDS = ("eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty "
+                "sixty seventy eighty ninety hundred thousand first third").split()  # no "second" (fr), six, ten, nine
+
+
+def wf_piece_ids(spm) -> list[int]:
+    return [i for i in range(spm.get_piece_size()) if WF_CHARS.search(spm.id_to_piece(i))]
+
+
+def en_num_piece_ids(spm) -> list[int]:
+    want = {"▁" + w for w in EN_NUM_WORDS}
+    return [i for i in range(spm.get_piece_size()) if spm.id_to_piece(i) in want]
+
+
+def numberish(word: str) -> bool:
+    from common import NUMBER_WORDS
+
+    w = word.lower().strip(".,;:!?\"'")
+    return bool(NUMBER_WORDS.search(w)) or w in {"one", "oh", "zero", "first", "second", "third", "fourth", "fifth",
+                                                 "sixth", "seventh", "eighth", "ninth", "tenth", "hundredth"}
+
+
+def prefix_len(spm, ids) -> int:
+    """Label positions [0, k) before the first number word, minus one word (number_span misses "Q one", "COVID")."""
+    words = row_words(spm, ids)
+    for wi, (w, a, b) in enumerate(words):
+        if numberish(w):
+            return words[wi - 1][1] if wi > 0 else 0
+    return len(ids) + 1
+
+
+def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: float = 30.0, tok_weight: float = 1.0,
+                  wf_weight: float = 1.0, en_weight: float = 1.0, sub_batch: int = 4, emit_p: float = 0.1):
+    import copy
+
+    teacher_dec, teacher_joint = copy.deepcopy(m.decoder).eval(), copy.deepcopy(m.joint).eval()
+    for p in list(teacher_dec.parameters()) + list(teacher_joint.parameters()):
+        p.requires_grad_(False)
+    m._kl_teacher = (teacher_dec, teacher_joint)
+    spm = m.tokenizer.tokenizer
+    term_t = torch.tensor([i for i in range(spm.get_piece_size())
+                           if spm.id_to_piece(i).lstrip("▁") in {".", "?", "!", "...", "…"}])
+    wf_t, en_t = torch.tensor(wf_piece_ids(spm)), torch.tensor(en_num_piece_ids(spm))
+    print(f"R3 losses: wf pieces {len(wf_t)} e.g. {[spm.id_to_piece(int(i)) for i in wf_t[:12]]}; "
+          f"en_num pieces {[spm.id_to_piece(int(i)) for i in en_t]}; tags {dict(collections.Counter(row_tags.values()))}",
+          flush=True)
+    orig_step = m.training_step
+    nb = 8193
+
+    def training_step(batch, batch_idx):
+        out = orig_step(batch, batch_idx)
+        signal, signal_len, tokens, tokens_len = batch[:4]
+        tdec, tjoint = m._kl_teacher
+        tdec.to(signal.device), tjoint.to(signal.device)
+        dev = signal.device
+        with torch.no_grad():
+            feats, feats_len = m.preprocessor(input_signal=signal, length=signal_len)
+            enc, enc_len = m.encoder(audio_signal=feats, length=feats_len)
+            t_g, _, _ = tdec(targets=tokens, target_length=tokens_len)
+        with NoDropout(m.decoder):
+            s_g, _, _ = m.decoder(targets=tokens, target_length=tokens_len)
+        f = enc.transpose(1, 2)
+        B = f.shape[0]
+        row_toks = [tokens[i, :int(tokens_len[i])].tolist() for i in range(B)]
+        tags = [row_tags.get(tuple(t), "free") for t in row_toks]
+        W = int(tokens_len.max()) + 1
+        klu = torch.zeros(B, W, dtype=torch.bool)  # label positions where KL applies
+        for i, tg in enumerate(tags):
+            if tg in ("anchor", "nonen"):
+                klu[i] = True
+            elif tg == "span":
+                klu[i, :min(prefix_len(spm, row_toks[i]), W)] = True
+        klu = klu.to(dev)
+        is_nonen = torch.tensor([tg == "nonen" for tg in tags], device=dev)
+        tid, wf, en = term_t.to(dev), wf_t.to(dev), en_t.to(dev)
+
+        def chunk(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, klu_sl, nonen_sl):
+            with NoDropout(m.joint):
+                s_logits = m.joint.joint(f_sl, s_sl).float()
+            with torch.no_grad():
+                t_logits = tjoint.joint(f_sl, t_sl).float()
+            T, U = s_logits.shape[1], s_logits.shape[2]
+            mask = ((torch.arange(T, device=dev)[None, :, None] < enc_len_sl[:, None, None])
+                    & (torch.arange(U, device=dev)[None, None, :] <= tok_len_sl[:, None, None]))
+            kmask = mask & klu_sl[:, None, :U]
+            s_all, t_all = s_logits[..., :nb].logsumexp(-1), t_logits[..., :nb].logsumexp(-1)
+            s_nbz, t_nbz = s_logits[..., :nb - 1].logsumexp(-1), t_logits[..., :nb - 1].logsumexp(-1)
+            s_lb, t_lb = s_logits[..., nb - 1] - s_all, t_logits[..., nb - 1] - t_all
+            s_lnb, t_lnb = s_nbz - s_all, t_nbz - t_all
+            kl_blank = t_lb.exp() * (t_lb - s_lb) + t_lnb.exp() * (t_lnb - s_lnb)
+            bmask = kmask & (t_lnb.exp() > 0.9)  # gnorm
+            s_lt, t_lt = s_logits[..., tid].logsumexp(-1) - s_nbz, t_logits[..., tid].logsumexp(-1) - t_nbz
+            s_lo = torch.log((1 - s_lt.exp()).clamp(min=1e-7))
+            t_lo = torch.log((1 - t_lt.exp()).clamp(min=1e-7))
+            kl_p = t_lt.exp() * (t_lt - s_lt) + t_lo.exp() * (t_lo - s_lo)
+            tmask = mask & nonen_sl[:, None, None]
+            s_lp, t_lp = s_logits[..., :nb] - s_all[..., None], t_logits[..., :nb] - t_all[..., None]
+            kl_t = (t_lp.exp() * (t_lp - s_lp)).sum(-1)
+            emit = mask & (s_lnb.detach().exp() > emit_p)
+
+            def pen(ids, rows_sl):
+                p = (s_logits[..., ids].logsumexp(-1) - s_nbz).exp().clamp(max=1 - 1e-6)
+                e = emit & rows_sl[:, None, None]
+                per_row = (-torch.log1p(-p) * e).sum((1, 2)) / e.sum((1, 2)).clamp(min=1)
+                return per_row.sum(), rows_sl.sum()
+
+            wf_s, wf_n = pen(wf, ~nonen_sl)
+            en_s, en_n = pen(en, nonen_sl) if len(en) else (torch.zeros((), device=dev),) * 2
+            return ((kl_blank * bmask).sum(), bmask.sum(), (kl_p * kmask).sum(), kmask.sum(),
+                    (kl_t * tmask).sum(), tmask.sum(), wf_s, wf_n.float(), en_s, en_n.float())
+
+        acc = [torch.zeros((), device=dev) for _ in range(10)]
+        for j in range(0, B, sub_batch):
+            sl = torch.arange(j, min(B, j + sub_batch), device=dev)
+            u = int(tokens_len[sl].max()) + 1
+            t = int(enc_len[sl].max())
+            r_ = torch.utils.checkpoint.checkpoint(
+                chunk, f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
+                enc_len[sl], tokens_len[sl], klu[sl], is_nonen[sl], use_reentrant=False)
+            acc = [a + b for a, b in zip(acc, r_)]
+        kl_b = acc[0] / acc[1].clamp(min=1)
+        kl_p = acc[2] / acc[3].clamp(min=1)
+        kl_t = acc[4] / acc[5].clamp(min=1)
+        wf_pen = acc[6] / acc[7].clamp(min=1)
+        en_pen = acc[8] / acc[9].clamp(min=1)
+        aux = kl_weight * kl_b + punct_weight * kl_p + tok_weight * kl_t + wf_weight * wf_pen + en_weight * en_pen
+        m._r3_parts = {"rnnt": out["loss"].detach(), "kl_b": kl_b.detach(), "kl_p": kl_p.detach(),
+                       "kl_t": kl_t.detach(), "wf": wf_pen.detach(), "en": en_pen.detach()}
+        out["loss"] = out["loss"] + aux
+        if batch_idx % 10 == 0:
+            print("r3 " + " ".join(f"{k} {v.item():.5f}" for k, v in m._r3_parts.items())
+                  + f" tags {dict(collections.Counter(tags))}", flush=True)
+        return out
+
+    m.training_step = training_step
+
+
+class L2SP(pl.Callback):
+    """Decoupled pull toward v10pt after every optimizer step: p <- p - lr * c * (p - p_v10pt). The anchor is loaded
+    from the v10pt FILE (also on resume: init_from is skipped then). The written-form output rows of the joint's last
+    layer are exempt (N2: they must stay free to keep non-English digits at stock strength)."""
+
+    def __init__(self, anchor_path: str, c: float, exempt_rows: list[int]):
+        self.path, self.c, self.exempt = anchor_path, c, exempt_rows
+        self.anchor = None
+
+    def on_train_batch_end(self, trainer, m, outputs, batch, batch_idx):
+        if not self.c:
+            return
+        if self.anchor is None:
+            sd = torch.load(self.path, map_location="cpu")
+            self.anchor = {n: sd[n].to(p.device, p.dtype) for n, p in m.named_parameters() if p.requires_grad and n in sd}
+            print(f"L2SP c={self.c}: {len(self.anchor)} tensors anchored to {self.path}", flush=True)
+        lr = trainer.optimizers[0].param_groups[0]["lr"]
+        last = "joint.joint_net." + str(len(m.joint.joint_net) - 1)
+        with torch.no_grad():
+            drift = 0.0
+            for n, p in m.named_parameters():
+                a = self.anchor.get(n)
+                if a is None:
+                    continue
+                d = p.data - a
+                if n.startswith(last) and self.exempt:
+                    d[self.exempt] = 0
+                p.data.sub_(d, alpha=lr * self.c)
+                drift += float((d.float() ** 2).sum())
+        if batch_idx % 50 == 0:
+            print(f"l2sp drift {drift ** 0.5:.4f}", flush=True)
+
+
 MERGED_KL = True  # one joint pass for all KL terms (2026-10-13 speed fix)
 KL_EQ_CHECK = os.environ.get("KL_EQ_CHECK") == "1"  # first 3 batches: also run the separate passes and print both
 
@@ -486,9 +670,15 @@ def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_text
             src = keep
         print(f"mix {path}: {len(src)} rows, {sum(x['duration'] for x in src) / 3600:.2f} h")
         if tag is not None and tagged is not None:
-            # explicit KL treatment: "anchor" | "span" | "nonen" | "free"
+            # explicit KL treatment: "anchor" | "anchor_num" | "span" | "nonen" | "free"
             if tag != "free":
                 tagged.setdefault(tag, set()).update(x["text"] for x in src)
+            if tag == "anchor_num":  # LSPC rows: the ones with number words are KL-exempt (v10pt's numwords rule)
+                from common import NUMBER_WORDS
+
+                plain = {x["text"] for x in src if not NUMBER_WORDS.search(x["text"])}
+                tagged["anchor_num"] -= plain
+                tagged.setdefault("anchor", set()).update(plain)
         elif replay_texts is not None and path.startswith("replay/"):
             if kl_exempt and kl_exempt in path:
                 exempt.update(x["text"] for x in src)
@@ -538,7 +728,9 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3, spec_augment: bool = True,
           kl_weight: float = 0.0, kl_replay_only: bool = False, init_from: str = "", kl_terms: str = "blank,dur",
           seed: int = 1, kl_exempt: str = "", kl_blank_scale: float = 1.0, kl_punct: float = 0.0,
-          kl_punct_rows: str = "all", kl_tok: float = 0.0, resume: bool = True, stage_dir: str = ""):
+          kl_punct_rows: str = "all", kl_tok: float = 0.0, resume: bool = True, stage_dir: str = "",
+          r3: bool = False, wf_weight: float = 1.0, en_weight: float = 1.0, l2sp_c: float = 0.0,
+          l2sp_anchor: str = ""):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
     entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists."""
@@ -548,11 +740,16 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     os.makedirs(exp, exist_ok=True)
     last = f"{exp}/last.ckpt"
     resuming = resume and os.path.exists(last)
+    sampler_seed = seed
     if resuming:
-        # lhotse restarts its sampler on resume: a NEW data seed so the resumed run does not replay the batches it
-        # already saw (NeMo lhotse docs; Opus review B5). Loss continuity is checked within noise, not identity.
-        seed = seed + 1000 * int(open(last + ".step").read().strip() or 0)
-        print(f"resume: data seed -> {seed}")
+        # lhotse restarts its sampler on resume: a NEW sampler seed so the resumed run does not replay the batches it
+        # already saw (NeMo lhotse docs; Opus review B5). R3: the MIX (which rows) stays the same — only the order
+        # changes (retrain-3 review: reseeding write_mix changed the data mid-run).
+        step0 = int(open(last + ".step").read().strip() or 0)
+        sampler_seed = seed + 1000 * step0
+        if not r3:
+            seed = sampler_seed
+        print(f"resume: sampler seed -> {sampler_seed}")
     replay_texts = set()
     tagged: dict = {}
     manifest = f"{stage_dir}/train_manifest.jsonl" if stage_dir else f"{exp}/train_manifest.jsonl"
@@ -564,7 +761,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         import shutil
 
         shutil.copyfile(manifest, f"{exp}/train_manifest.jsonl")  # the record of what was trained on
-    if tagged:
+    if tagged and not r3:
         replay_texts |= tagged.get("anchor", set())
         # a label in two tags keeps the stricter one: anchor > nonen > span
         span_texts = tagged.get("span", set()) - replay_texts
@@ -584,7 +781,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
             "manifest_filepath": manifest, "sample_rate": 16000,
             "use_lhotse": True, "text_field": "text", "batch_duration": batch_duration,
             "max_duration": 20.0, "min_duration": 0.5, "use_bucketing": True, "num_buckets": 10,
-            "bucket_buffer_size": 20000, "shuffle": True, "shuffle_buffer_size": 10000, "seed": seed,
+            "bucket_buffer_size": 20000, "shuffle": True, "shuffle_buffer_size": 10000, "seed": sampler_seed,
             "num_workers": 8, "pin_memory": True, "skip_missing_manifest_entries": False})
     m.setup_training_data(m.cfg.train_ds)
     if not spec_augment:
@@ -596,7 +793,22 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     m.encoder.freeze()
     if "blankspan" in kl_terms:
         assert kl_replay_only, "blankspan only works with kl_replay_only (span rows are matched by label)"
-    if kl_weight or kl_punct:
+    extra_cb = []
+    if r3:
+        ids = lambda t: tuple(m.tokenizer.text_to_ids(t))  # noqa: E731
+        row_tags = {}
+        for tag in ("free", "span", "anchor_num", "nonen", "anchor"):  # later = stricter wins
+            for t in tagged.get(tag, ()):
+                row_tags[ids(t)] = tag
+        add_r3_losses(m, row_tags, kl_weight=kl_weight, punct_weight=kl_punct, tok_weight=kl_tok,
+                      wf_weight=wf_weight, en_weight=en_weight)
+        if l2sp_c:
+            last_layer = m.joint.joint_net[-1].weight.shape[0]
+            exempt = [i for i in wf_piece_ids(m.tokenizer.tokenizer) if i < last_layer]
+            extra_cb.append(L2SP(l2sp_anchor, l2sp_c, exempt))
+            weight_decay = 0.0
+            print(f"L2SP toward {l2sp_anchor} c={l2sp_c}, {len(exempt)} written-form rows exempt; AdamW decay 0")
+    elif kl_weight or kl_punct:
         add_blank_duration_kl(m, kl_weight, only_texts=replay_texts if kl_replay_only else None, terms=kl_terms,
                               blank_scale=kl_blank_scale, punct_weight=kl_punct, punct_rows=kl_punct_rows,
                               span_texts=span_texts, nonen_texts=nonen_texts, tok_weight=kl_tok)
@@ -625,7 +837,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
                          limit_train_batches=max_steps, limit_val_batches=0, num_sanity_val_steps=0,
                          use_distributed_sampler=False, gradient_clip_val=1.0, logger=False,
                          enable_checkpointing=False, enable_progress_bar=False,
-                         callbacks=[KeepEncoderFrozen(), StepLog()] + extra
+                         callbacks=[KeepEncoderFrozen(), StepLog()] + extra + extra_cb
                          + ([SaveEvery(exp, save_every, on_save, last)] if save_every else []))
     m.set_trainer(trainer)
     m.setup_optimization(OmegaConf.create({

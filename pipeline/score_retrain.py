@@ -19,6 +19,25 @@ EN_NUM = re.compile(r"\b(two|three|four|five|seven|eight|nine|eleven|twelve|thir
                     r"seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|"
                     r"thousand|billion|percent)\b", re.I)
 FILL = re.compile(r"\b(uh|um|uhm|er|erm|mm|hmm|mhm)\b", re.I)
+# retrain-3 (R3.12.5 / R3.15): language-aware leak words (homographs per language removed), full written-form set,
+# the "twenty thousand <1-99>" blend (not followed by a scale), chimeras (digits glued to letters / number word + ".5")
+LEAK_EXTRA = ["zero", "six", "ten", "point", "million", "first", "second", "third"]
+LEAK_HOMOGRAPH = {"fr": {"six", "million", "point", "second"}, "nl": {"ten", "zero"}, "it": {"zero"}, "pt": {"zero"},
+                  "es": {"million"}, "de": {"million"}, "sv": {"million"}, "da": {"million"}, "ro": {"zero"},
+                  "mt": {"ten"}}
+WF = re.compile(r"[0-9$€£¥¢₹₩₽%#/+°\u2047²³¹½¼¾]")
+_U = "one|two|three|four|five|six|seven|eight|nine"
+_T = "ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
+_D = "twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety"
+BLEND = re.compile(rf"\btwenty thousand (?:(?:{_D})(?:[ -](?:{_U}))?|{_T}|{_U})\b(?![ -](?:hundred|thousand|million|"
+                   rf"billion|trillion|point|and)\b)", re.I)
+CHIMERA = re.compile(rf"[a-z]{{2,}}\d|\d[a-z]{{3,}}\b|\b(?i:zero|{_U}|{_T}|{_D})[.,]\d")  # "Q1" (a code) is WF, not here
+
+
+def leak_re(lang):
+    words = [w for w in EN_NUM.pattern[5:-5].split("|")] + LEAK_EXTRA
+    words = [w for w in words if w not in LEAK_HOMOGRAPH.get(lang, set())]
+    return re.compile(r"\b(" + "|".join(sorted(set(words))) + r")\b", re.I)
 
 
 def load(root, run, name):
@@ -30,6 +49,7 @@ def load(root, run, name):
 
 def norm(t):
     t = re.sub(r"[^\w' ]", " ", t.lower())
+    t = FILL.sub(" ", t)  # filler-free (owner 2026-10-13: fillers are never gated)
     return re.sub(r"\s+", " ", t).strip()
 
 
@@ -107,7 +127,8 @@ def lang_of(r):
 
 
 def digit_runs(t):
-    return sorted(re.sub(r"[.,\u00a0 ]", "", d) for d in re.findall(r"\d+(?:[.,\u00a0 ]\d+)*", t))
+    # "49, 99" == "49,99" (one optional space after a separator inside a number: review #5)
+    return sorted(re.sub(r"[.,\u00a0 ]", "", d) for d in re.findall(r"\d+(?:(?:[.,]\s?|[\u00a0 ])\d+)*", t))
 
 
 def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"):
@@ -120,15 +141,27 @@ def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"
         by[lang_of(r)].append(r)
     s["wer_fleurs"] = {k: wer(v) for k, v in sorted(by.items())}
     for name in ("vox_dev", "fleurs_num"):
-        by = defaultdict(lambda: [0, 0])
+        by = defaultdict(lambda: [0, 0, 0])
         for r in load(root, run, name):
             k = lang_of(r)
             by[k][0] += 1
-            by[k][1] += bool(EN_NUM.search(r["hyp"]))
+            by[k][1] += bool(leak_re(k).search(r["hyp"]))
+            by[k][2] += digit_runs(r["hyp"]) == digit_runs(r["ref"].split("\t")[0])
         s[f"leak_{name}"] = {k: v[1] for k, v in sorted(by.items())}
         s[f"leak_{name}_total"] = sum(v[1] for v in by.values())
-    for name in ("e22_other", "lspc_dev", "d1_dev", "e22_numbers"):
-        s[f"digits_{name}"] = sum(bool(re.search(r"\d", r["hyp"])) for r in load(root, run, name))
+        s[f"digitok_{name}"] = {k: f"{v[2]}/{v[0]}" for k, v in sorted(by.items())}
+        s[f"digitok_{name}_total"] = sum(v[2] for v in by.values())
+    blend = chim = 0
+    for name in ("e22_other", "lspc_dev", "d1_dev", "e22_numbers", "e21_dev", "fast", "adv"):
+        rows = load(root, run, name)
+        if name in ("e22_other", "lspc_dev", "d1_dev", "e22_numbers"):
+            s[f"digits_{name}"] = sum(bool(WF.search(r["hyp"])) for r in rows)
+            s[f"wf_tokens_{name}"] = sum(len(WF.findall(r["hyp"])) for r in rows)
+        en_rows = [r for r in rows if name != "adv" or r["ref"].split("\t")[2] == "en"]
+        blend += sum(len(BLEND.findall(r["hyp"])) for r in en_rows)
+        chim += sum(len(CHIMERA.findall(r["hyp"])) for r in en_rows)
+    s["blend_twenty_thousand"] = blend
+    s["chimeras"] = chim
     nz = load(root, run, "noise")
     s["noise_numbers"] = sum(bool(EN_NUM.search(r["hyp"]) or re.search(r"\d", r["hyp"])) for r in nz)
     s["noise_words"] = sum(len(r["hyp"].split()) for r in nz)
@@ -139,7 +172,11 @@ def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"
     # non-English: the contract is STOCK's digits (labels were stock's), so a row is right when its digit runs equal
     # stock's on the same clip and no English number word appears (the script's canonical values like "1200000000"
     # for "1,2 mil millones" are not a writing anyone produces)
-    stock_d = {r["id"]: digit_runs(r["hyp"]) for r in load(root, stock_run, "adv")}
+    stock_rows = load(root, stock_run, "adv")
+    stock_d = {r["id"]: digit_runs(r["hyp"]) for r in stock_rows}
+    # pre-registered from the STOCK decode only: stock wrote English number words -> the TTS clip sounds English
+    stock_en = {r["id"] for r in stock_rows if r["ref"].split("\t")[2] != "en" and EN_NUM.search(r["hyp"])}
+    adv3 = defaultdict(lambda: [0, 0])
     for r in load(root, run, "adv"):
         text, exp, lang, cat, split = r["ref"].split("\t")
         if split != want_split or r["id"] in exclude:
@@ -149,7 +186,12 @@ def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"
         else:
             ok = digit_runs(r["hyp"]) == stock_d.get(r["id"]) and not EN_NUM.search(r["hyp"])
         if lang != "en":
-            adv_leak += bool(EN_NUM.search(r["hyp"]))
+            adv_leak += bool(leak_re(lang).search(r["hyp"]))
+            cs = cat.startswith("codeswitch")
+            for view, inc in (("all", True), ("nocs", not cs), ("clean", not cs and r["id"] not in stock_en)):
+                if inc:
+                    adv3[view][0] += 1
+                    adv3[view][1] += ok
         key = ("en" if lang == "en" else "xx") + ":" + cat
         adv[key][0] += 1
         adv[key][1] += ok
@@ -159,6 +201,8 @@ def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"
     s["adv_xx_ok"] = sum(v[1] for k, v in adv.items() if k.startswith("xx:"))
     s["adv_xx_n"] = sum(v[0] for k, v in adv.items() if k.startswith("xx:"))
     s["adv_xx_leak"] = adv_leak
+    s["adv_xx_views"] = {k: f"{v[1]}/{v[0]}" for k, v in adv3.items()}
+    s["adv_xx_clean_ok"] = adv3["clean"][1]
     # fast: refs "caption\tgold\ttag"; D1 (macOS say, literal readings) = reading match with word boundaries;
     # E22 = value match. Arm selection uses D1 only (D.9 / Opus H4); E22 is reported.
     fast = defaultdict(lambda: [0, 0])
@@ -238,32 +282,36 @@ def e21x_values(root, run, refs_dir):
     return dict(tot)
 
 
-SELECT_ORDER = [("leak", -1), ("fast_d1_ok", +1), ("adv_en_ok", +1), ("wer_dev", -1)]
+# RETRAIN-3 frozen selection order (plan R3.12.5; written before any retrain-3 number was read). Lexicographic; a
+# difference within the stated noise band passes to the next key.
+SELECT_ORDER = [("blend", -1, 0), ("en_wf", -1, 2), ("chimeras", -1, 0), ("adv_en_ok", +1, 3), ("fast_d1_ok", +1, 5),
+                ("nonen_leak", -1, 1), ("fleurs_worst", -1, 0.1), ("wer_dev", -1, 0.1)]
 
 
 def sel_metrics(s):
-    return {"leak": s["leak_vox_dev_total"] + s["leak_fleurs_num_total"] + s["adv_xx_leak"],
-            "fast_d1_ok": s["fast_d1_ok"], "adv_en_ok": s["adv_en_ok"],
+    fl = [v for v in (s.get("wer_fleurs_delta") or {}).values() if v is not None]
+    return {"blend": s["blend_twenty_thousand"], "en_wf": s["digits_e22_numbers"] + s["digits_d1_dev"],
+            "chimeras": s["chimeras"], "adv_en_ok": s["adv_en_ok"], "fast_d1_ok": s["fast_d1_ok"],
+            "nonen_leak": s["leak_vox_dev_total"] + s["leak_fleurs_num_total"],
+            "fleurs_worst": max(fl) if fl else 0.0,
             "wer_dev": (s["wer_lspc_dev"] or 0) + (s["wer_d1_dev"] or 0)}
 
 
-def select(res, main_runs, stock_runs):
-    """Pre-registered (V2 'Selection'): MAIN ships unless STOCK-INIT beats it, on the first metric in SELECT_ORDER
-    where the arm means differ by more than the larger within-arm seed spread. Within the chosen arm, seeds are
-    ranked lexicographically by SELECT_ORDER."""
-    m = {r: sel_metrics(res[r]) for r in main_runs + stock_runs}
-    arm = "main"
-    for k, sign in SELECT_ORDER:
-        a = [m[r][k] for r in main_runs]
-        b = [m[r][k] for r in stock_runs]
-        spread = max(max(a) - min(a), max(b) - min(b))
-        diff = (sum(b) / len(b) - sum(a) / len(a)) * sign
-        if abs(diff) > spread:
-            arm = "stockinit" if diff > 0 else "main"
+def select(res, runs, baseline=None):
+    """Pick one run: walk SELECT_ORDER; at each key keep the runs within the noise band of the best; stop when one is
+    left (ties after the last key: the first listed). `baseline` (e.g. v10pt) fills wer_fleurs_delta."""
+    if baseline is not None:
+        for r in runs:
+            res[r]["wer_fleurs_delta"] = {k: (v - res[baseline]["wer_fleurs"].get(k, v))
+                                          for k, v in res[r]["wer_fleurs"].items() if v is not None}
+    m = {r: sel_metrics(res[r]) for r in runs}
+    alive = list(runs)
+    for k, sign, band in SELECT_ORDER:
+        best = max(sign * m[r][k] for r in alive)
+        alive = [r for r in alive if best - sign * m[r][k] <= band]
+        if len(alive) == 1:
             break
-    runs = main_runs if arm == "main" else stock_runs
-    best = sorted(runs, key=lambda r: tuple(-sign * m[r][k] for k, sign in SELECT_ORDER))[0]
-    return {"arm": arm, "run": best, "metrics": m}
+    return {"run": alive[0], "tied": alive, "metrics": m}
 
 
 if __name__ == "__main__":

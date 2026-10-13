@@ -637,27 +637,27 @@ class Recropper:
         self.sc = recrop.W2VScorer()
 
     @modal.method()
-    def shard(self, tag: str) -> dict:
+    def shard(self, tag: str, rows_dir: str = "d1/rows3") -> dict:
         import recrop
 
-        st = recrop.recrop_shard(VOL, self.sc, tag)
+        st = recrop.recrop_shard(VOL, self.sc, tag, rows_dir=rows_dir)
         vol.commit()
         return st
 
 
 @app.function(image=scan_image, volumes={VOL: vol}, timeout=6 * 3600)
-def s3_recrop(only: str = ""):
+def s3_recrop(only: str = "", rows_dir: str = "d1/rows3"):
     """Quiet-gap re-crop of every labelled English shard -> /vol/d1/crops2 (retrain-3)."""
     import glob
     import json
     import os
 
     vol.reload()
-    tags = sorted(os.path.basename(f)[:-6] for f in glob.glob(f"{VOL}/d1/rows/*.jsonl") if not f.endswith("_pct.jsonl"))
+    tags = sorted(os.path.basename(f)[:-6] for f in glob.glob(f"{VOL}/{rows_dir}/*.jsonl") if not f.endswith("_pct.jsonl"))
     if only:
         tags = [t for t in tags if t in only.split(",")]
     tot = {}
-    for st in Recropper().shard.map(tags, return_exceptions=True):
+    for st in Recropper().shard.map(tags, kwargs={"rows_dir": rows_dir}, return_exceptions=True):
         if isinstance(st, Exception):
             print("FAIL", repr(st)[:400])
             continue
