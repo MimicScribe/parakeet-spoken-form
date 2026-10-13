@@ -457,9 +457,9 @@ def span_mask(spm, pairs, batch, width, device):
 # averaged per row over that row's emitting cells, then over rows: conditioned on non-blank so it never moves the blank
 # logit, per-row so it does not scale with T x U.
 WF_CHARS = re.compile(r"[0-9$€£¥¢₹₩₽%#/+°⁇²³¹½¼¾⅓⅔]")
-EN_NUM_WORDS = ("one two three four five seven eight eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen "
+EN_NUM_WORDS = ("two three four five seven eight eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen "
                 "nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand first third").split()
-# no "second" (fr), six, ten (pl/cs/sk/nl), nine. Only whole-word pieces count (en_num_piece_ids); the multi-piece ones
+# no "one" (pl "they"), "second" (fr), six, ten (pl/cs/sk/nl), nine. Only whole-word pieces count (en_num_piece_ids); the multi-piece ones
 # are guarded by the token KL to stock on non-English rows, not by en_pen (retrain-3 reviews).
 
 
@@ -736,8 +736,10 @@ def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_text
             if tag in ("anchor", "anchor_num"):
                 # rows that say a number (numberish words, Roman numerals) are KL-exempt (v10pt's numwords rule): the
                 # stock teacher forced on spoken numbers derails (external review: 2,666 such rows were full-anchored)
-                def says_number(t):
-                    return any(numberish(w) for w in t.split()) or re.search(r"\b(?:II|III|IV|VI|VII|VIII|IX|XI|XII)\b|"
+                from common import NUMBER_WORDS
+
+                def says_number(t):  # NUMBER_WORDS (not numberish: "one"/"second" are mostly ordinary words) + Roman
+                    return NUMBER_WORDS.search(t) is not None or re.search(r"\b(?:II|III|IV|VI|VII|VIII|IX|XI|XII)\b|"
                                                                            r"\bWorld War I\b", t) is not None
 
                 num = {x["text"] for x in src if says_number(x["text"])}

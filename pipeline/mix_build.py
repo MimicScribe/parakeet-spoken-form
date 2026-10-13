@@ -590,7 +590,10 @@ def patch3(vol: str, dec: dict, seed: int = 3) -> dict:
 def trim_d1(vol: str, hours: float, seed: int = 7) -> dict:
     """The F4 share trim (R3.17: cap order = D1 plain int/year first): drop `hours` of plain int/year crops (never
     onset or keep-all kinds) from mix3/d1.jsonl. Applied 2026-10-13 with hours=4.2 (share 41.5% -> 39.5%)."""
-    rows = _rows(f"{vol}/mix3/d1.jsonl")
+    src = f"{vol}/mix3/d1.pre_trim.jsonl"
+    if not os.path.exists(src):  # idempotent: always trim from the untrimmed file
+        os.replace(f"{vol}/mix3/d1.jsonl", src)
+    rows = _rows(src)
     pool = [i for i, x in enumerate(rows) if not (x["onset"] or set(x["kinds"]) & KEEP_ALL_KINDS)]
     random.Random(seed).shuffle(pool)
     drop, acc = set(), 0.0
@@ -600,7 +603,6 @@ def trim_d1(vol: str, hours: float, seed: int = 7) -> dict:
         drop.add(i)
         acc += rows[i]["duration"]
     keep = [x for i, x in enumerate(rows) if i not in drop]
-    os.replace(f"{vol}/mix3/d1.jsonl", f"{vol}/mix3/d1.pre_trim.jsonl")
     _write(f"{vol}/mix3/d1.jsonl", keep)
     return {"rows": [len(rows), len(keep)], "dropped_h": round(acc / 3600, 2)}
 
@@ -611,11 +613,23 @@ def restore_unk_nonen(vol: str, min_h: float = 0.4, tol: float = 0.1) -> dict:
     reproduces stock (no new behaviour). For languages under `min_h` in mix3/d2, add back their audited \u2047 rows."""
     import soundfile as sf
 
-    d2 = _rows(f"{vol}/mix3/d2.jsonl")
+    base = f"{vol}/mix3/d2.pre_unk.jsonl"
+    d2 = _rows(base if os.path.exists(base) else f"{vol}/mix3/d2.jsonl")  # idempotent: rebuild from the pre-restore file
     have = {}
     for x in d2:
         have[x["lang"]] = have.get(x["lang"], 0) + x["duration"] / 3600
     src = [x for f in sorted(glob.glob(f"{vol}/d2/*/digit.jsonl")) for x in _rows(f) if "\u2047" in x["text"]]
+    eval_ng, eval_paths = set(), set()  # the build3 eval dedupe (re-review: restored rows skipped it)
+    for f in glob.glob(f"{vol}/beds/e21x/refs/*.txt"):
+        for t in re.split(r"(?<=[.?!])\s+", open(f).read()):
+            eval_ng |= ngrams(t)
+    for pat in ("e22/all.jsonl", "beds/fleurs/*.jsonl", "beds/vox/*.jsonl", "beds/adv/all.jsonl", "beds/e21_dev/*.jsonl",
+                "beds/fleurs3/*.jsonl", "beds/vox/*3.jsonl"):
+        for x in _rows(f"{vol}/{pat}"):
+            eval_ng |= ngrams(x["text"].split("\t")[0])
+            eval_paths.add(os.path.basename(x.get("audio_filepath", "")))
+    src = [x for x in src if not ngrams(x["text"]) & eval_ng and os.path.basename(x["audio_filepath"]) not in eval_paths]
+    random.Random(11).shuffle(src)
     seen = {x["audio_filepath"] for x in d2}
     added = {}
     for x in src:
@@ -632,8 +646,8 @@ def restore_unk_nonen(vol: str, min_h: float = 0.4, tol: float = 0.1) -> dict:
         d2.append(x)
         have[lang] = have.get(lang, 0) + x["duration"] / 3600
         added[lang] = added.get(lang, 0) + 1
-    if added:
-        if not os.path.exists(f"{vol}/mix3/d2.pre_unk.jsonl"):
-            os.replace(f"{vol}/mix3/d2.jsonl", f"{vol}/mix3/d2.pre_unk.jsonl")
+    if added or os.path.exists(base):
+        if not os.path.exists(base):
+            os.replace(f"{vol}/mix3/d2.jsonl", base)
         _write(f"{vol}/mix3/d2.jsonl", d2)
     return {"added_rows": added, "h_by_lang": {k: round(v, 3) for k, v in sorted(have.items())}}
