@@ -260,7 +260,7 @@ def build(vol: str, seed: int = 1, aug_frac: float = 0.25, d10_h: float = 4.0, d
         stats[f"{name}_rows"] = len(rows)
     stats["d2_h_by_lang"] = {}
     for x in d2:
-        stats["d2_h_by_lang"][x["lang"]] = round(stats["d2_h_by_lang"].get(x["lang"], 0) + x["duration"] / 3600, 2)
+        stats["d2_h_by_lang"][x["lang"]] = stats["d2_h_by_lang"].get(x["lang"], 0) + x["duration"] / 3600
     json.dump(stats, open(f"{out}/stats.json", "w"), indent=1)
     return stats
 
@@ -371,10 +371,10 @@ def mix_share(vol: str, mix: list) -> dict:
 KEEP_ALL_KINDS = {"code", "money", "percent", "scaled", "ordinal", "decade", "clock", "decimal", "ratio", "slash",
                   "phone", "unit", "range"}
 TWO_K_LOW = re.compile(r"\btwo thousand (?:and )?(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
-                       r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty(?: \w+)?)\b(?! (?:hundred|thousand|million|billion))")
-TWO_K_0X = re.compile(r"\btwo thousand (?:and )?(?:one|two|three|four|five|six|seven|eight|nine)\b(?! (?:hundred|thousand|million|billion|\w+teen))")
+                       r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty(?: \w+)?)\b(?! (?:hundred|thousand|million|billion))", re.I)
+TWO_K_0X = re.compile(r"\btwo thousand (?:and )?(?:one|two|three|four|five|six|seven|eight|nine)\b(?! (?:hundred|thousand|million|billion|\w+teen))", re.I)
 TWENTY_YR = re.compile(r"\btwenty (?:ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|"
-                       r"twenty(?: \w+)?)\b")
+                       r"twenty(?: \w+)?)\b", re.I)
 
 
 def build3(vol: str, seed: int = 1, aug_frac: float = 0.25, d1_h: float = 20.0, d10_h: float = 6.0,
@@ -524,6 +524,116 @@ def build3(vol: str, seed: int = 1, aug_frac: float = 0.25, d1_h: float = 20.0, 
         stats[f"{name}_rows"] = len(rows)
     stats["d2_h_by_lang"] = {}
     for x in d2:
-        stats["d2_h_by_lang"][x["lang"]] = round(stats["d2_h_by_lang"].get(x["lang"], 0) + x["duration"] / 3600, 2)
+        stats["d2_h_by_lang"][x["lang"]] = stats["d2_h_by_lang"].get(x["lang"], 0) + x["duration"] / 3600
     json.dump(stats, open(f"{out}/stats.json", "w"), indent=1)
     return stats
+
+
+def _label_noise(x: dict, dec: dict | None) -> str:
+    """Retrain-3 reviews: caption labels that dropped a spoken "percent"/"dollars" (stock AND v10pt hear it), number
+    words with a prime apostrophe ("five' to three'"), "World War I" for a spoken "one"."""
+    t = x["text"]
+    if re.search(r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)'(?!s)", t, re.I):
+        return "prime"
+    if re.search(r"\bWorld War I\b", t):
+        return "roman"
+    if dec:
+        for word, sym in (("percent", "%"), ("dollars?", "$")):
+            n_lab = len(re.findall(rf"\b{word}\b", t, re.I))
+            n_v, n_s = (len(re.findall(rf"\b{word}\b|\{sym}", dec.get(k, ""), re.I)) for k in ("v10", "stock"))
+            if n_v > n_lab and n_s > n_lab:
+                return "dropped_" + word.rstrip("s?")
+    return ""
+
+
+def patch3(vol: str, dec: dict, seed: int = 3) -> dict:
+    """Post-build fixes to /vol/mix3 (retrain-3 reviews), kept as code: (1) the year-ratio cap with case-insensitive
+    regexes on D1 and D10n ("two thousand 1-29" <= "twenty 10-29" / 2.5, dropping plain 2000-2009 rows only); (2) the
+    label-noise drops (_label_noise) on D1 and D10n (D10n rows inherit their source crop's decode via src+text).
+    `dec`: {crop wav: {"stock","v10"}} from d1/dec3. Originals are kept as <part>.pre_patch.jsonl."""
+    r = random.Random(seed)
+    st = {}
+    crop_dec = {}
+    for x in _rows(f"{vol}/d1/crops3_ok/*.jsonl"):
+        if x["audio_filepath"] in dec:
+            crop_dec[(x["src"], x["text"])] = dec[x["audio_filepath"]]
+    for part in ("d1", "d10n"):
+        rows = _rows(f"{vol}/mix3/{part}.jsonl")
+        n0 = len(rows)
+        noise = {}
+        keep = []
+        for x in rows:
+            why = _label_noise(x, crop_dec.get((x.get("src"), x["text"])))
+            if why:
+                noise[why] = noise.get(why, 0) + 1
+            else:
+                keep.append(x)
+        n2k = sum(bool(TWO_K_LOW.search(x["text"])) for x in keep)
+        n20 = sum(bool(TWENTY_YR.search(x["text"])) for x in keep)
+        excess = max(0, int(n2k - n20 / 2.5 + 0.999))
+        cand = [i for i, x in enumerate(keep) if TWO_K_0X.search(x["text"])
+                and not set(x.get("kinds", [])) & KEEP_ALL_KINDS]  # onset year crops count too (R3.16 #2 caps 2000-2009)
+        r.shuffle(cand)
+        drop = set(cand[:excess])
+        keep = [x for i, x in enumerate(keep) if i not in drop]
+        if not os.path.exists(f"{vol}/mix3/{part}.pre_patch.jsonl"):
+            os.replace(f"{vol}/mix3/{part}.jsonl", f"{vol}/mix3/{part}.pre_patch.jsonl")
+        _write(f"{vol}/mix3/{part}.jsonl", keep)
+        st[part] = {"rows_in": n0, "label_noise": noise, "year_in": [n2k, n20], "year_cap_dropped": len(drop),
+                    "year_cap_short": excess - len(drop),
+                    "year_out": [sum(bool(TWO_K_LOW.search(x["text"])) for x in keep),
+                                 sum(bool(TWENTY_YR.search(x["text"])) for x in keep)],
+                    "rows_out": len(keep), "h_out": round(_h(keep), 2)}
+    return st
+
+
+def trim_d1(vol: str, hours: float, seed: int = 7) -> dict:
+    """The F4 share trim (R3.17: cap order = D1 plain int/year first): drop `hours` of plain int/year crops (never
+    onset or keep-all kinds) from mix3/d1.jsonl. Applied 2026-10-13 with hours=4.2 (share 41.5% -> 39.5%)."""
+    rows = _rows(f"{vol}/mix3/d1.jsonl")
+    pool = [i for i, x in enumerate(rows) if not (x["onset"] or set(x["kinds"]) & KEEP_ALL_KINDS)]
+    random.Random(seed).shuffle(pool)
+    drop, acc = set(), 0.0
+    for i in pool:
+        if acc >= hours * 3600:
+            break
+        drop.add(i)
+        acc += rows[i]["duration"]
+    keep = [x for i, x in enumerate(rows) if i not in drop]
+    os.replace(f"{vol}/mix3/d1.jsonl", f"{vol}/mix3/d1.pre_trim.jsonl")
+    _write(f"{vol}/mix3/d1.jsonl", keep)
+    return {"rows": [len(rows), len(keep)], "dropped_h": round(acc / 3600, 2)}
+
+
+def restore_unk_nonen(vol: str, min_h: float = 0.4, tol: float = 0.1) -> dict:
+    """Retrain-3 external review: dropping every stock label with "\u2047" left Greek D2 at 0.05 h (final sigma is not in
+    the vocab, so stock writes \u2047). Stock emits \u2047 there itself, so a "\u2047" label on a NON-ENGLISH row
+    reproduces stock (no new behaviour). For languages under `min_h` in mix3/d2, add back their audited \u2047 rows."""
+    import soundfile as sf
+
+    d2 = _rows(f"{vol}/mix3/d2.jsonl")
+    have = {}
+    for x in d2:
+        have[x["lang"]] = have.get(x["lang"], 0) + x["duration"] / 3600
+    src = [x for f in sorted(glob.glob(f"{vol}/d2/*/digit.jsonl")) for x in _rows(f) if "\u2047" in x["text"]]
+    seen = {x["audio_filepath"] for x in d2}
+    added = {}
+    for x in src:
+        lang = x["lang"]
+        if have.get(lang, 0) >= min_h or x["audio_filepath"] in seen:
+            continue
+        try:
+            i = sf.info(x["audio_filepath"])
+        except Exception:
+            continue
+        if i.samplerate != 16000 or abs(i.frames / i.samplerate - x["duration"]) > tol:
+            continue
+        seen.add(x["audio_filepath"])
+        d2.append(x)
+        have[lang] = have.get(lang, 0) + x["duration"] / 3600
+        added[lang] = added.get(lang, 0) + 1
+    if added:
+        if not os.path.exists(f"{vol}/mix3/d2.pre_unk.jsonl"):
+            os.replace(f"{vol}/mix3/d2.jsonl", f"{vol}/mix3/d2.pre_unk.jsonl")
+        _write(f"{vol}/mix3/d2.jsonl", d2)
+    return {"added_rows": added, "h_by_lang": {k: round(v, 3) for k, v in sorted(have.items())}}

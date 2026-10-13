@@ -1058,6 +1058,26 @@ def clean_manifest(src: str = "replay/fleurs_train_multi.jsonl", dst: str = "mix
     print(f"{src}: {len(rows)} -> {len(keep)} rows -> {dst}")
 
 
+@app.function(image=nemo_image, volumes={VOL: vol}, cpu=8, memory=32768, timeout=3600)
+def patch_mix3():
+    """Retrain-3 review fixes to the built mix: year-ratio cap (case-insensitive) + label-noise drops on D1/D10n, and
+    the Greek/thin-language "\u2047" D2 rows restored (mix_build.patch3 / restore_unk_nonen)."""
+    import glob
+    import json
+
+    import mix_build
+
+    vol.reload()
+    dec = {}
+    for f in glob.glob(f"{VOL}/d1/dec3/*.json"):
+        dec.update(json.load(open(f)))
+    out = {"patch3": mix_build.patch3(VOL, dec), "unk": mix_build.restore_unk_nonen(VOL)}
+    out["share"] = mix_build.mix_share(VOL, retrain3_mix())
+    print(json.dumps(out, indent=1))
+    json.dump(out, open(f"{VOL}/mix3/patch3.json", "w"), indent=1)
+    vol.commit()
+
+
 # Screening arms (R3.12.4 + R3.14: S-D dropped). Each is a full 4000-step cosine run evaluated at step 1000; the winner
 # continues as final seed 1.
 R3_ARMS = {"S-A": dict(wf_weight=1.0, l2sp_c=0.3, lr=1e-4), "S-B": dict(wf_weight=3.0, l2sp_c=0.3, lr=1e-4),

@@ -47,7 +47,8 @@ def bar(base: dict, cand: dict) -> dict:
         "splice": tot(cand, "spliceDefects") <= tot(base, "spliceDefects"),
         "exact": tot(cand, "exactMatches") >= tot(base, "exactMatches") - 2,
         "blend_zero": tot(cand, "blend") == 0,
-        "english_wf_chunks": tot(cand, "wf_chunks") <= tot(base, "wf_chunks"),
+        # (no English-digit key: this text is after the app's verbalizer, so digits never reach it; the model-level
+        # digit count is the dev-bed key en_wf)
         "chimeras_zero": tot(cand, "chimeras") == 0,
     }
     res["checks"] = checks

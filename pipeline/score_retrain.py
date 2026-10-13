@@ -53,6 +53,43 @@ def norm(t):
     return re.sub(r"\s+", " ", t).strip()
 
 
+def _ed(a, b):
+    prev = list(range(len(b) + 1))
+    for i, x in enumerate(a, 1):
+        cur = [i] + [0] * len(b)
+        for j, y in enumerate(b, 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x != y))
+        prev = cur
+    return prev[-1]
+
+
+def fleurs_bootstrap(root, run, base, name="fleurs_wer", reps=2000, seed=0, bar=0.3):
+    """R3.17 M2: per-language paired bootstrap of the WER difference run - base over utterances (same ids). A language
+    FAILS only when the mean delta > `bar` points AND the 95% CI excludes 0."""
+    import random
+
+    a = {r["id"]: r for r in load(root, run, name)}
+    b = {r["id"]: r for r in load(root, base, name)}
+    by = defaultdict(list)
+    for i, rb in b.items():
+        ra = a.get(i)
+        if ra is None or not norm(rb["ref"]):
+            continue
+        ref = norm(rb["ref"]).split()
+        by[lang_of(rb)].append((_ed(ref, norm(ra["hyp"]).split()), _ed(ref, norm(rb["hyp"]).split()), len(ref)))
+    out = {}
+    rnd = random.Random(seed)
+    for lang, xs in sorted(by.items()):
+        n = len(xs)
+        d = lambda s_: 100 * (sum(x[0] for x in s_) - sum(x[1] for x in s_)) / max(1, sum(x[2] for x in s_))  # noqa
+        ds = sorted(d([xs[rnd.randrange(n)] for _ in range(n)]) for _ in range(reps))
+        lo, hi = ds[int(0.025 * reps)], ds[int(0.975 * reps) - 1]
+        mean = d(xs)
+        out[lang] = {"n": n, "delta": round(mean, 3), "ci": [round(lo, 3), round(hi, 3)],
+                     "fail": mean > bar and lo > 0}
+    return out
+
+
 def wer(rows):
     rows = [r for r in rows if norm(r["ref"])]
     if not rows:
@@ -174,7 +211,9 @@ def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"
         if name in ("e22_other", "lspc_dev", "d1_dev", "e22_numbers"):
             s[f"digits_{name}"] = sum(bool(WF.search(r["hyp"])) for r in rows)
             s[f"wf_tokens_{name}"] = sum(len(WF.findall(r["hyp"])) for r in rows)
-        en_rows = [r for r in rows if name != "adv" or r["ref"].split("\t")[2] == "en"]
+        # adv: English rows of the scored split only (Opus review: sealed adv rows were feeding selection keys 1 and 3)
+        en_rows = [r for r in rows if name != "adv" or (r["ref"].split("\t")[2] == "en"
+                                                        and r["ref"].split("\t")[4] == want_split)]
         blend += sum(len(BLEND.findall(r["hyp"])) for r in en_rows)
         chim += sum(len(CHIMERA.findall(r["hyp"])) for r in en_rows)
     s["blend_twenty_thousand"] = blend
@@ -201,7 +240,7 @@ def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"
         if lang == "en":
             ok = adv_ok(text, exp, lang, r["hyp"])
         else:
-            ok = digit_runs(r["hyp"]) == stock_d.get(r["id"]) and not EN_NUM.search(r["hyp"])
+            ok = digit_runs(r["hyp"]) == stock_d.get(r["id"]) and not leak_re(lang).search(r["hyp"])
         if lang != "en":
             adv_leak += bool(leak_re(lang).search(r["hyp"]))
             cs = cat.startswith("codeswitch")
@@ -339,7 +378,15 @@ if __name__ == "__main__":
         excl = frozenset(exclusions(root, st, v10))
         print(f"D.2 exclusions: {len(excl)}")
     split = sys.argv[sys.argv.index("--split") + 1] if "--split" in sys.argv else "dev"
-    res = {run: score(root, run, split, excl) for run in runs}
+    # cached-encoder runs (eval_multi, "<run>_c") are compared only with cached baselines: stock = ultra_rt_c
+    stock = sys.argv[sys.argv.index("--stock") + 1] if "--stock" in sys.argv else (
+        "ultra_rt_c" if all(r.endswith("_c") for r in runs) else "ultra_rt")
+    res = {run: score(root, run, split, excl, stock_run=stock) for run in runs}
+    if "--base" in sys.argv:
+        base = sys.argv[sys.argv.index("--base") + 1]
+        for run in runs:
+            if run != base:
+                res[run]["fleurs_bootstrap_vs_" + base] = fleurs_bootstrap(root, run, base)
     print(json.dumps(res, indent=1))
     if "--json" in sys.argv:
         json.dump(res, open(sys.argv[sys.argv.index("--json") + 1], "w"), indent=1)

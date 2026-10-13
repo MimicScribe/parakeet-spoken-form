@@ -457,8 +457,10 @@ def span_mask(spm, pairs, batch, width, device):
 # averaged per row over that row's emitting cells, then over rows: conditioned on non-blank so it never moves the blank
 # logit, per-row so it does not scale with T x U.
 WF_CHARS = re.compile(r"[0-9$€£¥¢₹₩₽%#/+°⁇²³¹½¼¾⅓⅔]")
-EN_NUM_WORDS = ("eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty "
-                "sixty seventy eighty ninety hundred thousand first third").split()  # no "second" (fr), six, ten, nine
+EN_NUM_WORDS = ("one two three four five seven eight eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen "
+                "nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand first third").split()
+# no "second" (fr), six, ten (pl/cs/sk/nl), nine. Only whole-word pieces count (en_num_piece_ids); the multi-piece ones
+# are guarded by the token KL to stock on non-English rows, not by en_pen (retrain-3 reviews).
 
 
 TWENTY_PAIR = re.compile(r"\btwenty (?:ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|"
@@ -466,7 +468,8 @@ TWENTY_PAIR = re.compile(r"\btwenty (?:ten|eleven|twelve|thirteen|fourteen|fifte
 
 
 def wf_piece_ids(spm) -> list[int]:
-    return [i for i in range(spm.get_piece_size()) if WF_CHARS.search(spm.id_to_piece(i))]
+    return [i for i in range(spm.get_piece_size()) if WF_CHARS.search(spm.id_to_piece(i))
+            and not re.fullmatch(r"<\|.*\|>", spm.id_to_piece(i))]
 
 
 def en_num_piece_ids(spm) -> list[int]:
@@ -492,7 +495,7 @@ def prefix_len(spm, ids) -> int:
 
 
 def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: float = 30.0, tok_weight: float = 1.0,
-                  wf_weight: float = 1.0, en_weight: float = 1.0, sub_batch: int = 4, emit_p: float = 0.1):
+                  wf_weight: float = 1.0, en_weight: float = 1.0, sub_batch: int = 2, emit_p: float = 0.1):
     import copy
 
     teacher_dec, teacher_joint = copy.deepcopy(m.decoder).eval(), copy.deepcopy(m.joint).eval()
@@ -503,9 +506,10 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
     term_t = torch.tensor([i for i in range(spm.get_piece_size())
                            if spm.id_to_piece(i).lstrip("▁") in {".", "?", "!", "...", "…"}])
     wf_t, en_t = torch.tensor(wf_piece_ids(spm)), torch.tensor(en_num_piece_ids(spm))
-    th_t = torch.tensor([i for i in range(spm.get_piece_size()) if spm.id_to_piece(i) == "\u2581thousand"])
+    th_first = int(m.tokenizer.text_to_ids("thousand")[0])
+    th_t = torch.tensor([th_first])
     print(f"R3 losses: wf pieces {len(wf_t)} e.g. {[spm.id_to_piece(int(i)) for i in wf_t[:12]]}; "
-          f"en_num pieces {[spm.id_to_piece(int(i)) for i in en_t]}; tags {dict(collections.Counter(row_tags.values()))}",
+          f"en_num pieces {[spm.id_to_piece(int(i)) for i in en_t]}; thousand first piece {spm.id_to_piece(th_first)!r}; tags {dict(collections.Counter(row_tags.values()))}",
           flush=True)
     orig_step = m.training_step
     nb = 8193
@@ -539,9 +543,20 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
         texts = [spm.decode(t).lower() for t in row_toks]
         is_yr = torch.tensor([tg != "nonen" and bool(TWENTY_PAIR.search(tx)) and "thousand" not in tx
                               for tg, tx in zip(tags, texts)], device=dev)
+        yrcol = torch.zeros(B, W, dtype=torch.bool)  # label columns right after a "twenty" of a year pair
+        for i in range(B):
+            if not is_yr[i]:
+                continue
+            ws = row_words(spm, row_toks[i])
+            for k in range(len(ws) - 1):
+                if ws[k][0].lower() == "twenty" and TWENTY_PAIR.match("twenty " + ws[k + 1][0].lower()):
+                    u = ws[k + 1][1]
+                    if row_toks[i][u] != th_first:
+                        yrcol[i, u] = True
+        yrcol = yrcol.to(dev)
         tid, wf, en, th = term_t.to(dev), wf_t.to(dev), en_t.to(dev), th_t.to(dev)
 
-        def chunk(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, klu_sl, nonen_sl, yr_sl):
+        def chunk(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, klu_sl, nonen_sl, yr_sl, yrcol_sl):
             with NoDropout(m.joint):
                 s_logits = m.joint.joint(f_sl, s_sl).float()
             with torch.no_grad():
@@ -560,20 +575,29 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             s_lo = torch.log((1 - s_lt.exp()).clamp(min=1e-7))
             t_lo = torch.log((1 - t_lt.exp()).clamp(min=1e-7))
             kl_p = t_lt.exp() * (t_lt - s_lt) + t_lo.exp() * (t_lo - s_lo)
-            tmask = mask & nonen_sl[:, None, None]
-            s_lp, t_lp = s_logits[..., :nb] - s_all[..., None], t_logits[..., :nb] - t_all[..., None]
-            kl_t = (t_lp.exp() * (t_lp - s_lp)).sum(-1)
+            # token KL (non-English rows): over the non-blank distribution at the teacher's emitting cells; averaged over
+            # all T x U cells it was ~95% blank and inert (retrain-2 diagnosis; both retrain-3 reviews)
+            tmask = mask & nonen_sl[:, None, None] & (t_lnb.exp() > emit_p)
+            if bool(nonen_sl.any()):
+                s_lp = s_logits[..., :nb - 1] - s_nbz[..., None]
+                t_lp = t_logits[..., :nb - 1] - t_nbz[..., None]
+                kl_t = (t_lp.exp() * (t_lp - s_lp)).sum(-1)
+                del s_lp, t_lp
+            else:
+                kl_t = torch.zeros_like(s_nbz)
             emit = mask & (s_lnb.detach().exp() > emit_p)
 
-            def pen(ids, rows_sl):
+            def pen(ids, rows_sl, cols=None):
                 p = 0.99 * (s_logits[..., ids].logsumexp(-1) - s_nbz).exp()  # bounded (-log <= 4.6) and still graded at p -> 1
                 e = emit & rows_sl[:, None, None]
+                if cols is not None:
+                    e = e & cols[:, None, :e.shape[2]]
                 per_row = (-torch.log1p(-p) * e).sum((1, 2)) / e.sum((1, 2)).clamp(min=1)
                 return per_row.sum(), rows_sl.sum()
 
             wf_s, wf_n = pen(wf, ~nonen_sl)
             en_s, en_n = pen(en, nonen_sl) if len(en) else (torch.zeros((), device=dev),) * 2
-            th_s, th_n = pen(th, yr_sl) if len(th) else (torch.zeros((), device=dev),) * 2
+            th_s, th_n = pen(th, yr_sl, yrcol_sl)
             return ((kl_blank * bmask).sum(), bmask.sum(), (kl_p * kmask).sum(), kmask.sum(),
                     (kl_t * tmask).sum(), tmask.sum(), wf_s, wf_n.float(), en_s, en_n.float(), th_s, th_n.float())
 
@@ -584,7 +608,7 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             t = int(enc_len[sl].max())
             r_ = torch.utils.checkpoint.checkpoint(
                 chunk, f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
-                enc_len[sl], tokens_len[sl], klu[sl], is_nonen[sl], is_yr[sl], use_reentrant=False)
+                enc_len[sl], tokens_len[sl], klu[sl], is_nonen[sl], is_yr[sl], yrcol[sl], use_reentrant=False)
             acc = [a + b for a, b in zip(acc, r_)]
         kl_b = acc[0] / acc[1].clamp(min=1)
         kl_p = acc[2] / acc[3].clamp(min=1)
@@ -597,15 +621,15 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
         m._r3_parts = {"rnnt": out["loss"].detach(), "kl_b": kl_b.detach(), "kl_p": kl_p.detach(),
                        "kl_t": kl_t.detach(), "wf": wf_pen.detach(), "en": en_pen.detach(),
                        "th": th_pen.detach()}
-        if os.environ.get("R3_GRADSHARE") and batch_idx % 10 == 0:
+        if os.environ.get("R3_GRADSHARE") and batch_idx % 50 == 0:
             # E2 acceptance (R3.12.3): each term's gradient on the joint's last layer, overall and on the written-form
             # output rows (wf_pen must reach >= 10% of the RNNT gradient there)
             W = m.joint.joint_net[-1].weight
             wf_rows = wf.clamp(max=W.shape[0] - 1)
             gs = {}
-            for k, term in (("rnnt", out["loss"]), ("kl_b", kl_weight * kl_b), ("kl_p", punct_weight * kl_p),
-                            ("kl_t", tok_weight * kl_t), ("wf", wf_weight * wf_pen), ("en", en_weight * en_pen),
-                            ("th", wf_weight * th_pen)):
+            for k, term in (("rnnt", out["loss"]), ("wf", wf_weight * wf_pen), ("th", wf_weight * th_pen),
+                            ("kl_t", tok_weight * kl_t), ("kl_b", kl_weight * kl_b)):
+                torch.cuda.empty_cache()
                 if not term.requires_grad:
                     gs[k] = (0.0, 0.0)
                     continue
@@ -651,7 +675,7 @@ class L2SP(pl.Callback):
                     d[self.exempt] = 0
                 p.data.sub_(d, alpha=lr * self.c)
                 drift += float((d.float() ** 2).sum())
-        if batch_idx % 50 == 0:
+        if (batch_idx + 1) % (50 * trainer.accumulate_grad_batches) == 0:
             print(f"l2sp drift {drift ** 0.5:.4f}", flush=True)
 
 
@@ -702,12 +726,18 @@ def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_text
             # explicit KL treatment: "anchor" | "anchor_num" | "span" | "nonen" | "free"
             if tag != "free":
                 tagged.setdefault(tag, set()).update(x["text"] for x in src)
-            if tag == "anchor_num":  # LSPC rows: the ones with number words are KL-exempt (v10pt's numwords rule)
-                from common import NUMBER_WORDS
+            if tag in ("anchor", "anchor_num"):
+                # rows that say a number (numberish words, Roman numerals) are KL-exempt (v10pt's numwords rule): the
+                # stock teacher forced on spoken numbers derails (external review: 2,666 such rows were full-anchored)
+                def says_number(t):
+                    return any(numberish(w) for w in t.split()) or re.search(r"\b(?:II|III|IV|VI|VII|VIII|IX|XI|XII)\b|"
+                                                                           r"\bWorld War I\b", t) is not None
 
-                plain = {x["text"] for x in src if not NUMBER_WORDS.search(x["text"])}
-                tagged["anchor_num"] -= plain
+                num = {x["text"] for x in src if says_number(x["text"])}
+                plain = {x["text"] for x in src} - num
+                tagged.setdefault("anchor_num", set()).update(num)
                 tagged.setdefault("anchor", set()).update(plain)
+                tagged[tag] -= (plain if tag == "anchor_num" else num)
         elif replay_texts is not None and path.startswith("replay/"):
             if kl_exempt and kl_exempt in path:
                 exempt.update(x["text"] for x in src)
