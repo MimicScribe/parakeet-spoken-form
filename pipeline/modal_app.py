@@ -978,7 +978,7 @@ def retrain3_mix() -> list:
             ("replay/lspc_train.jsonl", 35.0, "anchor_num"), ("replay/lspc_train_numwords.jsonl", 5.0, "anchor_num"),
             ("replay/icsi_train.jsonl", 0, "anchor_num"), ("mix3/d1p.jsonl", 0, "anchor"), ("mix3/d10p.jsonl", 0, "anchor"),
             ("mix3/d1.jsonl", 0, "span"), ("mix3/d10n.jsonl", 0, "span"),
-            ("replay/fleurs_train_multi.jsonl", 3.0, "nonen"), ("mix3/d2.jsonl", 0, "nonen"), ("mix3/d2p.jsonl", 0, "nonen")]
+            ("mix3/fleurs_train_multi.jsonl", 3.0, "nonen"), ("mix3/d2.jsonl", 0, "nonen"), ("mix3/d2p.jsonl", 0, "nonen")]
 
 
 @app.function(image=nemo_image, volumes={VOL: vol}, cpu=16, memory=32768, timeout=2 * 3600)
@@ -1022,6 +1022,40 @@ def audit_mix3(fix: bool = True, tol: float = 0.1):
         print(path, json.dumps(out[path]))
     json.dump(out, open(f"{VOL}/mix3/audit.json", "w"), indent=1)
     vol.commit()
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, cpu=16, memory=16384, timeout=3600)
+def clean_manifest(src: str = "replay/fleurs_train_multi.jsonl", dst: str = "mix3/fleurs_train_multi.jsonl",
+                   tol: float = 0.1):
+    """Copy of a shared manifest without rows whose wav is missing / not 16 kHz / a different length (FLEURS id
+    collisions), and with one row per wav path (the one matching the file)."""
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+
+    import soundfile as sf
+
+    vol.reload()
+    rows = [json.loads(line) for line in open(f"{VOL}/{src}")]
+
+    def ok(r):
+        try:
+            i = sf.info(r["audio_filepath"])
+        except Exception:
+            return False
+        return i.samplerate == 16000 and abs(i.frames / i.samplerate - r["duration"]) <= tol
+
+    with ThreadPoolExecutor(64) as ex:
+        good = list(ex.map(ok, rows))
+    seen, keep = set(), []
+    for r, g in zip(rows, good):
+        if g and r["audio_filepath"] not in seen:
+            seen.add(r["audio_filepath"])
+            keep.append(r)
+    with open(f"{VOL}/{dst}", "w") as f:
+        for r in keep:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    vol.commit()
+    print(f"{src}: {len(rows)} -> {len(keep)} rows -> {dst}")
 
 
 # Screening arms (R3.12.4 + R3.14: S-D dropped). Each is a full 4000-step cosine run evaluated at step 1000; the winner
