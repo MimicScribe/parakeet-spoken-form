@@ -763,6 +763,30 @@ class CropDecoder:
         return {"shard": tag, "crops": len(paths)}
 
 
+    @modal.method()
+    def paths(self, paths: list, which: str = "v10") -> dict:
+        import ft_eval
+
+        self.m.load_state_dict(self.v10 if which == "v10" else self.stock, strict=False)
+        return {p: h["text"] for p, h in zip(paths, ft_eval.decode(self.m, paths, batch_size=32))}
+
+
+@app.function(image=scan_image, volumes={VOL: vol}, timeout=4 * 3600)
+def decode_manifest(manifest: str = "d1/plain3.jsonl", out: str = "d1/plain3_v10.json", which: str = "v10"):
+    """Parallel (8 x L4) decode of one manifest -> {wav: text} (D1p filler restoration, R3.17 F1)."""
+    import json
+
+    vol.reload()
+    paths = [json.loads(line)["audio_filepath"] for line in open(f"{VOL}/{manifest}")]
+    parts = [paths[i::16] for i in range(16)]
+    res = {}
+    for d in CropDecoder().paths.map(parts, kwargs={"which": which}):
+        res.update(d)
+    json.dump(res, open(f"{VOL}/{out}", "w"))
+    vol.commit()
+    print(f"decoded {len(res)} of {len(paths)}")
+
+
 @app.function(image=scan_image, volumes={VOL: vol}, timeout=4 * 3600)
 def s3_decode_crops(only: str = "", crops_dir: str = "d1/crops3", out_dir: str = "d1/dec3"):
     """Parallel (8 x L4) stock + v10pt decode of the recropped shards; skips shards already decoded."""
@@ -950,7 +974,7 @@ def retrain3_mix() -> list:
     return [("tts/v10pt/train_ok.jsonl", 0, "free"), ("tts/d9sup/train_ok.jsonl", 0, "free"),
             ("tts/biz/train_ok.jsonl", 0, "free"),
             ("replay/lspc_train.jsonl", 35.0, "anchor_num"), ("replay/lspc_train_numwords.jsonl", 5.0, "anchor_num"),
-            ("replay/icsi_train.jsonl", 0, "anchor"), ("mix3/d1p.jsonl", 0, "anchor"), ("mix3/d10p.jsonl", 0, "anchor"),
+            ("replay/icsi_train.jsonl", 0, "anchor_num"), ("mix3/d1p.jsonl", 0, "anchor"), ("mix3/d10p.jsonl", 0, "anchor"),
             ("mix3/d1.jsonl", 0, "span"), ("mix3/d10n.jsonl", 0, "span"),
             ("replay/fleurs_train_multi.jsonl", 3.0, "nonen"), ("mix3/d2.jsonl", 0, "nonen"), ("mix3/d2p.jsonl", 0, "nonen")]
 

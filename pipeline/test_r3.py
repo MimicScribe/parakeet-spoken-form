@@ -50,3 +50,22 @@ def test_year_ratio_regexes():
 def test_restore_fillers_no_number_repeats():
     t, n = R.merge("So we grew five percent.", "So, uh, we we grew five five percent.")
     assert t == "So uh we we grew five percent." and n == 2
+
+
+def test_leak_words_complete():  # review: [5:-5] slicing dropped "two"/"percent", added "o"
+    de = S.leak_re("de")
+    assert de.search("zwei two") and de.search("percent") and not S.leak_re("pt").search("o carro")
+    assert not S.leak_re("pl").search("ten dom")
+
+
+def test_blend_no_backtrack():
+    assert not S.BLEND.search("twenty thousand fifty five hundred")
+
+
+def test_scaled_decimal_units():
+    assert F.units("we made two point five million dollars") == F.units("we made $2.5 million")
+
+
+def test_restore_no_link_word_repeats():
+    t, _ = R.merge("so we made a hundred and five sales", "so we made a a hundred and and five sales")
+    assert t == "so we made a hundred and five sales"

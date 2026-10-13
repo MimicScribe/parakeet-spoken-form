@@ -4,7 +4,7 @@ when every inserted word is a filler or repeats an adjacent label word; the capt
 is otherwise untouched."""
 import difflib, json, re, sys, collections
 
-from common import NUMBER_WORDS, SPAN_CORE
+from common import NUMBER_WORDS, SPAN_CORE, SPAN_LINK
 FILL = {"uh", "um", "uhm", "er", "erm", "hmm", "mm", "mhm", "uh-huh", "mm-hmm", "ah"}
 k = lambda w: re.sub(r"[^\w'-]", "", w.lower())
 
@@ -14,11 +14,14 @@ def merge(label, hyp):
     out, n_ins = [], 0
     sm = difflib.SequenceMatcher(None, Lk, Vk, autojunk=False)
     for op, i1, i2, j1, j2 in sm.get_opcodes():
+        if op == "insert" and i1 == 0:  # never at the clip start ("Uh And then"): the next word's case is unknown
+            continue
         if op == "insert":
             ins = Vk[j1:j2]
             nb = set(Lk[max(0, i1 - 2):i1 + 2])
             # repeats only of non-number words: a doubled number word in v10pt's decode is as likely its error as a stutter
-            if all(w in FILL or (w in nb and not NUMBER_WORDS.fullmatch(w) and w not in SPAN_CORE) for w in ins) and len(ins) <= 4:
+            if all(w in FILL or (w in nb and not NUMBER_WORDS.fullmatch(w) and w not in SPAN_CORE
+                                         and w not in SPAN_LINK) for w in ins) and len(ins) <= 4:
                 words = [re.sub(r"[^\w'-]", "", w).lower() if k(w) in FILL else re.sub(r"[.?!,;:]+$", "", w) for w in V[j1:j2]]
                 if out and not out[-1][-1:] in ".?!" or not out:
                     words = [w.lower() if k(w) in FILL else w for w in words]

@@ -22,7 +22,7 @@ import zlib
 
 import numpy as np
 
-from common import WRITTEN_FORM
+from common import NUMBER_WORDS, WRITTEN_FORM
 
 
 def _rows(pattern):
@@ -389,7 +389,8 @@ def build3(vol: str, seed: int = 1, aug_frac: float = 0.25, d1_h: float = 20.0, 
     eval_ng, eval_paths, texts = set(), set(), []
     for f in glob.glob(f"{vol}/beds/e21x/refs/*.txt"):
         texts += re.split(r"(?<=[.?!])\s+", open(f).read())
-    for pat in ("e22/all.jsonl", "beds/fleurs/*.jsonl", "beds/vox/*.jsonl", "beds/adv/all.jsonl", "beds/e21_dev/*.jsonl"):
+    for pat in ("e22/all.jsonl", "beds/fleurs/*.jsonl", "beds/vox/*.jsonl", "beds/adv/all.jsonl", "beds/e21_dev/*.jsonl",
+                "beds/fleurs3/*.jsonl", "beds/vox/*3.jsonl"):
         for x in _rows(f"{vol}/{pat}"):
             texts.append(x["text"].split("\t")[0])
             eval_paths.add(os.path.basename(x.get("audio_filepath", "")))
@@ -497,7 +498,7 @@ def build3(vol: str, seed: int = 1, aug_frac: float = 0.25, d1_h: float = 20.0, 
     d10n += speed_copies(rest, d10_h - _h(d10n), "n")
     stats["d10n_year_h"] = round(sum(x["duration"] for x in d10n if "year" in x["kinds"] or "decade" in x["kinds"]) / 3600, 2)
     plain_src = d1p + _rows(f"{vol}/replay/lspc_train.jsonl")[:3000] + _rows(f"{vol}/replay/icsi_train.jsonl")
-    plain_src = [x for x in plain_src if x["duration"] <= 20]
+    plain_src = [x for x in plain_src if x["duration"] <= 20 and not NUMBER_WORDS.search(x["text"])]  # review #4
     r.shuffle(plain_src)
     d10p = speed_copies(plain_src, _h(d10n), "p")
 

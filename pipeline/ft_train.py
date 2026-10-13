@@ -566,7 +566,7 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             emit = mask & (s_lnb.detach().exp() > emit_p)
 
             def pen(ids, rows_sl):
-                p = (s_logits[..., ids].logsumexp(-1) - s_nbz).exp().clamp(max=0.99)  # bounded: one cell cannot spike
+                p = 0.99 * (s_logits[..., ids].logsumexp(-1) - s_nbz).exp()  # bounded (-log <= 4.6) and still graded at p -> 1
                 e = emit & rows_sl[:, None, None]
                 per_row = (-torch.log1p(-p) * e).sum((1, 2)) / e.sum((1, 2)).clamp(min=1)
                 return per_row.sum(), rows_sl.sum()

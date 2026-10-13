@@ -24,18 +24,18 @@ FILL = re.compile(r"\b(uh|um|uhm|er|erm|mm|hmm|mhm)\b", re.I)
 LEAK_EXTRA = ["zero", "six", "ten", "point", "million", "first", "second", "third"]
 LEAK_HOMOGRAPH = {"fr": {"six", "million", "point", "second"}, "nl": {"ten", "zero"}, "it": {"zero"}, "pt": {"zero"},
                   "es": {"million"}, "de": {"million"}, "sv": {"million"}, "da": {"million"}, "ro": {"zero"},
-                  "mt": {"ten"}}
+                  "mt": {"ten"}, "pl": {"ten"}, "cs": {"ten"}, "sk": {"ten"}}
 WF = re.compile(r"[0-9$€£¥¢₹₩₽%#/+°\u2047²³¹½¼¾]")
 _U = "one|two|three|four|five|six|seven|eight|nine"
 _T = "ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
 _D = "twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety"
 BLEND = re.compile(rf"\btwenty thousand (?:(?:{_D})(?:[ -](?:{_U}))?|{_T}|{_U})\b(?![ -](?:hundred|thousand|million|"
-                   rf"billion|trillion|point|and)\b)", re.I)
+                   rf"billion|trillion|point|and|{_U}|{_T}|{_D})\b)", re.I)
 CHIMERA = re.compile(rf"[a-z]{{2,}}\d|\d[a-z]{{3,}}\b|\b(?i:zero|{_U}|{_T}|{_D})[.,]\d")  # "Q1" (a code) is WF, not here
 
 
 def leak_re(lang):
-    words = [w for w in EN_NUM.pattern[5:-5].split("|")] + LEAK_EXTRA
+    words = EN_NUM.pattern[len(r"\b("):-len(r")\b")].split("|") + LEAK_EXTRA  # review: [5:-5] cut "two"/"percent"
     words = [w for w in words if w not in LEAK_HOMOGRAPH.get(lang, set())]
     return re.compile(r"\b(" + "|".join(sorted(set(words))) + r")\b", re.I)
 

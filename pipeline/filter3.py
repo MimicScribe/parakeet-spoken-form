@@ -25,7 +25,7 @@ from common import NUMBER_WORDS, SPAN_CORE, WRITTEN_FORM, number_span
 from restore_fillers import FILL, merge
 
 UNIT_ABBR = re.compile(r"\b(?:" + NUMBER_WORDS.pattern[3:-3] + r"|one|oh)\s+(?:m|km|kg|g|mg|ms|mb|gb|tb|kb|cm|mm|ft|lb|lbs|"
-                       r"oz|hz|khz|mhz|ghz|kw|mw|kwh|v|w|mph|kph|sq)\b", re.I)
+                       r"oz|hz|khz|mhz|ghz|kw|mw|kwh|v|w|mph|kph|kmh|sq)\b", re.I)
 D4_MARGIN = 6.0
 
 
@@ -38,6 +38,30 @@ def _words(text: str) -> list[str]:
     return out
 
 
+SCALE = {"thousand": 10**3, "million": 10**6, "billion": 10**9, "trillion": 10**12}
+
+
+def _canon(v) -> str:
+    from decimal import Decimal
+
+    try:
+        return format(Decimal(str(v)).normalize(), "f")
+    except Exception:
+        return str(v)
+
+
+def _spelled(span: list[str]):
+    """Value of a spelled span; "two point five million" = 2.5e6 (spelled_value cannot scale a decimal)."""
+    v = L.spelled_value(" ".join(span))
+    if v is None and len(span) > 1 and span[-1] in SCALE:
+        w = L.spelled_value(" ".join(span[:-1]))
+        if w is not None:
+            from decimal import Decimal
+
+            return _canon(Decimal(str(w[0])) * SCALE[span[-1]])
+    return _canon(v[0]) if v else None
+
+
 def units(text: str) -> list[str]:
     """Number spans become one value unit ("#2011", "#5%"); other words stay words. "$5" -> "#5", "dollars"."""
     ws = _words(text)
@@ -47,7 +71,16 @@ def units(text: str) -> list[str]:
         if re.search(r"\d", ws[i]):
             raw = ws[i]
             v = re.sub(r"[^\d.]", "", raw.replace(",", "")).rstrip(".")
-            out.append("#" + v + ("%" if "%" in raw else ""))
+            pct = "%" in raw
+            if i + 1 < len(ws) and ws[i + 1] in SCALE and v:  # "2.5 million" = one value
+                from decimal import Decimal
+
+                v = str(Decimal(v) * SCALE[ws[i + 1]])
+                i += 1
+            if i + 1 < len(ws) and ws[i + 1] == "percent":
+                pct = True
+                i += 1
+            out.append("#" + _canon(v) + ("%" if pct else ""))
             if "$" in raw:
                 out.append("dollars")
             i += 1
@@ -63,8 +96,8 @@ def units(text: str) -> list[str]:
         pct = span[-1] == "percent"
         if pct:
             span = span[:-1]
-        v = L.spelled_value(" ".join(span)) if span else None
-        out.append("#" + (str(v[0]) if v else " ".join(span)) + ("%" if pct else ""))
+        v = _spelled(span) if span else None
+        out.append("#" + (v if v is not None else " ".join(span)) + ("%" if pct else ""))
         i = j
     return out
 
@@ -118,6 +151,12 @@ def run(root: str) -> dict:
                 note("no_decode", x)
                 continue
             t, v10, stock = x["text"], d["v10"], d["stock"]
+            # caption artifacts: "sixteen.Bolded" (no space after a stop), "Jiaga ," (space before punctuation)
+            t2 = re.sub(r"\s+([,.?!;:])(?=\s|$)", r"\1", re.sub(r"([a-z])([.?!])([A-Z])", r"\1\2 \3", t))
+            if t2 != t:
+                st["caption_spacing_fixed"] += 1
+                x = {**x, "text": t2}
+                t = t2
             # F2: label agreement per span kind, before any filter (by value, digits or words)
             lv = num_values(t)
             for kind in x["kinds"]:
@@ -149,7 +188,8 @@ def run(root: str) -> dict:
                     year_ratio["two_thousand"] += 1
                 elif pick.startswith("twenty"):
                     year_ratio["twenty"] += 1
-                if pick.startswith("two thousand") and not has(v10, pick):
+                v10_digits = re.search(r"\b(?:19|20)\d\d\b", v10) is not None and not re.search(r"\btwenty\b", v10)
+                if pick.startswith("two thousand") and not has(v10, pick) and not v10_digits:
                     h = hub.get(str(i))
                     ok = s.get("mc", 0) >= D4_MARGIN and h is not None and h["best"] == pick
                     st["d4_disagree"] += 1
