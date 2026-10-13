@@ -48,6 +48,8 @@ tts_image = (
     .env({"HF_HOME": "/root/hf"})
     .add_local_python_source("common", "readings", "gen", "voice")
     .add_local_file(CARRIERS_FILE, "/root/carriers.txt")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "carriers_year.txt"), "/root/carriers_year.txt")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "carriers_year_b.txt"), "/root/carriers_year_b.txt")
 )
 
 
@@ -127,7 +129,7 @@ def voice_shard(rows: list, out_dir: str) -> list:
 
 @app.function(image=tts_image, volumes={VOL: vol}, timeout=3 * 3600)
 def make_tts(name: str, n_rows: int, seed: int = 1, shard: int = 200, multi_frac: float = 0.0, slots: str = "",
-             sub_one: bool = False, control_frac: float = 0.1):
+             sub_one: bool = False, control_frac: float = 0.1, carriers: str = "carriers.txt", speed: str = ""):
     """Generate rows, voice them in parallel shards, write train/dev manifests under /vol/tts/<name>.
     `slots` + `sub_one`: a targeted supplement (only those carriers; every scaled amount/percent below one)."""
     import json
@@ -138,7 +140,12 @@ def make_tts(name: str, n_rows: int, seed: int = 1, shard: int = 200, multi_frac
 
     if sub_one:
         readings.SUB_ONE_P = 1.0
-    rows = list(gen.rows(n_rows, seed, multi_frac=multi_frac, slots=slots, control_frac=control_frac))
+    rows = list(gen.rows(n_rows, seed, multi_frac=multi_frac, slots=slots, control_frac=control_frac,
+                         carriers=carriers))
+    if speed:  # "lo,hi": a speech-rate range for this set (v12 year supplement: fast speech)
+        lo, hi = (float(x) for x in speed.split(","))
+        for row in rows:
+            row["speed_lo"], row["speed_hi"] = lo, hi
     shards = [rows[i:i + shard] for i in range(0, len(rows), shard)]
     out_dir = f"{VOL}/tts/{name}"
     os.makedirs(out_dir, exist_ok=True)
@@ -269,6 +276,16 @@ def score_texts(run: str = "v10pt", items: str = "yeardrop/items.json"):
     vol.reload()
     for r in run.split(","):
         rescore.score_texts(VOL, r, ultra_path(), f"{VOL}/{items}", f"{VOL}/yeardrop/scores_{r}.json")
+    vol.commit()
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=3600)
+def seam_decode(run: str = "v10pt", items: str = "seamb1/items.json", out: str = "seamb1/decoded.json"):
+    """Seam re-decode placement study (rescore.cut_decode): cut clips from full wavs, greedy-decode."""
+    import rescore
+
+    vol.reload()
+    rescore.cut_decode(VOL, run, ultra_path(), f"{VOL}/{items}", f"{VOL}/{out}")
     vol.commit()
 
 

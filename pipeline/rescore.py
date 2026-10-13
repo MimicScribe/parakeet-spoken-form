@@ -193,3 +193,37 @@ def greedy_vs_beam(vol: str, run: str, ultra: str, items_path: str, out_path: st
     b = ft_eval.decode(m, paths, batch_size=1)
     print("beam strategy used:", used)
     json.dump([{**it, "greedy": x["text"], "beam": y["text"]} for it, x, y in zip(items, g, b)], open(out_path, "w"), indent=1)
+
+
+def cut_decode(vol: str, run: str, ultra: str, items_path: str, out_path: str) -> None:
+    """Seam re-decode placement study: cut [t0, t1) from a source wav on the volume and greedy-decode it.
+    items: [{"id", "src" (path on the volume), "t0", "t1"}]. Writes {id: text}."""
+    import tempfile
+    import soundfile as sf
+
+    import ft_eval
+
+    m = ft_eval.load_model(vol, run, ultra).cuda().eval()
+    items = json.load(open(items_path))
+    tmp = tempfile.mkdtemp()
+    cache = {}
+    out = {}
+    for start in range(0, len(items), 512):
+        chunk = items[start:start + 512]
+        paths = []
+        for it in chunk:
+            src = f"{vol}/{it['src']}"
+            if src not in cache:
+                cache.clear()
+                cache[src] = sf.read(src, dtype="float32")[0]
+            x = cache[src]
+            seg = x[max(0, int(it["t0"] * 16000)):int(it["t1"] * 16000)]
+            p = f"{tmp}/{it['id']}.wav"
+            sf.write(p, seg, 16000)
+            paths.append(p)
+        for it, h in zip(chunk, ft_eval.decode(m, paths, batch_size=16)):
+            out[it["id"]] = h["text"]
+        for p in paths:
+            os.remove(p)
+        print(f"{start + len(chunk)}/{len(items)}")
+    json.dump(out, open(out_path, "w"))
