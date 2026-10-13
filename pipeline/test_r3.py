@@ -1,0 +1,52 @@
+"""Retrain-3 unit tests (plan R3.13 #16). python -m pytest test_r3.py -q"""
+import labeller as L
+import filter3 as F
+import mix_build as M
+import score_retrain as S
+import restore_fillers as R
+
+
+def test_render_ranges_a_hundred_offset():
+    cap = "about a 100 people and 25 more"
+    sp = L.spans(cap)
+    label, ranges = L.render_ranges(cap, sp, [0] * len(sp))
+    for (a, b), s in zip(ranges, sp):
+        assert label[a:b].strip() and not label[a:b].startswith(" ")
+    assert label[ranges[-1][0]:ranges[-1][1]].startswith("twenty")
+
+
+def test_edge_units_by_value():
+    assert F.edge_ok("In twenty eleven we grew five percent.", "In 2011, we grew 5%.")
+    assert F.edge_ok("It cost five dollars", "It cost $5")
+    assert not F.edge_ok("So two thousand eleven was big", "2011 was big")
+    assert not F.edge_ok("we grew five percent", "we grew six percent")
+
+
+def test_unit_abbreviation_drop():
+    assert F.UNIT_ABBR.search("three thousand seven hundred m away")
+    assert not F.UNIT_ABBR.search("four oh one K plan")
+
+
+def test_blend_counter_excludes_scales():
+    assert S.BLEND.search("in twenty thousand fourteen we")
+    assert not S.BLEND.search("twenty thousand nine hundred people")
+    assert not S.BLEND.search("twenty thousand people")
+
+
+def test_select_without_stock_init():
+    base = {"blend_twenty_thousand": 0, "digits_e22_numbers": 1, "digits_d1_dev": 1, "chimeras": 0, "adv_en_ok": 50,
+            "fast_d1_ok": 40, "leak_vox_dev_total": 0, "leak_fleurs_num_total": 0, "wer_lspc_dev": 0.05,
+            "wer_d1_dev": 0.1, "wer_fleurs": {"de_de": 0.05}}
+    res = {"a": dict(base), "b": {**base, "adv_en_ok": 60}, "v10": dict(base)}
+    assert S.select(res, ["a", "b"], baseline="v10")["run"] == "b"
+
+
+def test_year_ratio_regexes():
+    assert M.TWO_K_0X.search("in two thousand nine we") and not M.TWO_K_0X.search("two thousand nineteen")
+    assert not M.TWO_K_LOW.search("two thousand five hundred people")
+    assert M.TWENTY_YR.search("twenty fourteen was")
+
+
+def test_restore_fillers_no_number_repeats():
+    t, n = R.merge("So we grew five percent.", "So, uh, we we grew five five percent.")
+    assert t == "So uh we we grew five percent." and n == 2

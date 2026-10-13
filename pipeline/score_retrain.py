@@ -152,7 +152,17 @@ def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"
         s[f"digitok_{name}"] = {k: f"{v[2]}/{v[0]}" for k, v in sorted(by.items())}
         s[f"digitok_{name}_total"] = sum(v[2] for v in by.values())
     blend = chim = 0
-    for name in ("e22_other", "lspc_dev", "d1_dev", "e22_numbers", "e21_dev", "fast", "adv"):
+    # e21_dev is a STOP check only (never selection, R3.12.5): reported on its own keys
+    e21 = load(root, run, "e21_dev")
+    s["e21_dev_blend"] = sum(len(BLEND.findall(r["hyp"])) for r in e21)
+    s["e21_dev_blend_hits"] = [m.group(0) + " @ " + r["id"] for r in e21 for m in BLEND.finditer(r["hyp"])][:40]
+    s["e21_dev_wf_windows"] = sum(bool(WF.search(r["hyp"])) for r in e21)
+    s["e21_dev_chimeras"] = sum(len(CHIMERA.findall(r["hyp"])) for r in e21)
+    biz = load(root, run, "biz_dev")
+    if biz:
+        s["wer_biz_dev"] = wer(biz)
+        s["digits_biz_dev"] = sum(bool(WF.search(r["hyp"])) for r in biz)
+    for name in ("e22_other", "lspc_dev", "d1_dev", "e22_numbers", "fast", "adv"):
         rows = load(root, run, name)
         if name in ("e22_other", "lspc_dev", "d1_dev", "e22_numbers"):
             s[f"digits_{name}"] = sum(bool(WF.search(r["hyp"])) for r in rows)

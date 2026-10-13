@@ -36,16 +36,16 @@ class Veto:
                                                   torch.tensor([lp.shape[0]]), torch.tensor([len(ids)]),
                                                   blank=self.proc.tokenizer.pad_token_id, reduction="sum"))
 
-    def rows(self, vol: str, tag: str) -> dict:
+    def rows(self, vol: str, tag: str, rows_dir: str = "d1/rows", out_dir: str = "d1/veto") -> dict:
         import soundfile as sf
 
         man = {}
-        recs = [json.loads(x) for x in open(f"{vol}/d1/rows/{tag}.jsonl")]
+        recs = [json.loads(x) for x in open(f"{vol}/{rows_dir}/{tag}.jsonl")]
         shard = tag.removesuffix("_pct")
         for x in open(f"{vol}/yodas/en/manifests/{shard}.jsonl"):
             r = json.loads(x)
             man[r["utt_id"]] = r["audio_filepath"]
-        out, n_span, n_veto = {}, 0, 0
+        out, hub, n_span, n_veto = {}, {}, 0, 0
         for rec in recs:
             spans_out = rec.get("spans") or []
             multi = [s for s in spans_out if s.get("decided") and s.get("n", 1) > 1]
@@ -71,9 +71,12 @@ class Veto:
                     ch[i] = c
                     scores.append(self.nll(lp, L.render(rec["caption"], sp, ch)))
                 best = min(range(len(scores)), key=scores.__getitem__)
+                hub.setdefault(rec["utt_id"], {})[str(i)] = {"best": sp[i].cands[best], "pick": sp[i].cands[s["pick"]],
+                                                              "nll": [round(v, 2) for v in scores]}
                 if norm_ctc(sp[i].cands[best]) != norm_ctc(sp[i].cands[s["pick"]]):
                     n_veto += 1
                     out.setdefault(rec["utt_id"], []).append(sp[i].cands[s["pick"]])
-        os.makedirs(f"{vol}/d1/veto", exist_ok=True)
-        json.dump({"vetoed": out, "spans": n_span, "vetoes": n_veto}, open(f"{vol}/d1/veto/{tag}.json", "w"))
+        os.makedirs(f"{vol}/{out_dir}", exist_ok=True)
+        json.dump({"vetoed": out, "hubert": hub, "spans": n_span, "vetoes": n_veto},
+                  open(f"{vol}/{out_dir}/{tag}.json", "w"))
         return {"tag": tag, "spans": n_span, "vetoes": n_veto}

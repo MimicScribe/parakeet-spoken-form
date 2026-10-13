@@ -1,0 +1,37 @@
+# 2026-10-13 retrain-3 tts/biz (R3.16 #3, D-7). Business shapes; about a third start with the number or code.
+# No E21/E22/eval phrasing.
+{biz_code} changed how we think about inventory.
+{biz_code} is where most of the detail lives.
+{biz_code} demand has been steadier than we expected.
+We cover that in more detail in the {biz_code}.
+Most of the slowdown came from {biz_code} accounts.
+The impact of {biz_code} on the supply side is mostly behind us.
+That disclosure will be in our {biz_code} filing.
+Our {biz_code} business grew faster than the rest.
+{date_year} is when the new contract starts.
+{date_year} was the closing date for the deal.
+The program launched on {date_year}, and uptake has been good.
+We announced the acquisition on {date_year}.
+As of {date_year}, we had no debt outstanding.
+{quarter_year} was a record for the services team.
+{quarter_year} should look a lot like this one.
+Looking back at {quarter_year}, the mix shifted toward software.
+We expect to be cash positive by {quarter_year}.
+Guidance for {quarter_year} stays where it was.
+Compared with {quarter_year}, margins are up.
+{small_pct} of revenue came from the new region.
+Churn was about {small_pct} for the month.
+The fee is only {small_pct}, so it barely shows up.
+Gross margin moved {bps} in the quarter.
+{bps} of improvement came from pricing alone.
+Spreads widened by about {bps} last month.
+We gave back {bps} on the funding side.
+{signed} was the swing in operating income.
+Free cash flow was {signed} for the half.
+The currency effect was {signed} on the top line.
+Organic growth came in at {signed} in that segment.
+{twenty_pause} was a tough year for the whole industry.
+{twenty_pause} is when we first entered that market.
+Back in {twenty_pause}, the team was a third of this size.
+In late {twenty_pause}, we changed the pricing model.
+That lease runs through {twenty_pause}, so there is time.

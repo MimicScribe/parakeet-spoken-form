@@ -220,3 +220,95 @@ def e21x(vol: str, chunk_s: float = 20.0) -> dict:
         os.remove(wav)
     _write(f"{out}/sealed.jsonl", rows)
     return {"files": len(ids), "chunks": len(rows), "hours": round(sum(r["duration"] for r in rows) / 3600, 1)}
+
+
+# ---- retrain-3 bed rebuild (R3.12.5 E-2, R3.15 #2, R3.17 M1/M2) --------------------------------------------------
+
+EN_STOP = set("the and of to is that we in it this for are have be not on with you our i was they what so but".split())
+
+
+def vox3(vol: str) -> dict:
+    """vox dev/sealed minus English floor speech (stock decode >= 25% English function words) and duplicate ids."""
+    st = {}
+    for split in ("dev", "sealed"):
+        rows = [json.loads(line) for line in open(f"{vol}/beds/vox/{split}.jsonl")]
+        seen, keep, en = set(), [], 0
+        for r in rows:
+            w = re.findall(r"[a-z']+", r["stock"].lower())
+            if w and sum(x in EN_STOP for x in w) / len(w) >= 0.25:
+                en += 1
+                continue
+            if r["id"] in seen:
+                continue
+            seen.add(r["id"])
+            keep.append(r)
+        _write(f"{vol}/beds/vox/{split}3.jsonl", keep)
+        st[split] = {"in": len(rows), "english_dropped": en, "kept": len(keep)}
+    return st
+
+
+def fleurs3(vol: str, screen_per_lang: int = 100) -> dict:
+    """FLEURS TEST, the FULL split per language (M2), one wav per ROW (the v1 bed keyed wavs by sentence id, so the
+    speakers of one sentence overwrote each other). wer_full = every number-free row; wer = the first
+    `screen_per_lang` of them (screening); num = every digit row."""
+    import librosa
+    import pyarrow.parquet as pq
+    import soundfile as sf
+    from huggingface_hub import hf_hub_download
+
+    out = f"{vol}/beds/fleurs3"
+    os.makedirs(f"{out}/wav", exist_ok=True)
+    full, screen, num, stats = [], [], [], {}
+    for lang in FLEURS:
+        path = hf_hub_download("google/fleurs", f"{lang}/test/0000.parquet", repo_type="dataset",
+                               revision="refs/convert/parquet")
+        t = pq.read_table(path, columns=["id", "audio", "raw_transcription"]).to_pylist()
+        random.Random(lang).shuffle(t)
+        nw = nn = 0
+        for k, r in enumerate(t):
+            x, sr = sf.read(io.BytesIO(r["audio"]["bytes"]), dtype="float32")
+            if x.ndim > 1:
+                x = x.mean(1)
+            if sr != 16000:
+                x = librosa.resample(x, orig_sr=sr, target_sr=16000)
+            p = f"{out}/wav/{lang}_{r['id']}_{k}.wav"
+            sf.write(p, x, 16000, subtype="PCM_16")
+            row = {"audio_filepath": p, "duration": len(x) / 16000, "text": r["raw_transcription"], "lang": lang,
+                   "id": f"{lang}_{r['id']}_{k}"}
+            if re.search(r"\d", r["raw_transcription"]):
+                num.append(row)
+                nn += 1
+            else:
+                full.append(row)
+                if nw < screen_per_lang:
+                    screen.append(row)
+                nw += 1
+        stats[lang] = (nw, nn)
+    _write(f"{out}/wer_full.jsonl", full)
+    _write(f"{out}/wer.jsonl", screen)
+    _write(f"{out}/num.jsonl", num)
+    return stats
+
+
+def e21_dev_cut(vol: str, win_s: float = 14.96, stride_s: float = 9.44, phases=(0.0, 3.15, 6.3)) -> list:
+    """The 11 E21_LOCAL calls as app-geometry windows (StreamingAsrConstants: 187-frame window, 118-frame stride) at
+    three phase offsets, so every number sits at several left-edge positions (M1). Returns every window row."""
+    import soundfile as sf
+
+    out = f"{vol}/beds/e21_dev"
+    os.makedirs(f"{out}/wav", exist_ok=True)
+    rows = []
+    for fid in sorted(E21_LOCAL):
+        x, sr = sf.read(f"{vol}/e21local/audio/{fid}.wav", dtype="float32")
+        if x.ndim > 1:
+            x = x.mean(1)
+        assert sr == 16000, sr
+        n, s = int(win_s * 16000), int(stride_s * 16000)
+        for ph in phases:
+            for a in range(int(ph * 16000), len(x) - 16000, s):
+                seg = x[a:a + n]
+                p = f"{out}/wav/{fid}_{a}.wav"
+                sf.write(p, seg, 16000, subtype="PCM_16")
+                rows.append({"audio_filepath": p, "duration": round(len(seg) / 16000, 3), "text": "", "call": fid,
+                             "start": round(a / 16000, 2), "phase": ph, "id": f"{fid}_{a}"})
+    return rows

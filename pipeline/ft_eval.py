@@ -116,12 +116,25 @@ RETRAIN_SETS = [
 ]
 SEALED_SETS = [("beds/vox/sealed.jsonl", "sealed/vox"), ("beds/e21x/sealed.jsonl", "sealed/e21x")]
 
+# Retrain-3 beds (R3.12.5/R3.15/R3.17): vox LID+dedupe, FLEURS one-wav-per-row (screen = 100/lang), mix3 d1_dev,
+# e21_dev (app-geometry windows; STOP checks only, never selection), tts/biz dev. FLEURS full split = final gate only.
+RETRAIN3_SETS = [
+    ("e22/numbers.jsonl", "e22_numbers", 0), ("e22/other.jsonl", "e22_other", 0),
+    ("replay/lspc_dev.jsonl", "lspc_dev", 600), ("mix3/d1_dev.jsonl", "d1_dev", 0),
+    ("beds/vox/dev3.jsonl", "vox_dev", 0), ("beds/fleurs3/wer.jsonl", "fleurs_wer", 0),
+    ("beds/fleurs3/num.jsonl", "fleurs_num", 0), ("beds/noise/all.jsonl", "noise", 0),
+    ("beds/adv/all.jsonl", "adv", 0), ("beds/fast/all.jsonl", "fast", 0), ("tts/d9sup/dev_ok.jsonl", "d9_dev", 0),
+    ("tts/biz/dev_ok.jsonl", "biz_dev", 0), ("beds/e21_dev/all.jsonl", "e21_dev", 0),
+]
+SEALED3_SETS = [("beds/vox/sealed3.jsonl", "sealed/vox"), ("beds/e21x/sealed.jsonl", "sealed/e21x"),
+                ("beds/fleurs3/wer_full.jsonl", "sealed/fleurs_full")]
 
-def eval_retrain(vol: str, m, run: str, suffix: str = "", sealed: bool = False) -> None:
+
+def eval_retrain(vol: str, m, run: str, suffix: str = "", sealed: bool = False, r3: bool = False) -> None:
     e22_other(vol)
     os.makedirs(f"{vol}/hyps/{run}/sealed", exist_ok=True)
-    for man, name, limit in RETRAIN_SETS:
+    for man, name, limit in (RETRAIN3_SETS if r3 else RETRAIN_SETS):
         transcribe_loaded(vol, m, run, man, name + suffix, limit=limit)
     if sealed:
-        for man, name in SEALED_SETS:
+        for man, name in (SEALED3_SETS if r3 else SEALED_SETS):
             transcribe_loaded(vol, m, run, man, name + suffix)

@@ -586,6 +586,51 @@ def k_disfluent(r):
     return f"{a}, or maybe {b}"
 
 
+# --- retrain-3 tts/biz (R3.16 #3, D-7): business shapes real calls use, several at word 0 ---------------
+
+
+def k_biz_code(r):
+    return _pick(r, [(0.3, "COVID nineteen"), (0.15, "Form ten K"), (0.1, "Form ten Q"), (0.1, "B to B"),
+                     (0.08, "D to C"), (0.07, "B to C"), (0.06, "ten K"), (0.05, "ten Q"), (0.05, "eight K"),
+                     (0.04, "four oh one K")])
+
+
+def k_date_year(r):
+    mo, d, y = r.choice(MONTHS), r.randint(1, 28), year(r.randint(2005, 2030))
+    return _pick(r, [(0.55, f"{mo} {ordinal(d)}, {y}"), (0.25, f"{mo} {ordinal(d)} {y}"),
+                     (0.2, f"the {ordinal(d)} of {mo} {y}")])
+
+
+def k_quarter_year(r):
+    q = r.randint(1, 4)
+    y = year(r.randint(2018, 2030))
+    return _pick(r, [(0.35, f"Q {ONES[q]} {y}"), (0.25, f"the {ordinal(q)} quarter of {y}"),
+                     (0.15, f"{ordinal(q)} quarter {y}"), (0.15, f"F Y {cardinal(r.randint(18, 30))}"),
+                     (0.1, f"fiscal {y}")])
+
+
+def k_small_pct(r):
+    return f"{_sub_one(r)} percent"
+
+
+def k_bps(r):
+    n = cardinal(r.choice([5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 80, 100, 110, 125, 140, 150, 175, 200, 250, 300]))
+    return _pick(r, [(0.5, f"{n} basis points"), (0.3, f"{n} B P S"), (0.2, f"{n} bips")])
+
+
+def k_signed(r):
+    sign = _pick(r, [(0.5, "negative"), (0.5, "minus")])
+    return _pick(r, [(0.35, f"{sign} {cardinal(r.randint(1, 99))} {r.choice(['million', 'billion', 'thousand'])} dollars"),
+                     (0.35, f"{sign} {_decimal(r, max_int=9).removeprefix('oh ')} percent"),
+                     (0.3, f"{sign} {cardinal(r.randint(1, 50))} percent")])
+
+
+def k_twenty_pause(r):
+    """A "twenty" year said with a pause before the second word (4366893 blend): voiced "twenty, fourteen", labelled
+    without the comma ("|" = the pause; gen.fill writes a space in the target and ", " for the synthesizer)."""
+    return f"twenty|{cardinal(r.randint(10, 29))}"
+
+
 KINDS = {name[2:]: fn for name, fn in globals().items() if name.startswith("k_")}
 
 
@@ -597,7 +642,7 @@ LETTER_NAMES = dict(zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ",
 # Acronyms said as words get a respelling for the synthesizer; other capitals are read as letters.
 SPOKEN = {"EBIT": "ee bit", "EBITDA": "ee bit dah", "YoY": "why oh why", "PhD": "pee aitch dee", "CapEx": "cap ex",
           "OpEx": "op ex", "SaaS": "sass", "GAAP": "gap", "AT": "ay tee", "B2B": "bee two bee", "Ms": "Miz",
-          "WiFi": "why fye"}
+          "WiFi": "why fye", "COVID": "co vid"}
 
 
 def tts_form(slot: str) -> str:

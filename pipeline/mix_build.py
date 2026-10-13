@@ -349,7 +349,8 @@ def trim_edges(rows, wav_dir, stats):
 
 
 NUMBER_PART = {"tts/v10pt/train_ok.jsonl": 0.9, "tts/d9sup/train_ok.jsonl": 1.0, "replay/lspc_train_numwords.jsonl": 1.0,
-               "mix/d1.jsonl": 1.0, "mix/d1_up.jsonl": 1.0, "mix/d10n.jsonl": 1.0, "mix/d2.jsonl": 1.0}
+               "mix/d1.jsonl": 1.0, "mix/d1_up.jsonl": 1.0, "mix/d10n.jsonl": 1.0, "mix/d2.jsonl": 1.0,
+               "tts/biz/train_ok.jsonl": 1.0, "mix3/d1.jsonl": 1.0, "mix3/d10n.jsonl": 1.0, "mix3/d2.jsonl": 1.0}
 
 
 def mix_share(vol: str, mix: list) -> dict:
@@ -363,3 +364,165 @@ def mix_share(vol: str, mix: list) -> dict:
         tot += take
         num += take * NUMBER_PART.get(path, 0.0)
     return {"parts": parts, "total_h": round(tot, 2), "number_h": round(num, 2), "share": round(num / max(tot, 1e-9), 4)}
+
+
+# ---- retrain-3 mix (R3.12.2, R3.16 #2, R3.17 F1/F4) ------------------------------------------------------------------
+
+KEEP_ALL_KINDS = {"code", "money", "percent", "scaled", "ordinal", "decade", "clock", "decimal", "ratio", "slash",
+                  "phone", "unit", "range"}
+TWO_K_LOW = re.compile(r"\btwo thousand (?:and )?(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+                       r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty(?: \w+)?)\b(?! (?:hundred|thousand|million|billion))")
+TWO_K_0X = re.compile(r"\btwo thousand (?:and )?(?:one|two|three|four|five|six|seven|eight|nine)\b(?! (?:hundred|thousand|million|billion|\w+teen))")
+TWENTY_YR = re.compile(r"\btwenty (?:ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|"
+                       r"twenty(?: \w+)?)\b")
+
+
+def build3(vol: str, seed: int = 1, aug_frac: float = 0.25, d1_h: float = 20.0, d10_h: float = 6.0,
+           d1p_h: float = 10.0, d2_h: float = 16.0, d2p_h: float = 14.0) -> dict:
+    """Retrain-3 mix -> /vol/mix3/. D1 = filtered crops3 (d1/crops3_ok: D-1b/D-4/veto/label assert done, fillers
+    restored) with the stratified quota; D1p = plain3 (fillers restored when d1/plain3_ok.jsonl exists); speed copies
+    from CLEAN audio, weighted to years; AUG after; eval dedupe by text 8-grams AND by wav path."""
+    r = random.Random(seed)
+    out = f"{vol}/mix3"
+    os.makedirs(f"{out}/wav", exist_ok=True)
+    stats = {}
+    eval_ng, eval_paths, texts = set(), set(), []
+    for f in glob.glob(f"{vol}/beds/e21x/refs/*.txt"):
+        texts += re.split(r"(?<=[.?!])\s+", open(f).read())
+    for pat in ("e22/all.jsonl", "beds/fleurs/*.jsonl", "beds/vox/*.jsonl", "beds/adv/all.jsonl", "beds/e21_dev/*.jsonl"):
+        for x in _rows(f"{vol}/{pat}"):
+            texts.append(x["text"].split("\t")[0])
+            eval_paths.add(os.path.basename(x.get("audio_filepath", "")))
+    eval_paths.discard("")
+    for t in texts:
+        eval_ng |= ngrams(t)
+    stats["eval_texts"], stats["eval_paths"] = len(texts), len(eval_paths)
+    assert len(texts) > 5000, f"eval texts missing ({len(texts)}): build the beds first"
+
+    def dedupe(rows, name):
+        hit = {id(x) for x in rows if ngrams(x["text"]) & eval_ng}
+        bad_v = {x.get("video") for x in rows if id(x) in hit and x.get("video")}
+        keep = [x for x in rows if not (id(x) in hit or (x.get("video") and x["video"] in bad_v))]
+        by_path = [x for x in keep if os.path.basename(x["audio_filepath"]) not in eval_paths]
+        stats[f"{name}_dedupe_dropped"] = len(rows) - len(keep)
+        stats[f"{name}_dedupe_videos"] = len(bad_v)
+        stats[f"{name}_dedupe_path_dropped"] = len(keep) - len(by_path)
+        return by_path
+
+    def assert_spoken(rows, name):
+        bad = [x for x in rows if WRITTEN_FORM.search(x["text"]) or re.search(r"[+#°¥⁇²³¹½¼¾]", x["text"])]
+        stats[f"{name}_written_form_dropped"] = len(bad)
+        return [x for x in rows if x not in bad] if bad else rows
+
+    # D1 + 3% video dev split
+    d1 = _rows(f"{vol}/d1/crops3_ok/*.jsonl")
+    stats["d1_in_rows"], stats["d1_in_h"] = len(d1), round(_h(d1), 2)
+    d1 = assert_spoken(dedupe(d1, "d1"), "d1")
+    dev_v = {x["video"] for x in d1 if zlib.crc32(x["video"].encode()) % 100 < 3}
+    _write(f"{out}/d1_dev.jsonl", [x for x in d1 if x["video"] in dev_v])
+    d1 = [x for x in d1 if x["video"] not in dev_v and 0.5 <= x["duration"] <= 20]
+    # stratified quota: every informative crop and every onset sub-crop; plain int/year/spelled crops fill the rest
+    keep = [x for x in d1 if x["onset"] or set(x["kinds"]) & KEEP_ALL_KINDS]
+    pool = [x for x in d1 if not (x["onset"] or set(x["kinds"]) & KEEP_ALL_KINDS)]
+    r.shuffle(pool)
+    n_2k = sum(bool(TWO_K_LOW.search(x["text"])) for x in keep + pool)
+    n_20 = sum(bool(TWENTY_YR.search(x["text"])) for x in keep + pool)
+    stats["year_ratio_in"] = {"two_thousand_1_29": n_2k, "twenty_10_29": n_20}
+    if n_2k > n_20 / 2.5:  # R3.16 #2: cap the 2000-2009 crops to restore the ratio
+        excess = int(n_2k - n_20 / 2.5)
+        drop = set()
+        for x in pool:
+            if len(drop) >= excess:
+                break
+            if TWO_K_0X.search(x["text"]):
+                drop.add(id(x))
+        pool = [x for x in pool if id(x) not in drop]
+        stats["year_cap_dropped"] = len(drop)
+    room = max(0.0, d1_h - _h(keep))
+    d1 = keep + _take(pool, room)
+    stats["d1_keep_all_h"], stats["d1_pool_taken_h"] = round(_h(keep), 2), round(_h(d1) - _h(keep), 2)
+    stats["year_ratio_out"] = {"two_thousand_1_29": sum(bool(TWO_K_LOW.search(x["text"])) for x in d1),
+                               "twenty_10_29": sum(bool(TWENTY_YR.search(x["text"])) for x in d1)}
+    stats["d1_onset_share"] = round(sum(x["duration"] for x in d1 if x["onset"]) / max(1e-9, _h(d1) * 3600), 3)
+    r.shuffle(d1)
+
+    # D1p: plain3 (stock CER <= 0.15), fillers restored when available
+    src = f"{vol}/d1/plain3_ok.jsonl" if os.path.exists(f"{vol}/d1/plain3_ok.jsonl") else f"{vol}/d1/plain3.jsonl"
+    stats["d1p_source"] = src
+    d1p = [x for x in _rows(src) if 1 <= x["duration"] <= 20 and not re.search(r"[#=*_<>\[\]{}|~^@&]", x["text"])]
+    d1p = [x for x in assert_spoken(dedupe(d1p, "d1p"), "d1p") if x["video"] not in dev_v]
+    r.shuffle(d1p)
+    d1p = _take(d1p, d1p_h)
+
+    d2, d2p = [], []
+    for f in sorted(glob.glob(f"{vol}/d2/*/digit.jsonl")):
+        d2 += [json.loads(line) for line in open(f)]
+    for f in sorted(glob.glob(f"{vol}/d2/*/plain.jsonl")):
+        d2p += [json.loads(line) for line in open(f)]
+    stats["d2_unk_dropped"] = sum("⁇" in x["text"] for x in d2 + d2p)
+    d2 = [x for x in d2 if "⁇" not in x["text"]]
+    d2p = [x for x in d2p if "⁇" not in x["text"]]
+    d2, d2p = dedupe(d2, "d2"), dedupe(d2p, "d2p")
+    d2 = _take_per_lang_src(d2, d2_h, r)
+    d2p = _take_per_lang_src(d2p, d2p_h, r)
+    stats["d2_src_h"] = {k: round(sum(x["duration"] for x in d2 if x["src"] == k) / 3600, 2) for k in ("vox", "yodas", "fleurs")}
+
+    # D10 speed copies from CLEAN audio (before AUG), half of D10n from year crops
+    def speed_copies(cand, hours, tag):
+        outr, acc = [], 0.0
+        for i, x in enumerate(cand):
+            if acc >= hours * 3600:
+                break
+            f = r.uniform(1.15, 1.3)
+            wps = x.get("wps") or len(x["text"].split()) / max(x["duration"], 0.1)
+            if wps * f > 5.5:
+                f = 5.5 / wps
+            if f < 1.1:
+                continue
+            o = f"{out}/wav/spd_{tag}_{i}.wav"
+            try:
+                speed(x["audio_filepath"], o, f)
+            except Exception:
+                continue
+            d = x["duration"] / f
+            outr.append({**x, "audio_filepath": o, "duration": round(d, 3), "speed": round(f, 3)})
+            acc += d
+        return outr
+
+    yrs = [x for x in d1 if "year" in x["kinds"] or "decade" in x["kinds"]]
+    rest = [x for x in d1 if not ("year" in x["kinds"] or "decade" in x["kinds"])]
+    r.shuffle(yrs)
+    r.shuffle(rest)
+    d10n = speed_copies(yrs, d10_h / 2, "ny")
+    d10n += speed_copies(rest, d10_h - _h(d10n), "n")
+    stats["d10n_year_h"] = round(sum(x["duration"] for x in d10n if "year" in x["kinds"] or "decade" in x["kinds"]) / 3600, 2)
+    plain_src = d1p + _rows(f"{vol}/replay/lspc_train.jsonl")[:3000] + _rows(f"{vol}/replay/icsi_train.jsonl")
+    plain_src = [x for x in plain_src if x["duration"] <= 20]
+    r.shuffle(plain_src)
+    d10p = speed_copies(plain_src, _h(d10n), "p")
+
+    # AUG in place (after the speed copies)
+    deg = Degrader(f"{vol}/slr28/RIRS_NOISES", seed)
+    aug_counts = {}
+    for name, rows in (("d1", d1), ("d2", d2)):
+        for i, x in enumerate(rows):
+            if r.random() >= aug_frac:
+                continue
+            o = f"{out}/wav/aug_{name}_{i}.wav"
+            try:
+                k = deg(x["audio_filepath"], o)
+            except Exception:
+                continue
+            aug_counts[k] = aug_counts.get(k, 0) + 1
+            rows[i] = {**x, "audio_filepath": o, "aug": k}
+    stats["aug"] = aug_counts
+    stats["d1p_short_of_target_h"] = round(max(0.0, d1p_h - _h(d1p)), 2)
+    for name, rows in (("d1", d1), ("d1p", d1p), ("d2", d2), ("d2p", d2p), ("d10n", d10n), ("d10p", d10p)):
+        _write(f"{out}/{name}.jsonl", rows)
+        stats[f"{name}_h"] = round(_h(rows), 2)
+        stats[f"{name}_rows"] = len(rows)
+    stats["d2_h_by_lang"] = {}
+    for x in d2:
+        stats["d2_h_by_lang"][x["lang"]] = round(stats["d2_h_by_lang"].get(x["lang"], 0) + x["duration"] / 3600, 2)
+    json.dump(stats, open(f"{out}/stats.json", "w"), indent=1)
+    return stats

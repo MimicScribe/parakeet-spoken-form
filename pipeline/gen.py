@@ -79,8 +79,8 @@ def fill(carrier: str, r: random.Random):
         kind = m.group(1)
         slot = readings.KINDS[kind](r)
         kinds.append(kind)
-        target = target.replace(m.group(0), slot, 1)
-        tts = tts.replace(m.group(0), readings.tts_form(slot), 1)
+        target = target.replace(m.group(0), slot.replace("|", " "), 1)
+        tts = tts.replace(m.group(0), readings.tts_form(slot).replace("|", ", "), 1)
     if carrier.startswith("{"):
         target, tts = target[0].upper() + target[1:], tts[0].upper() + tts[1:]
     return target, tts, kinds

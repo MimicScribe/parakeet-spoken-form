@@ -38,7 +38,7 @@ nemo_image = (
     .env({"HF_HOME": f"{VOL}/hf", "HF_HUB_ENABLE_HF_TRANSFER": "1"})
     .add_local_python_source("common", "data_e22", "data_replay", "data_fleurs", "ft_train", "ft_eval", "rescore", "preflight",
                               "labeller", "readings", "label_gpu", "harvest", "beds", "veto",
-                              "mix_build", "recrop")
+                              "mix_build", "recrop", "score_retrain")
 )
 
 tts_image = (
@@ -55,6 +55,7 @@ tts_image = (
     .add_local_file(os.path.join(os.path.dirname(__file__), "carriers_year.txt"), "/root/carriers_year.txt")
     .add_local_file(os.path.join(os.path.dirname(__file__), "carriers_year_b.txt"), "/root/carriers_year_b.txt")
     .add_local_file(os.path.join(os.path.dirname(__file__), "carriers_d9.txt"), "/root/carriers_d9.txt")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "carriers_biz.txt"), "/root/carriers_biz.txt")
 )
 
 
@@ -728,6 +729,58 @@ def s3_recrop(only: str = "", rows_dir: str = "d1/rows3"):
     print("TOTAL", json.dumps(tot))
 
 
+@app.cls(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=2 * 3600, max_containers=8, retries=1)
+class CropDecoder:
+    @modal.enter()
+    def load(self):
+        import torch
+
+        import ft_eval
+
+        self.m = ft_eval.load_model(VOL, "ultra", ultra_path())
+        self.stock = {k: v.clone() for k, v in self.m.state_dict().items() if not k.startswith(("encoder.", "preprocessor."))}
+        self.v10 = torch.load(f"{VOL}/exp/v10pt/step1500.pt", map_location="cpu")
+
+    @modal.method()
+    def shard(self, tag: str, crops_dir: str = "d1/crops3", out_dir: str = "d1/dec3") -> dict:
+        """Stock + v10pt greedy decodes of one shard's crops (filters D-1b/D-2/D-4, restore_fillers, F2 report)."""
+        import json
+        import os
+
+        import ft_eval
+
+        vol.reload()
+        rows = [json.loads(line) for line in open(f"{VOL}/{crops_dir}/{tag}.jsonl")]
+        paths = [r["audio_filepath"] for r in rows]
+        res = {p: {} for p in paths}
+        for name, st in (("stock", self.stock), ("v10", self.v10)):
+            self.m.load_state_dict(st, strict=False)
+            for p, h in zip(paths, ft_eval.decode(self.m, paths, batch_size=32) if paths else []):
+                res[p][name] = h["text"]
+        os.makedirs(f"{VOL}/{out_dir}", exist_ok=True)
+        json.dump(res, open(f"{VOL}/{out_dir}/{tag}.json", "w"))
+        vol.commit()
+        return {"shard": tag, "crops": len(paths)}
+
+
+@app.function(image=scan_image, volumes={VOL: vol}, timeout=4 * 3600)
+def s3_decode_crops(only: str = "", crops_dir: str = "d1/crops3", out_dir: str = "d1/dec3"):
+    """Parallel (8 x L4) stock + v10pt decode of the recropped shards; skips shards already decoded."""
+    import glob
+    import os
+
+    vol.reload()
+    tags = sorted(os.path.basename(f)[:-6] for f in glob.glob(f"{VOL}/{crops_dir}/*.jsonl"))
+    if only:
+        tags = [t for t in tags if t in only.split(",")]
+    tags = [t for t in tags if not os.path.exists(f"{VOL}/{out_dir}/{t}.json")]
+    n = 0
+    for st in CropDecoder().shard.map(tags, kwargs={"crops_dir": crops_dir, "out_dir": out_dir}, return_exceptions=True):
+        print(st if not isinstance(st, Exception) else f"FAIL {repr(st)[:300]}")
+        n += st.get("crops", 0) if isinstance(st, dict) else 0
+    print(f"TOTAL {n} crops from {len(tags)} shards")
+
+
 @app.function(image=nemo_image, volumes={VOL: vol}, secrets=[hf_secret], gpu="L4", timeout=4 * 3600, max_containers=8,
               retries=1)
 def d2_harvest_lang(lang: str, digit_h: float = 1.2, plain_h: float = 1.2) -> dict:
@@ -789,6 +842,58 @@ def build_beds(which: str = "vox,fleurs,noise"):
         vol.commit()
 
 
+@app.function(image=nemo_image, volumes={VOL: vol}, secrets=[hf_secret], gpu="L4", cpu=8, memory=32768,
+              timeout=6 * 3600)
+def build_beds3(which: str = "vox,fleurs,e21"):
+    """Retrain-3 beds: vox LID+dedupe, FLEURS full split, e21_dev (app windows; kept where stock writes a digit or
+    v10pt a number word) + the blend reproduction check with rt2_main_s2 (R3.12.5)."""
+    import json
+    import os
+    import re
+
+    import torch
+
+    os.environ["HF_HOME"] = "/tmp/hf"
+    import beds
+    import ft_eval
+    import score_retrain
+
+    vol.reload()
+    if "vox" in which:
+        print("vox3", json.dumps(beds.vox3(VOL)))
+        vol.commit()
+    if "fleurs" in which:
+        print("fleurs3", json.dumps(beds.fleurs3(VOL)))
+        vol.commit()
+    if "e21" in which:
+        rows = beds.e21_dev_cut(VOL)
+        vol.commit()
+        m = ft_eval.load_model(VOL, "ultra", ultra_path())
+        stock = {k: v.clone() for k, v in m.state_dict().items() if not k.startswith(("encoder.", "preprocessor."))}
+        paths = [r["audio_filepath"] for r in rows]
+        hyp = {}
+        for name, sd in (("stock", stock), ("v10", f"{VOL}/exp/v10pt/step1500.pt"),
+                         ("rt2", f"{VOL}/exp/rt2_main_s2/step3000.pt")):
+            m.load_state_dict(sd if isinstance(sd, dict) else torch.load(sd, map_location="cpu"), strict=False)
+            hyp[name] = [h["text"] for h in ft_eval.decode(m, paths, batch_size=32)]
+        num_w = re.compile(r"\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty|"
+                           r"forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|percent)\b", re.I)
+        keep = []
+        for i, r in enumerate(rows):
+            r = {**r, "stock": hyp["stock"][i], "v10": hyp["v10"][i], "rt2": hyp["rt2"][i]}
+            if re.search(r"\d", r["stock"]) or num_w.search(r["v10"]):
+                keep.append(r)
+            else:
+                os.remove(r["audio_filepath"])
+        beds._write(f"{VOL}/beds/e21_dev/all.jsonl", keep)
+        bl = {n: [(r["call"], r["start"], m_.group(0)) for r in keep for m_ in score_retrain.BLEND.finditer(r[n])]
+              for n in ("stock", "v10", "rt2")}
+        print("e21_dev windows", len(rows), "kept", len(keep), f"{sum(r['duration'] for r in keep) / 3600:.2f} h")
+        print("BLEND hits", json.dumps({n: len(v) for n, v in bl.items()}), "rt2:", json.dumps(bl["rt2"][:20]))
+        print("4366893 rt2 blends:", sum(c == "4366893" for c, _, _ in bl["rt2"]))
+        vol.commit()
+
+
 mix_image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("ffmpeg")
@@ -805,6 +910,17 @@ def build_mix(seed: int = 1):
 
     vol.reload()
     print(json.dumps(mix_build.build(VOL, seed=seed), indent=1))
+    vol.commit()
+
+
+@app.function(image=mix_image, volumes={VOL: vol}, cpu=8, memory=32768, timeout=8 * 3600)
+def build_mix3(seed: int = 1, d1_h: float = 20.0, d10_h: float = 6.0):
+    import json
+
+    import mix_build
+
+    vol.reload()
+    print(json.dumps(mix_build.build3(VOL, seed=seed, d1_h=d1_h, d10_h=d10_h), indent=1))
     vol.commit()
 
 
@@ -827,6 +943,48 @@ def retrain_mix(arm: str, tts_h: float = 6.0) -> list:
     if arm == "abl_nonen":
         return base + nonen
     return base + en + nonen
+
+
+def retrain3_mix() -> list:
+    """Retrain-3 mix with the R3.17 F6 tag table. Hours <= 0 = all rows of that manifest."""
+    return [("tts/v10pt/train_ok.jsonl", 0, "free"), ("tts/d9sup/train_ok.jsonl", 0, "free"),
+            ("tts/biz/train_ok.jsonl", 0, "free"),
+            ("replay/lspc_train.jsonl", 35.0, "anchor_num"), ("replay/lspc_train_numwords.jsonl", 5.0, "anchor_num"),
+            ("replay/icsi_train.jsonl", 0, "anchor"), ("mix3/d1p.jsonl", 0, "anchor"), ("mix3/d10p.jsonl", 0, "anchor"),
+            ("mix3/d1.jsonl", 0, "span"), ("mix3/d10n.jsonl", 0, "span"),
+            ("replay/fleurs_train_multi.jsonl", 3.0, "nonen"), ("mix3/d2.jsonl", 0, "nonen"), ("mix3/d2p.jsonl", 0, "nonen")]
+
+
+# Screening arms (R3.12.4 + R3.14: S-D dropped). Each is a full 4000-step cosine run evaluated at step 1000; the winner
+# continues as final seed 1.
+R3_ARMS = {"S-A": dict(wf_weight=1.0, l2sp_c=0.3, lr=1e-4), "S-B": dict(wf_weight=3.0, l2sp_c=0.3, lr=1e-4),
+           "S-C": dict(wf_weight=1.0, l2sp_c=0.0, lr=1e-4), "S-E": dict(wf_weight=1.0, l2sp_c=0.3, lr=5e-5)}
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-40GB", cpu=8, memory=32768, timeout=24 * 3600,
+              retries=modal.Retries(max_retries=2, initial_delay=30.0))
+def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, save_every: int = 250,
+             en_weight: float = 1.0, check_share: bool = True, warmup: int = 50):
+    """One retrain-3 run (R3.13): r3 losses, decoupled L2-SP to v10pt@1500, 200 s x 2 accumulated batches.
+    Rehearsal (E2) = a small max_steps. Resumes from exp/<run>/last.ckpt after a preemption."""
+    import json
+
+    import ft_train
+    import mix_build
+
+    vol.reload()
+    cfg = R3_ARMS[arm]
+    mix = retrain3_mix()
+    share = mix_build.mix_share(VOL, mix)
+    print("MIX", json.dumps(share), "ARM", arm, json.dumps(cfg))
+    if check_share:
+        assert 0.35 <= share["share"] <= 0.40, f"number share {share['share']} outside 35-40% (R3.17 F4)"
+    ft_train.train(VOL, ultra_path(), run, mix=mix, max_steps=max_steps, lr=cfg["lr"], warmup=warmup, seed=seed,
+                   init_from="v10pt@1500", batch_duration=200, accumulate=2, spec_augment=False, kl_weight=10.0,
+                   kl_punct=30.0, kl_tok=1.0, save_every=save_every, on_save=vol.commit, stage_dir="/tmp/stage",
+                   r3=True, wf_weight=cfg["wf_weight"], en_weight=en_weight, l2sp_c=cfg["l2sp_c"],
+                   l2sp_anchor=f"{VOL}/exp/v10pt/step1500.pt")
+    vol.commit()
 
 
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-40GB", cpu=8, memory=32768, timeout=6 * 3600,
@@ -858,7 +1016,7 @@ def retrain(run: str, arm: str = "main", seed: int = 1, max_steps: int = 3000, k
 
 
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=4 * 3600, max_containers=6)
-def eval_retrain(run: str, step: int = 0, sealed: bool = False):
+def eval_retrain(run: str, step: int = 0, sealed: bool = False, r3: bool = False):
     """Decode every retrain bed with exp/<run>/step<step>.pt ("v10pt"/"ultra" baselines: their own weights)."""
     import torch
 
@@ -869,7 +1027,7 @@ def eval_retrain(run: str, step: int = 0, sealed: bool = False):
     if run != "ultra":
         m.load_state_dict(torch.load(f"{VOL}/exp/{run}/step{step}.pt", map_location="cpu"), strict=False)
     ft_eval.eval_retrain(VOL, m.cuda().eval(), f"{run}@{step}" if run != "ultra" else "ultra_rt",
-                         sealed=sealed)
+                         sealed=sealed, r3=r3)
     vol.commit()
 
 
@@ -882,22 +1040,22 @@ class Vetoer:
         self.v = veto.Veto()
 
     @modal.method()
-    def tag(self, tag: str) -> dict:
-        st = self.v.rows(VOL, tag)
+    def tag(self, tag: str, rows_dir: str = "d1/rows", out_dir: str = "d1/veto") -> dict:
+        st = self.v.rows(VOL, tag, rows_dir=rows_dir, out_dir=out_dir)
         vol.commit()
         return st
 
 
 @app.function(image=scan_image, volumes={VOL: vol}, timeout=6 * 3600)
-def s3_veto(tags: str = ""):
+def s3_veto(tags: str = "", rows_dir: str = "d1/rows", out_dir: str = "d1/veto"):
     import glob
     import json
     import os
 
     vol.reload()
-    ts = tags.split(",") if tags else sorted(os.path.basename(f)[:-6] for f in glob.glob(f"{VOL}/d1/rows/*.jsonl"))
+    ts = tags.split(",") if tags else sorted(os.path.basename(f)[:-6] for f in glob.glob(f"{VOL}/{rows_dir}/*.jsonl"))
     tot = [0, 0]
-    for st in Vetoer().tag.map(ts, return_exceptions=True):
+    for st in Vetoer().tag.map(ts, kwargs={"rows_dir": rows_dir, "out_dir": out_dir}, return_exceptions=True):
         if isinstance(st, Exception):
             print("FAIL", repr(st)[:300])
             continue
