@@ -38,7 +38,7 @@ nemo_image = (
     .env({"HF_HOME": f"{VOL}/hf", "HF_HUB_ENABLE_HF_TRANSFER": "1"})
     .add_local_python_source("common", "data_e22", "data_replay", "data_fleurs", "ft_train", "ft_eval", "rescore", "preflight",
                               "labeller", "readings", "label_gpu", "harvest", "beds", "veto",
-                              "mix_build")
+                              "mix_build", "recrop")
 )
 
 tts_image = (
@@ -615,6 +615,49 @@ def s3_label(lang: str = "en", limit: int = 0, only: str = "", only_pct: bool = 
         print(json.dumps(st))
         for k in tot:
             tot[k] += st.get(k, 0)
+    print("TOTAL", json.dumps(tot))
+
+
+@app.cls(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=2 * 3600, max_containers=8, retries=1)
+class Recropper:
+    @modal.enter()
+    def load(self):
+        import os
+
+        import recrop
+
+        os.environ["HF_HOME"] = "/tmp/hf"
+        self.sc = recrop.W2VScorer()
+
+    @modal.method()
+    def shard(self, tag: str) -> dict:
+        import recrop
+
+        st = recrop.recrop_shard(VOL, self.sc, tag)
+        vol.commit()
+        return st
+
+
+@app.function(image=scan_image, volumes={VOL: vol}, timeout=6 * 3600)
+def s3_recrop(only: str = ""):
+    """Quiet-gap re-crop of every labelled English shard -> /vol/d1/crops2 (retrain-3)."""
+    import glob
+    import json
+    import os
+
+    vol.reload()
+    tags = sorted(os.path.basename(f)[:-6] for f in glob.glob(f"{VOL}/d1/rows/*.jsonl") if not f.endswith("_pct.jsonl"))
+    if only:
+        tags = [t for t in tags if t in only.split(",")]
+    tot = {}
+    for st in Recropper().shard.map(tags, return_exceptions=True):
+        if isinstance(st, Exception):
+            print("FAIL", repr(st)[:400])
+            continue
+        print(json.dumps(st))
+        for k, v in st.items():
+            if isinstance(v, (int, float)):
+                tot[k] = round(tot.get(k, 0) + v, 3)
     print("TOTAL", json.dumps(tot))
 
 
