@@ -341,6 +341,8 @@ def spans(text: str, lang: str) -> list[Span]:
             note = d.get("note", "")
         except Missing as e:
             cs, note = [], f"missing {e}"
+        except (ValueError, IndexError) as e:  # e.g. pt "0.011" read as a digit string with a point
+            cs, note = [], f"error {e!r}"[:80]
         out.append(Span(d["a"], d["b"], text[d["a"]:d["b"]], d["kind"], cs, note))
     return out
 
@@ -392,3 +394,16 @@ def render(text: str, sp: list[Span], choice: list[int]) -> str:
         pos = s.end
     out.append(text[pos:])
     return "".join(out)
+
+
+def all_digits_spanned(text: str, lang: str) -> bool:
+    """True when the text has digits, every digit lies inside a number span that can have readings (not a skipped
+    range/sign/degree/glued code/ambiguous grouping). P3 prefilter: a row with an unreadable number can never be kept."""
+    ds = _find(text, lang)
+    if not ds or any(d["kind"] == "skip" for d in ds):
+        return False
+    cover = [False] * len(text)
+    for d in ds:
+        for i in range(d["a"], d["b"]):
+            cover[i] = True
+    return all(cover[i] for i, c in enumerate(text) if c.isdigit())
