@@ -981,6 +981,49 @@ def retrain3_mix() -> list:
             ("replay/fleurs_train_multi.jsonl", 3.0, "nonen"), ("mix3/d2.jsonl", 0, "nonen"), ("mix3/d2p.jsonl", 0, "nonen")]
 
 
+@app.function(image=nemo_image, volumes={VOL: vol}, cpu=16, memory=32768, timeout=2 * 3600)
+def audit_mix3(fix: bool = True, tol: float = 0.1):
+    """Every row of every retrain-3 mix part: the wav exists, is 16 kHz, and its real duration matches the manifest
+    (P3 found FLEURS ids shared across speakers: D2 wavs named by id were overwritten). fix=True rewrites the mix3/
+    parts without the bad rows (the originals are kept as <part>.pre_audit.jsonl)."""
+    import json
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
+    import soundfile as sf
+
+    vol.reload()
+
+    def chk(r):
+        try:
+            i = sf.info(r["audio_filepath"])
+        except Exception:
+            return "missing"
+        if i.samplerate != 16000:
+            return "sr"
+        return "dur" if abs(i.frames / i.samplerate - r["duration"]) > tol else ""
+
+    out = {}
+    for path, _h, tag in retrain3_mix():
+        rows = [json.loads(line) for line in open(f"{VOL}/{path}")]
+        with ThreadPoolExecutor(64) as ex:
+            res = list(ex.map(chk, rows))
+        bad = {k: sum(x == k for x in res) for k in ("missing", "sr", "dur")}
+        dup = len(rows) - len({r["audio_filepath"] for r in rows})
+        out[path] = {"rows": len(rows), **bad, "dup_paths": dup,
+                     "bad_examples": [(r["audio_filepath"], r["duration"], x) for r, x in zip(rows, res) if x][:5]}
+        if fix and path.startswith("mix3/") and any(res):
+            os.replace(f"{VOL}/{path}", f"{VOL}/{path[:-6]}.pre_audit.jsonl")
+            with open(f"{VOL}/{path}", "w") as f:
+                for r, x in zip(rows, res):
+                    if not x:
+                        f.write(json.dumps(r, ensure_ascii=False) + "\n")
+            out[path]["rewritten"] = True
+        print(path, json.dumps(out[path]))
+    json.dump(out, open(f"{VOL}/mix3/audit.json", "w"), indent=1)
+    vol.commit()
+
+
 # Screening arms (R3.12.4 + R3.14: S-D dropped). Each is a full 4000-step cosine run evaluated at step 1000; the winner
 # continues as final seed 1.
 R3_ARMS = {"S-A": dict(wf_weight=1.0, l2sp_c=0.3, lr=1e-4), "S-B": dict(wf_weight=3.0, l2sp_c=0.3, lr=1e-4),
