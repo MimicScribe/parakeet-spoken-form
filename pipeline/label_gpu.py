@@ -19,7 +19,7 @@ import re
 import labeller as L
 
 MARGIN = 3.0
-RECORD_STOCK = True  # validation: also score every candidate under STOCK's decoder+joint
+RECORD_STOCK = False  # validation: also score every candidate under STOCK's decoder+joint
 W2V = "facebook/wav2vec2-large-960h-lv60-self"
 FILLERS = re.compile(r"\b(?:uh|um|uhm|er|erm|hmm|mm|mhm|uh-huh|mm-hmm)\b", re.I)
 
@@ -213,24 +213,33 @@ def choose(sc: Scorer, f, el, lp, text, sp):
         if len(s.cands) == 1:
             info.append({"n": 1})
             continue
-        tdt, ctc, stk = [], [], []
+        # Rule chosen on literal-reading gold (2026-10-13): wav2vec2 CTC decides the reading (>= MARGIN nats over every
+        # candidate with DIFFERENT words + exact fit in its own greedy transcript, checked by the caller). Requiring the
+        # v10pt or stock TDT scorer to agree removed 97-100% of hundred-pairs and most "two thousand X" years: both
+        # Parakeet decoders carry the very prior this retrain corrects. TDT only picks the orthography among
+        # candidates with the same words.
+        ctc = []
         for c in range(len(s.cands)):
             ch = choice[:]
             ch[i] = c
-            t = L.render(text, sp, ch)
-            tdt.append(sc.tdt_nll(f, el, t))
-            ctc.append(sc.ctc_nll(lp, t))
-            stk.append(sc.tdt_nll(f, el, t, sc.stock) if RECORD_STOCK else 0.0)
-        bt = min(range(len(tdt)), key=tdt.__getitem__)
-        bc = min(range(len(ctc)), key=ctc.__getitem__)
-        # Orthographic siblings (same words for the CTC scorer) are not competitors: margins are taken against the best
-        # candidate with DIFFERENT words; the TDT pick supplies the orthography.
+            ctc.append(sc.ctc_nll(lp, L.render(text, sp, ch)))
         key = [norm_ctc(c) for c in s.cands]
-        other_t = [tdt[c] for c in range(len(tdt)) if key[c] != key[bt]]
+        bc = min(range(len(ctc)), key=ctc.__getitem__)
         other_c = [ctc[c] for c in range(len(ctc)) if key[c] != key[bc]]
-        mt = (min(other_t) - tdt[bt]) if other_t else float("inf")
         mc = (min(other_c) - ctc[bc]) if other_c else float("inf")
-        ok = key[bt] == key[bc] and mt >= MARGIN and mc >= MARGIN
+        same = [c for c in range(len(s.cands)) if key[c] == key[bc]]
+        tdt = [0.0] * len(s.cands)
+        if len(same) > 1:
+            for c in same:
+                ch = choice[:]
+                ch[i] = c
+                tdt[c] = sc.tdt_nll(f, el, L.render(text, sp, ch))
+            bt = min(same, key=tdt.__getitem__)
+        else:
+            bt = bc
+        mt = 0.0
+        ok = mc >= MARGIN
+        stk = []
         choice[i] = bt if ok else 0
         info.append({"n": len(s.cands), "tdt": bt, "ctc": bc, "mt": round(mt, 2), "mc": round(mc, 2), "ok": ok,
                      "s_tdt": [round(x, 2) for x in tdt], "s_ctc": [round(x, 2) for x in ctc],
