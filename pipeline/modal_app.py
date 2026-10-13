@@ -540,6 +540,66 @@ def s3_fetch_shard(path: str, lang: str) -> dict:
     return st
 
 
+@app.function(image=scan_image, volumes={VOL: vol}, secrets=[hf_secret], cpu=2, memory=8192, timeout=3600,
+              retries=modal.Retries(max_retries=2, initial_delay=60.0))
+def d1p_fetch_shard(path: str, hours: float) -> dict:
+    import fetch
+
+    vol.reload()
+    st = fetch.fetch_plain(VOL, path, hours=hours)
+    vol.commit()
+    return st
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=3 * 3600)
+def d1p_filter(max_cer: float = 0.15):
+    """Stock-decode every fetched plain row; keep caption-vs-stock CER <= max_cer -> /vol/d1/plain3.jsonl."""
+    import glob
+    import json
+
+    import ft_eval
+    import label_gpu
+
+    vol.reload()
+    rows = [json.loads(l) for f in sorted(glob.glob(f"{VOL}/yodas/en_plain/manifests/*.jsonl")) for l in open(f)]
+    m = ft_eval.load_model(VOL, "ultra", ultra_path())
+    hyps = ft_eval.decode(m, [r["audio_filepath"] for r in rows], batch_size=32)
+    keep = []
+    for r, h in zip(rows, hyps):
+        if label_gpu.cer(r["text"], h["text"]) <= max_cer:
+            keep.append({"audio_filepath": r["audio_filepath"], "duration": r["duration"], "text": r["text"],
+                         "video": r["original_audio_id"], "stock": h["text"]})
+    with open(f"{VOL}/d1/plain3.jsonl", "w") as f:
+        for r in keep:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    print(f"plain rows {len(rows)} ({sum(r['duration'] for r in rows) / 3600:.2f} h) -> kept {len(keep)} "
+          f"({sum(r['duration'] for r in keep) / 3600:.2f} h)")
+    vol.commit()
+
+
+@app.function(image=scan_image, volumes={VOL: vol}, timeout=4 * 3600)
+def d1p_fetch(hours: float = 0.5):
+    """D1p: number-free rows from the 33 labelled English shards (paths from their manifests)."""
+    import glob
+    import json
+    import os
+
+    vol.reload()
+    paths = []
+    for f in sorted(glob.glob(f"{VOL}/d1/rows/*.jsonl")):  # the 33 labelled shards (rows3 fills while this runs)
+        tag = os.path.basename(f)[:-6]
+        if tag.endswith("_pct"):
+            continue
+        r = json.loads(open(f"{VOL}/yodas/en/manifests/{tag}.jsonl").readline())
+        paths.append(r["shard"])
+    paths = sorted(set(paths))
+    tot = 0.0
+    for st in d1p_fetch_shard.map(paths, kwargs={"hours": hours}, return_exceptions=True):
+        print(st if not isinstance(st, Exception) else f"FAIL {repr(st)[:300]}")
+        tot += st.get("h", 0) if isinstance(st, dict) else 0
+    print(f"TOTAL {tot:.2f} h from {len(paths)} shards")
+
+
 @app.function(image=scan_image, volumes={VOL: vol}, secrets=[hf_secret], timeout=6 * 3600)
 def s3_fetch(lang: str = "en", limit: int = 0):
     """Audio for every scanned shard of `lang` (S3)."""
