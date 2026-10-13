@@ -106,7 +106,11 @@ def lang_of(r):
     return i.split("_")[0] if "_" in i else "?"
 
 
-def score(root, run, want_split="dev", exclude=frozenset()):
+def digit_runs(t):
+    return sorted(re.sub(r"[.,\u00a0 ]", "", d) for d in re.findall(r"\d+(?:[.,\u00a0 ]\d+)*", t))
+
+
+def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"):
     s = {}
     for name in ("e22_other", "lspc_dev", "d1_dev", "e22_numbers"):
         s[f"wer_{name}"] = wer(load(root, run, name))
@@ -132,11 +136,18 @@ def score(root, run, want_split="dev", exclude=frozenset()):
     # readings (labeller candidates, word-boundary match); other languages = every expected value present as digits.
     adv = defaultdict(lambda: [0, 0])
     adv_leak = 0
+    # non-English: the contract is STOCK's digits (labels were stock's), so a row is right when its digit runs equal
+    # stock's on the same clip and no English number word appears (the script's canonical values like "1200000000"
+    # for "1,2 mil millones" are not a writing anyone produces)
+    stock_d = {r["id"]: digit_runs(r["hyp"]) for r in load(root, stock_run, "adv")}
     for r in load(root, run, "adv"):
         text, exp, lang, cat, split = r["ref"].split("\t")
         if split != want_split or r["id"] in exclude:
             continue
-        ok = adv_ok(text, exp, lang, r["hyp"])
+        if lang == "en":
+            ok = adv_ok(text, exp, lang, r["hyp"])
+        else:
+            ok = digit_runs(r["hyp"]) == stock_d.get(r["id"]) and not EN_NUM.search(r["hyp"])
         if lang != "en":
             adv_leak += bool(EN_NUM.search(r["hyp"]))
         key = ("en" if lang == "en" else "xx") + ":" + cat
@@ -165,16 +176,39 @@ def score(root, run, want_split="dev", exclude=frozenset()):
     return s
 
 
+def value_ok(exp, hyp):
+    """Every expected VALUE present, written as digits or spoken (reading-agnostic)."""
+    want = [w for w in exp.split("|") if w]
+    got = {_num_norm(t) for t in re.findall(r"\d+(?:[.,\u00a0 ]\d+)*", hyp)} | {_num_norm(v) for v in values_spoken(hyp)}
+    return bool(want) and all(_num_norm(w) in got for w in want)
+
+
 def exclusions(root, stock_run, v10_run):
-    """D.2: adversarial rows that BOTH stock and v10pt get wrong are excluded (the TTS or the script is suspect)."""
-    def wrong(run):
+    """D.2: adversarial rows where BOTH stock and v10pt miss the expected VALUE are excluded (the TTS or the script is
+    suspect). Value, not reading: stock writes digits, so judging it by spoken reading would exclude every English
+    row v10pt gets wrong (circular)."""
+    def stock_wrong():
+        # English rows only (non-English is scored against stock itself). stock writes digits ("4:40", "555-0142", "-5"): every expected value's digits must occur in the digit
+        # stream of the hypothesis
         out = set()
-        for r in load(root, run, "adv"):
+        for r in load(root, stock_run, "adv"):
             text, exp, lang, cat, split = r["ref"].split("\t")
-            if not adv_ok(text, exp, lang, r["hyp"]):
+            if lang != "en":
+                continue
+            stream = re.sub(r"\D", "", r["hyp"])
+            want = [re.sub(r"\D", "", w) for w in exp.split("|") if re.sub(r"\D", "", w)]
+            if want and not all(w in stream for w in want):
                 out.add(r["id"])
         return out
-    return wrong(stock_run) & wrong(v10_run)
+
+    def v10_wrong():
+        out = set()
+        for r in load(root, v10_run, "adv"):
+            text, exp, lang, cat, split = r["ref"].split("\t")
+            if exp and not (adv_ok(text, exp, lang, r["hyp"]) or value_ok(exp, r["hyp"])):
+                out.add(r["id"])
+        return out
+    return stock_wrong() & v10_wrong()
 
 
 def e21x_values(root, run, refs_dir):

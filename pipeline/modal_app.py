@@ -722,11 +722,14 @@ def retrain_mix(arm: str, tts_h: float = 6.0) -> list:
               retries=modal.Retries(max_retries=2, initial_delay=30.0))
 def retrain(run: str, arm: str = "main", seed: int = 1, max_steps: int = 3000, kl_tok: float = 1.0,
             init_from: str = "v10pt@1500", lr: float = 1e-4, warmup: int = 50, save_every: int = 500,
-            kl_terms: str = "blank,gnorm,blankspan", check_share: bool = True):
+            kl_terms: str = "blank,gnorm,blankspan", check_share: bool = True, kl_eq_check: bool = False):
     """One arm of the real-speech retrain. Resumes from exp/<run>/last.ckpt after a preemption (retries).
     Dress rehearsal = the same mix with a small max_steps/save_every (manifests are read lazily: no frac needed)."""
     import json
+    import os
 
+    if kl_eq_check:
+        os.environ["KL_EQ_CHECK"] = "1"
     import ft_train
     import mix_build
 
@@ -739,7 +742,7 @@ def retrain(run: str, arm: str = "main", seed: int = 1, max_steps: int = 3000, k
     k = dict(RETRAIN_K, save_every=save_every)
     ft_train.train(VOL, ultra_path(), run, mix=mix, max_steps=max_steps, lr=lr, warmup=warmup, seed=seed,
                    init_from="" if arm == "stockinit" else init_from, kl_terms=kl_terms, kl_tok=kl_tok,
-                   on_save=vol.commit, **k)
+                   on_save=vol.commit, stage_dir="/tmp/stage", **k)
     vol.commit()
 
 

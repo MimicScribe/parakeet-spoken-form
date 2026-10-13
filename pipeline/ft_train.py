@@ -224,6 +224,88 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
             d_n = dmask.sum() if dur_on else zero
             return b_sum, b_n, d_sum, d_n, mask.sum(), gate.sum(), zero, zero
 
+        merged = (MERGED_KL and keep is not None and punct_rows == "replay"
+                  and not tset0 & {"g2", "tri", "durspan", "durgate", "dur"})
+        if merged:
+            # ONE joint evaluation per sub-batch for the blank/gnorm(+blankspan), punctuation and token terms (they
+            # used three, each recomputed in backward: the dress rehearsal ran ~2x slower than v12y). Same rows (keep;
+            # punct rows == keep with punct_rows="replay"), same masks and normalisations as the separate passes.
+            tid = term_t.to(f.device)
+            row_toks = [tokens[i, :int(tokens_len[i])].tolist() for i in range(f.shape[0])]
+            rows = [i for i, t in enumerate(row_toks) if tuple(t) in keep]
+            is_nonen = torch.tensor([tuple(t) in nonen_keep for t in row_toks], device=f.device)
+            spans = None
+            if "blankspan" in tset0:
+                spans = span_mask(m.tokenizer.tokenizer, [(i, row_toks[i]) for i in rows if tuple(row_toks[i]) in span_keep],
+                                  tokens.shape[0], int(tokens_len.max()), f.device)
+
+            def chunk_all(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, span_sl, nonen_sl):
+                with NoDropout(m.joint):
+                    s_logits = m.joint.joint(f_sl, s_sl).float()
+                with torch.no_grad():
+                    t_logits = tjoint.joint(f_sl, t_sl).float()
+                T, U = s_logits.shape[1], s_logits.shape[2]
+                mask = ((torch.arange(T, device=f_sl.device)[None, :, None] < enc_len_sl[:, None, None])
+                        & (torch.arange(U, device=f_sl.device)[None, None, :] <= tok_len_sl[:, None, None]))
+                s_all = s_logits[..., :nb].logsumexp(-1)
+                t_all = t_logits[..., :nb].logsumexp(-1)
+                s_lb = s_logits[..., nb - 1] - s_all
+                t_lb = t_logits[..., nb - 1] - t_all
+                s_nbz = s_logits[..., :nb - 1].logsumexp(-1)
+                t_nbz = t_logits[..., :nb - 1].logsumexp(-1)
+                s_lnb, t_lnb = s_nbz - s_all, t_nbz - t_all
+                kl_blank = t_lb.exp() * (t_lb - s_lb) + t_lnb.exp() * (t_lnb - s_lnb)
+                gate = mask & (t_lnb.exp() > 0.9)
+                bmask = gate if ("gated" in tset0 or "gnorm" in tset0) else mask
+                if span_sl is not None:
+                    bmask = bmask & ~span_sl[:, None, :]
+                zero = torch.zeros((), device=f_sl.device)
+                b_sum = (kl_blank * bmask).sum() if "blank" in tset0 else zero
+                b_n = (mask if "gated" in tset0 else bmask).sum()
+                if span_sl is not None and "gated" in tset0:
+                    b_n = (mask & ~span_sl[:, None, :]).sum()
+                # punctuation: {terminal vs other non-blank}
+                s_lt = s_logits[..., tid].logsumexp(-1) - s_nbz
+                t_lt = t_logits[..., tid].logsumexp(-1) - t_nbz
+                s_lo = torch.log((1 - s_lt.exp()).clamp(min=1e-7))
+                t_lo = torch.log((1 - t_lt.exp()).clamp(min=1e-7))
+                kl_p = t_lt.exp() * (t_lt - s_lt) + t_lo.exp() * (t_lo - s_lo)
+                p_sum, p_n = (kl_p * mask).sum(), mask.sum()
+                # token-level KL on non-English rows
+                tmask = mask & nonen_sl[:, None, None]
+                s_lp = s_logits[..., :nb] - s_all[..., None]
+                t_lp = t_logits[..., :nb] - t_all[..., None]
+                kl_t = (t_lp.exp() * (t_lp - s_lp)).sum(-1)
+                k_sum, k_n = (kl_t * tmask).sum(), tmask.sum()
+                return b_sum, b_n, mask.sum(), gate.sum(), p_sum, p_n, k_sum, k_n
+
+            zero = torch.zeros((), device=f.device)
+            b_tot = b_cnt = count = passed = p_tot = p_cnt = k_tot = k_cnt = zero
+            for j in range(0, len(rows), sub_batch):
+                sl = torch.tensor(rows[j:j + sub_batch], device=f.device)
+                u = int(tokens_len[sl].max()) + 1
+                t = int(enc_len[sl].max())
+                span_sl = spans[sl, :u] if spans is not None else None
+                r_ = torch.utils.checkpoint.checkpoint(
+                    chunk_all, f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
+                    enc_len[sl], tokens_len[sl], span_sl, is_nonen[sl], use_reentrant=False)
+                b_tot, b_cnt, count, passed = b_tot + r_[0], b_cnt + r_[1], count + r_[2], passed + r_[3]
+                p_tot, p_cnt, k_tot, k_cnt = p_tot + r_[4], p_cnt + r_[5], k_tot + r_[6], k_cnt + r_[7]
+            kl_b = blank_scale * (b_tot / b_cnt.clamp(min=1))
+            kl_p = p_tot / p_cnt.clamp(min=1)
+            kl_t = k_tot / k_cnt.clamp(min=1)
+            out["loss"] = out["loss"] + weight * kl_b + punct_weight * kl_p + (tok_weight * kl_t if tok_weight else 0)
+            m.log("kl_blank_dur", kl_b.detach(), prog_bar=False)
+            if batch_idx % 10 == 0:
+                n_non = int(is_nonen.sum())
+                print(f"kl_punct {kl_p.item():.5f}\nkl_tok {kl_t.item():.5f} rows {n_non}\n"
+                      f"kl_blank_dur {kl_b.item():.4f} (blank {kl_b.item():.4f} dur 0.0000) rows {len(rows)}/{f.shape[0]} "
+                      f"gate-pass {int(passed)}/{int(count)} wait-pass 0", flush=True)
+            if not (KL_EQ_CHECK and batch_idx < 3):
+                return out
+            merged_vals = (kl_b.item(), kl_p.item(), kl_t.item())
+            out_loss = out["loss"]
+            out["loss"] = orig_loss = out_loss.detach() * 0  # the separate passes below only report; no 2nd gradient
         if punct_weight:
             tid = term_t.to(f.device)
 
@@ -324,6 +406,10 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
                   f"rows {len(rows)}/{f.shape[0]} gate-pass {int(passed)}/{int(count)} wait-pass {int(w_cnt)}"
                   + (f" span-free {int(count - d_cnt)}/{int(count)}" if "durspan" in tset0 else ""),
                   flush=True)
+        if merged:  # KL_EQ_CHECK: compare the merged values with the separate passes, keep the merged gradient
+            sep = (kl_b.item(), kl_p.item() if punct_weight else 0.0, kl_t.item() if (tok_weight and nonen_keep) else 0.0)
+            print(f"KL_EQ_CHECK batch {batch_idx}: merged {merged_vals} separate {sep}", flush=True)
+            out["loss"] = out_loss
         return out
 
     m.training_step = training_step
@@ -356,6 +442,10 @@ def span_mask(spm, pairs, batch, width, device):
     return span.to(device)
 
 
+MERGED_KL = True  # one joint pass for all KL terms (2026-10-13 speed fix)
+KL_EQ_CHECK = os.environ.get("KL_EQ_CHECK") == "1"  # first 3 batches: also run the separate passes and print both
+
+
 class StepLog(pl.Callback):
     def __init__(self):
         self.t0 = time.time()
@@ -376,7 +466,7 @@ class StepLog(pl.Callback):
 
 
 def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_texts=None,
-              kl_exempt: str = "", tagged: dict | None = None) -> float:
+              kl_exempt: str = "", tagged: dict | None = None, stage_dir: str = "") -> float:
     """Concatenate manifests, taking `hours` from each (all if hours <= 0). Labels of rows from
     `replay/` manifests are added to `replay_texts` when given."""
     r = random.Random(seed)
@@ -414,6 +504,24 @@ def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_text
         replay_texts.difference_update(exempt)
         print(f"KL-exempt labels ({kl_exempt}): {len(exempt)}, anchored: {len(replay_texts)}")
     r.shuffle(rows)
+    if stage_dir:
+        # Copy the selected audio to the container's local disk: ~60k small files read from the network volume made
+        # each step ~3x slower than v12y's (dress rehearsal 2026-10-13).
+        from concurrent.futures import ThreadPoolExecutor
+        import shutil
+
+        t0 = time.time()
+
+        def stage(x):
+            dst = stage_dir + x["audio_filepath"]
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if not os.path.exists(dst):
+                shutil.copyfile(x["audio_filepath"], dst)
+            return {**x, "audio_filepath": dst}
+
+        with ThreadPoolExecutor(64) as ex:
+            rows = list(ex.map(stage, rows))
+        print(f"staged {len(rows)} files to {stage_dir} in {time.time() - t0:.0f}s", flush=True)
     with open(out, "w") as f:
         for x in rows:
             f.write(json.dumps({k: x[k] for k in ("audio_filepath", "duration", "text")}) + "\n")
@@ -430,7 +538,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           save_every: int = 0, on_save=lambda: None, weight_decay: float = 1e-3, spec_augment: bool = True,
           kl_weight: float = 0.0, kl_replay_only: bool = False, init_from: str = "", kl_terms: str = "blank,dur",
           seed: int = 1, kl_exempt: str = "", kl_blank_scale: float = 1.0, kl_punct: float = 0.0,
-          kl_punct_rows: str = "all", kl_tok: float = 0.0, resume: bool = True):
+          kl_punct_rows: str = "all", kl_tok: float = 0.0, resume: bool = True, stage_dir: str = ""):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
     entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists."""
@@ -447,8 +555,15 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         print(f"resume: data seed -> {seed}")
     replay_texts = set()
     tagged: dict = {}
-    hours = write_mix(vol, f"{exp}/train_manifest.jsonl", mix, seed=seed, replay_texts=replay_texts,
-                      kl_exempt=kl_exempt, tagged=tagged)
+    manifest = f"{stage_dir}/train_manifest.jsonl" if stage_dir else f"{exp}/train_manifest.jsonl"
+    if stage_dir:
+        os.makedirs(stage_dir, exist_ok=True)
+    hours = write_mix(vol, manifest, mix, seed=seed, replay_texts=replay_texts,
+                      kl_exempt=kl_exempt, tagged=tagged, stage_dir=stage_dir)
+    if stage_dir:
+        import shutil
+
+        shutil.copyfile(manifest, f"{exp}/train_manifest.jsonl")  # the record of what was trained on
     if tagged:
         replay_texts |= tagged.get("anchor", set())
         # a label in two tags keeps the stricter one: anchor > nonen > span
@@ -466,7 +581,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     with open_dict(m.cfg):
         print("checkpoint train_ds keys:", sorted(m.cfg.train_ds.keys()))
         m.cfg.train_ds = OmegaConf.create({
-            "manifest_filepath": f"{exp}/train_manifest.jsonl", "sample_rate": 16000,
+            "manifest_filepath": manifest, "sample_rate": 16000,
             "use_lhotse": True, "text_field": "text", "batch_duration": batch_duration,
             "max_duration": 20.0, "min_duration": 0.5, "use_bucketing": True, "num_buckets": 10,
             "bucket_buffer_size": 20000, "shuffle": True, "shuffle_buffer_size": 10000, "seed": seed,
