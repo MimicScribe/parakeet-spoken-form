@@ -472,3 +472,85 @@ def preflight(run: str, kl_weight: float = 7.0, tts: str = "", steps: int = 0, l
             lspc_h=lspc_h, numwords_h=numwords_h, fleurs_h=fleurs_h, tts_h=tts_h, seed=seed)
     vol.commit()
 
+
+
+# ---- Real-speech retrain (docs/plans/spoken-form-real-speech-retrain-plan-2026-10-12.md) ----
+
+scan_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .uv_pip_install("pyarrow", "huggingface_hub", "hf_transfer")
+    .add_local_python_source("common", "s0_scan", "fetch", "labeller", "readings")
+)
+hf_secret = modal.Secret.from_name("hf")
+
+
+@app.function(image=scan_image, volumes={VOL: vol}, secrets=[hf_secret], cpu=1, memory=4096, timeout=1800,
+              retries=2, max_containers=64)
+def s0_scan_shard(path: str, lang: str) -> dict:
+    import s0_scan
+
+    st = s0_scan.scan_shard(VOL, path, lang)
+    vol.commit()
+    return st
+
+
+@app.function(image=scan_image, volumes={VOL: vol}, secrets=[hf_secret], timeout=4 * 3600)
+def s0_scan(langs: str = "en,bg,cs,da,de,el,es,et,fi,fr,hr,hu,it,lt,lv,nl,pl,pt,ro,ru,sk,sv,uk",
+            en_shards: int = 150, big_shards: int = 25):
+    """Caption-only scan (S0): number density per language, flagged rows to /vol/s0/scan."""
+    import json
+
+    import s0_scan
+
+    jobs = s0_scan.pick_shards(langs.split(","), en_shards, big_shards)
+    print(f"{len(jobs)} shards")
+    stats = []
+    for st in s0_scan_shard.starmap(jobs, return_exceptions=True):
+        if isinstance(st, Exception):
+            print("FAIL", repr(st)[:200])
+            continue
+        stats.append(st)
+    vol.reload()
+    agg = {}
+    for st in stats:
+        a = agg.setdefault(st["lang"], {k: 0 for k in st if k not in ("shard", "lang")} | {"shards": 0})
+        a["shards"] += 1
+        for k, v in st.items():
+            if k not in ("shard", "lang"):
+                a[k] += v
+    for lang, a in sorted(agg.items()):
+        print(lang, json.dumps({k: round(v, 1) if isinstance(v, float) else v for k, v in a.items()}))
+    json.dump(agg, open(f"{VOL}/s0/scan_stats.json", "w"), indent=1)
+    vol.commit()
+
+
+@app.function(image=scan_image, volumes={VOL: vol}, secrets=[hf_secret], cpu=2, memory=8192,
+              timeout=3600, retries=2, max_containers=40)
+def s3_fetch_shard(path: str, lang: str) -> dict:
+    import fetch
+
+    vol.reload()
+    st = fetch.fetch_shard(VOL, path, lang)
+    vol.commit()
+    return st
+
+
+@app.function(image=scan_image, volumes={VOL: vol}, secrets=[hf_secret], timeout=6 * 3600)
+def s3_fetch(lang: str = "en", limit: int = 0):
+    """Audio for every scanned shard of `lang` (S3)."""
+    import glob
+    import json
+
+    vol.reload()
+    stats = [json.load(open(f)) for f in sorted(glob.glob(f"{VOL}/s0/scan/{lang}/*.stats"))]
+    jobs = [(st["shard"], lang) for st in stats][: limit or None]
+    print(f"{len(jobs)} shards")
+    tot_h = tot = 0
+    for st in s3_fetch_shard.starmap(jobs, return_exceptions=True):
+        if isinstance(st, Exception):
+            print("FAIL", repr(st)[:300])
+            continue
+        tot += st.get("kept", 0)
+        tot_h += st.get("h", 0)
+        print(json.dumps(st))
+    print(f"fetched {tot} rows, {tot_h:.1f} h")
