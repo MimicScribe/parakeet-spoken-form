@@ -19,13 +19,17 @@ import re
 import labeller as L
 
 MARGIN = 3.0
+RECORD_STOCK = True  # validation: also score every candidate under STOCK's decoder+joint
 W2V = "facebook/wav2vec2-large-960h-lv60-self"
 FILLERS = re.compile(r"\b(?:uh|um|uhm|er|erm|hmm|mm|mhm|uh-huh|mm-hmm)\b", re.I)
 
 
 def norm_ctc(text: str) -> str:
+    """wav2vec2-960h spelling (LibriSpeech): capitals, apostrophes; the digit "oh" is written "O"; AM/PM are letters."""
     t = text.upper().replace("-", " ")
     t = re.sub(r"[^A-Z' ]+", " ", t)
+    t = re.sub(r"\bOH\b", "O", t)
+    t = re.sub(r"\b([AP])M\b", r"\1 M", t)
     return re.sub(r"\s+", " ", t).strip()
 
 
@@ -121,14 +125,15 @@ class Scorer:
             lp = self.w2v(iv).logits.float().log_softmax(-1)[0]
         return enc.transpose(1, 2), el, lp
 
-    def tdt_nll(self, f, el, text):
+    def tdt_nll(self, f, el, text, model=None):
         torch = self.torch
-        ids = self.v10.tokenizer.text_to_ids(text)
+        model = model or self.v10
+        ids = model.tokenizer.text_to_ids(text)
         with torch.no_grad():
             tok = torch.tensor([ids], device="cuda")
             tl = torch.tensor([len(ids)], device="cuda")
-            g, _, _ = self.v10.decoder(targets=tok, target_length=tl)
-            logits = self.v10.joint.joint(f, g.transpose(1, 2)).float()
+            g, _, _ = model.decoder(targets=tok, target_length=tl)
+            logits = model.joint.joint(f, g.transpose(1, 2)).float()
             return float(self.tdt(log_probs=logits, targets=tok, input_lengths=el, target_lengths=tl))
 
     def ctc_ids(self, text):
@@ -208,13 +213,14 @@ def choose(sc: Scorer, f, el, lp, text, sp):
         if len(s.cands) == 1:
             info.append({"n": 1})
             continue
-        tdt, ctc = [], []
+        tdt, ctc, stk = [], [], []
         for c in range(len(s.cands)):
             ch = choice[:]
             ch[i] = c
             t = L.render(text, sp, ch)
             tdt.append(sc.tdt_nll(f, el, t))
             ctc.append(sc.ctc_nll(lp, t))
+            stk.append(sc.tdt_nll(f, el, t, sc.stock) if RECORD_STOCK else 0.0)
         bt = min(range(len(tdt)), key=tdt.__getitem__)
         bc = min(range(len(ctc)), key=ctc.__getitem__)
         # Orthographic siblings (same words for the CTC scorer) are not competitors: margins are taken against the best
@@ -226,7 +232,9 @@ def choose(sc: Scorer, f, el, lp, text, sp):
         mc = (min(other_c) - ctc[bc]) if other_c else float("inf")
         ok = key[bt] == key[bc] and mt >= MARGIN and mc >= MARGIN
         choice[i] = bt if ok else 0
-        info.append({"n": len(s.cands), "tdt": bt, "ctc": bc, "mt": round(mt, 2), "mc": round(mc, 2), "ok": ok})
+        info.append({"n": len(s.cands), "tdt": bt, "ctc": bc, "mt": round(mt, 2), "mc": round(mc, 2), "ok": ok,
+                     "s_tdt": [round(x, 2) for x in tdt], "s_ctc": [round(x, 2) for x in ctc],
+                     "s_stk": [round(x, 2) for x in stk], "keys": [norm_ctc(c) for c in s.cands]})
     return choice, info
 
 
@@ -386,7 +394,7 @@ def decide_text(sc: Scorer, x, text: str, stock_text: str) -> dict:
     out = []
     for s, c, inf, p in zip(sp, choice, info, pre):
         fit = fits(norm_ctc(s.cands[c]).split(), w2v)
-        out.append({"text": s.text, "kind": s.kind, "pick": s.cands[c], "gold": s.gold, "n": len(s.cands),
+        out.append({"text": s.text, "kind": s.kind, "pick": s.cands[c], "cands": s.cands, "gold": s.gold, "n": len(s.cands),
                     "pre": p, "fit": fit, **inf, "decided": bool(p and fit and inf.get("ok", True))})
     return {"spans": out, "label": L.render(text, sp, choice), "w2v": " ".join(w2v)}
 

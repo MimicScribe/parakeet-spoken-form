@@ -59,7 +59,7 @@ def lang_of(r):
     return i.split("_")[0] if "_" in i else "?"
 
 
-def score(root, run):
+def score(root, run, want_split="dev", exclude=frozenset()):
     s = {}
     for name in ("e22_other", "lspc_dev", "d1_dev", "e22_numbers"):
         s[f"wer_{name}"] = wer(load(root, run, name))
@@ -85,7 +85,9 @@ def score(root, run):
     adv = defaultdict(lambda: [0, 0])
     adv_leak = 0
     for r in load(root, run, "adv"):
-        text, exp, lang, cat = r["ref"].split("\t")
+        text, exp, lang, cat, split = r["ref"].split("\t")
+        if split != want_split or r["id"] in exclude:
+            continue
         want = [x for x in exp.split("|") if x]
         got = values_spoken(r["hyp"]) if lang == "en" else {d.replace(",", "").replace(" ", "") for d in
                                                               re.findall(r"\d[\d,. ]*\d|\d", r["hyp"])}

@@ -122,9 +122,17 @@ def build(vol: str, seed: int = 1, aug_frac: float = 0.25, d10_h: float = 6.0, d
     os.makedirs(f"{out}/wav", exist_ok=True)
     stats = {}
     eval_ng = set()
-    if os.path.exists(f"{out}/eval_texts.txt"):
-        for line in open(f"{out}/eval_texts.txt"):
-            eval_ng |= ngrams(line)
+    texts = []
+    for f in glob.glob(f"{vol}/beds/e21x/refs/*.txt"):
+        texts += re.split(r"(?<=[.?!])\s+", open(f).read())
+    for pat in ("e22/all.jsonl", "beds/fleurs/*.jsonl", "beds/vox/*.jsonl", "beds/adv/all.jsonl"):
+        for x in _rows(f"{vol}/{pat}"):
+            texts.append(x["text"].split("\t")[0])
+    for t in texts:
+        eval_ng |= ngrams(t)
+    stats["eval_texts"] = len(texts)
+    stats["eval_ngrams"] = len(eval_ng)
+    assert len(texts) > 5000, f"eval texts missing ({len(texts)}): build the beds first"
 
     def dedupe(rows, name):
         # a row overlapping eval text drops its whole video (an earnings call on YouTube is the same call)
