@@ -580,20 +580,24 @@ class Labeller:
         return n
 
     @modal.method()
-    def shard(self, man: str, tag: str, keep_audio: bool = True, only_pct: bool = False) -> dict:
+    def shard(self, man: str, tag: str, keep_audio: bool = True, only_pct: bool = False, rows_dir: str = "d1/rows",
+              write_crops: bool = True) -> dict:
         import os
 
         import label_gpu
 
-        if os.path.exists(f"{VOL}/d1/crops/{tag}.jsonl"):
+        done = f"{VOL}/{rows_dir}/{tag}.jsonl" if not write_crops else f"{VOL}/d1/crops/{tag}.jsonl"
+        if os.path.exists(done):
             return {"shard": tag, "skipped": True}
-        st = label_gpu.label_shard(VOL, self.sc, man, tag, keep_audio, only_pct)
+        st = label_gpu.label_shard(VOL, self.sc, man, tag, keep_audio, only_pct, rows_dir=rows_dir,
+                                   write_crops=write_crops)
         vol.commit()
         return st
 
 
 @app.function(image=scan_image, volumes={VOL: vol}, timeout=12 * 3600)
-def s3_label(lang: str = "en", limit: int = 0, only: str = "", only_pct: bool = False):
+def s3_label(lang: str = "en", limit: int = 0, only: str = "", only_pct: bool = False, rows_dir: str = "d1/rows",
+             write_crops: bool = True, labelled_only: bool = False):
     """Relabel every fetched English shard (S3); `only` = comma list of shard tags."""
     import glob
     import json
@@ -603,11 +607,14 @@ def s3_label(lang: str = "en", limit: int = 0, only: str = "", only_pct: bool = 
     mans = sorted(glob.glob(f"{VOL}/yodas/{lang}/manifests/*.jsonl"))
     if only:
         mans = [m for m in mans if os.path.basename(m)[:-6] in only.split(",")]
+    if labelled_only:  # retrain-3 relabel: exactly the shards labelled before
+        have = {os.path.basename(f)[:-6] for f in glob.glob(f"{VOL}/d1/rows/*.jsonl") if not f.endswith("_pct.jsonl")}
+        mans = [m for m in mans if os.path.basename(m)[:-6] in have]
     mans = mans[: limit or None]
     print(f"{len(mans)} shards")
     tot = {"rows": 0, "crops": 0, "crop_h": 0.0, "dropped": 0}
     suffix = "_pct" if only_pct else ""
-    jobs = [(m, os.path.basename(m)[:-6] + suffix, True, only_pct) for m in mans]
+    jobs = [(m, os.path.basename(m)[:-6] + suffix, write_crops, only_pct, rows_dir, write_crops) for m in mans]
     for st in Labeller().shard.starmap(jobs, return_exceptions=True):
         if isinstance(st, Exception):
             print("FAIL", repr(st)[:400])

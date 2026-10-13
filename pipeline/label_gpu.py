@@ -67,7 +67,7 @@ def word_edit(a: list[str], b: list[str]) -> int:
 def fits(span_words: list[str], hyp_words: list[str]) -> bool:
     n = len(span_words)
     if not n:
-        return True
+        return False  # nothing to check is never a fit (retrain-3 review: "\x00" bad spans were "decided")
     tol = 0  # exact: a caption missing words pushes both scorers toward longer readings (validation 2026-10-13)
     for k in range(max(1, n - tol), n + tol + 1):
         for i in range(0, max(1, len(hyp_words) - k + 1)):
@@ -208,6 +208,35 @@ class Scorer:
         return out
 
 
+CODE_NUM = re.compile(r"^(?:ZERO|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|"
+                      r"FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY|THIRTY|FORTY|FIFTY|SIXTY|SEVENTY|EIGHTY|"
+                      r"NINETY|HUNDRED|THOUSAND|O|TO)$")
+
+
+def code_seen(raw: str, reading: str, *decodes: str) -> bool:
+    """A code span is a target only when stock or v10pt wrote the raw code ("B2B", "COVID-19") or the chosen reading:
+    single-digit codes skip the stock-value precheck (it only checks 2+ digit runs)."""
+    key = lambda t: re.sub(r"[^a-z0-9]", "", t.lower())  # noqa: E731
+    r, w = key(raw), key(reading)
+    return any(r and r in key(d) or w and w in key(d) for d in decodes if d)
+
+
+def anchored_fit(sc, lp, s, cand: str, span_times, pad: float = 0.35) -> bool:
+    """Exact fit of the chosen reading inside the wav2vec2 greedy text of the frames aligned to THIS span (+-pad s),
+    not anywhere in the 20 s row (retrain-3 review: a one-candidate span could "fit" on the same word elsewhere).
+    Code spans check only their number words: wav2vec2 spells letters and new words ("COVID" -> "COVE") its own way."""
+    words = norm_ctc(cand).split()
+    if s.kind == "code":
+        words = [w for w in words if CODE_NUM.match(w)] or words
+    ts = [t for t in span_times if t[0] is not None]
+    if not ts:
+        return False
+    f0 = max(0, int((min(t[0] for t in ts) - pad) / 0.02))
+    f1 = min(lp.shape[0], int((max(t[1] for t in ts) + pad) / 0.02) + 1)
+    win = norm_ctc(sc.greedy_w2v(lp[f0:f1])).split()
+    return fits(words, win)
+
+
 def choose(sc: Scorer, f, el, lp, text, sp):
     """Coordinate pass over spans; returns (choice, per-span info)."""
     choice = [0] * len(sp)
@@ -288,7 +317,8 @@ def crops(words, times, bad_tok, num_tok, dur, rnd, max_s=15.0):
     return out + extra
 
 
-def label_shard(vol: str, sc: Scorer, man: str, out_tag: str, keep_audio=True, only_pct: bool = False):
+def label_shard(vol: str, sc: Scorer, man: str, out_tag: str, keep_audio=True, only_pct: bool = False,
+                rows_dir: str = "d1/rows", write_crops: bool = True):
     import soundfile as sf
 
     rows = [json.loads(l) for l in open(man)]
@@ -296,7 +326,7 @@ def label_shard(vol: str, sc: Scorer, man: str, out_tag: str, keep_audio=True, o
         rows = [r for r in rows if r["kind"] != "plain" and ("%" in r["text"] or "percent" in r["text"].lower())]
     num = [r for r in rows if r["kind"] != "plain"]
     plain = [r for r in rows if r["kind"] == "plain"]
-    os.makedirs(f"{vol}/d1/rows", exist_ok=True)
+    os.makedirs(f"{vol}/{rows_dir}", exist_ok=True)
     os.makedirs(f"{vol}/d1/crops", exist_ok=True)
     wav_dir = f"{vol}/d1/wav/{out_tag}"
     os.makedirs(wav_dir, exist_ok=True)
@@ -327,49 +357,40 @@ def label_shard(vol: str, sc: Scorer, man: str, out_tag: str, keep_audio=True, o
         choice, info = choose(sc, f, el, lp, text, sp)
         w2v = norm_ctc(sc.greedy_w2v(lp)).split()
         rec["w2v"] = " ".join(w2v)
-        spans_out, decided = [], []
-        for s, c, inf, p in zip(sp, choice, info, pre):
-            fit = fits(norm_ctc(s.cands[c]).split(), w2v)
-            ok = p and fit and inf.get("ok", True)
-            decided.append(ok)
-            spans_out.append({"text": s.text, "kind": s.kind, "cands": s.cands, "pick": c, "gold": s.gold,
-                              "pre": p, "fit": fit, **inf, "decided": ok})
-        rec["spans"] = spans_out
-        label = L.render(text, sp, choice)
+        label, ranges = L.render_ranges(text, sp, choice)
         rec["label"] = label
-        if not any(decided):
-            rec["drop"] = "no_decided_span"
-            continue
-        # token-level bookkeeping on the rendered label
         toks = label.split()
-        tok_span = [0] * len(toks)
-        bad = [False] * len(toks)
-        pos = 0
-        starts = []
+        starts, pos = [], 0
         for t in toks:
             k = label.find(t, pos)
             starts.append(k)
             pos = k + len(t)
-        # map span char ranges into the rendered label
-        shift, ranges = 0, []
-        for s, c in zip(sp, choice):
-            a = s.start + shift
-            b = a + len(s.cands[c])
-            ranges.append((a, b))
-            shift += len(s.cands[c]) - (s.end - s.start)
-        for j, (a, b) in enumerate(ranges, 1):
+        tok_span = [0] * len(toks)
+        for j, (ra, rb) in enumerate(ranges, 1):
             for ti, st0 in enumerate(starts):
-                if a <= st0 < b or (st0 < a < st0 + len(toks[ti])):
+                if ra <= st0 < rb or (st0 < ra < st0 + len(toks[ti])):
                     tok_span[ti] = j
-                    if not decided[j - 1]:
-                        bad[ti] = True
         times = sc.align(lp, label)
         if times is None:
             rec["drop"] = "align"
             continue
+        spans_out, decided = [], []
+        for j, (s, c, inf, p) in enumerate(zip(sp, choice, info, pre), 1):
+            fit = anchored_fit(sc, lp, s, s.cands[c], [times[ti] for ti in range(len(toks)) if tok_span[ti] == j])
+            ok = p and fit and inf.get("ok", True) and s.kind != "bad" and "\x00" not in s.cands[c]
+            if s.kind == "code":
+                ok = ok and code_seen(s.text, s.cands[c], st, vt)
+            decided.append(ok)
+            spans_out.append({"text": s.text, "kind": s.kind, "cands": s.cands, "pick": c, "gold": s.gold,
+                              "pre": p, "fit": fit, **inf, "decided": ok})
+        rec["spans"] = spans_out
+        if not any(decided):
+            rec["drop"] = "no_decided_span"
+            continue
+        bad = [bool(tok_span[ti]) and not decided[tok_span[ti] - 1] for ti in range(len(toks))]
         low = [tm[2] is not None and tm[2] < 0.05 for tm in times]
         bad = [b or lw for b, lw in zip(bad, low)]
-        for ci, (a, b) in enumerate(crops(toks, times, bad, tok_span, r["duration"], rnd)):
+        for ci, (a, b) in enumerate(crops(toks, times, bad, tok_span, r["duration"], rnd) if write_crops else []):
             if not any(tok_span[a:b]):
                 continue
             t0 = (times[a - 1][1] + times[a][0]) / 2 if a > 0 else max(0.0, times[a][0] - 0.15)
@@ -387,10 +408,10 @@ def label_shard(vol: str, sc: Scorer, man: str, out_tag: str, keep_audio=True, o
                               "src": r["utt_id"], "wps": round(nw / max(t1 - t0, 0.1), 2),
                               "kinds": sorted({sp[j - 1].kind for j in set(tok_span[a:b]) if j}),
                               "video": r["original_audio_id"]})
-    with open(f"{vol}/d1/rows/{out_tag}.jsonl", "w") as fo:
+    with open(f"{vol}/{rows_dir}/{out_tag}.jsonl", "w") as fo:
         for rec in out_rows:
             fo.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    with open(f"{vol}/d1/crops/{out_tag}.jsonl", "w") as fo:
+    with open(f"{vol}/d1/crops/{out_tag}.jsonl" if write_crops else os.devnull, "w") as fo:
         for c in out_crops:
             fo.write(json.dumps(c, ensure_ascii=False) + "\n")
     return {"shard": out_tag, "rows": len(num), "plain": len(plain), "crops": len(out_crops),

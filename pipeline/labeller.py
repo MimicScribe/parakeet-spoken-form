@@ -418,9 +418,23 @@ def spans(text: str) -> list[Span]:
         pre, num, post = mt.group("pre"), mt.group("num"), mt.group("post")
         if pre.lower() in ("am", "pm") or (not post and pre.lower() in UNIT_WORDS):
             continue
+        hy = mt.start() + len(pre)
+        if text[hy] == "-" and not pre.isupper() and len(num) == 4 and (not post or post == "s"):
+            tm = TOKEN.match(text, hy + 1)  # "mid-2015", "Pre-2020", "mid-1960s": an ordinary word + a year
+            if tm and tm.end() == mt.end():
+                cands, kind = _token_cands(tm)
+                if kind != "bad":
+                    add(hy + 1, tm.end(), cands, kind)
+                    continue
+        if (pre[0].islower() and len(pre) > 2) or any(ch.islower() for ch in post):
+            # "mid-2015", "mid-1960s", "query2vec", "2Learn"-style words: no defined code reading (retrain-3 review)
+            add(mt.start(), mt.end(), ["\x00"], "bad")
+            continue
         n = int(num)
         nums = _uniq(([cardinal(n)] if n < 100 or n % 100 == 0 else [pair(n) if n >= 1000 else cardinal(n)])
                      + [digits(num), digits(num, oh=True)] + int_readings(n, num, allow_year=False)[:2])
+        if num == "2" and post:
+            nums = _uniq(nums + ["to"])  # "B2B", "D2C": said "B to B" (retrain-3 review)
         pre_w = pre.upper() if pre.isupper() or len(pre) <= 2 else pre
         post_w = (" " + post.upper()) if post else ""
         add(mt.start(), mt.end(), _uniq([f"{pre_w} {x}{post_w}" for x in nums]), "code")
@@ -428,6 +442,10 @@ def spans(text: str) -> list[Span]:
         a = mt.start()
         if a > 0 and (text[a - 1].isalnum() or text[a - 1] in "/.:" or
                       (text[a - 1] == "-" and a > 1 and text[a - 2] != " ")):
+            continue
+        nxt = text[mt.end()] if mt.end() < len(text) else " "
+        if nxt.isalpha() or nxt in "°º":
+            add(mt.start(), mt.end(), ["\x00"], "bad")  # "3DS", "5V", "4ac", "84°C": glued, no defined reading
             continue
         cands, kind = _token_cands(mt)
         if a > 0 and text[a - 1] == "-" and (a == 1 or text[a - 2] == " ") and kind in ("int", "decimal", "percent"):
@@ -471,9 +489,19 @@ def spans(text: str) -> list[Span]:
 def render(text: str, sp: list[Span], choice: list[int]) -> str:
     """The caption with each span replaced by its chosen candidate (sentence-initial capital kept). A hyphen joining
     the number to a following word ("20-foot", "twenty-second") becomes a space: no hyphens in number words."""
-    parts, pos = [], 0
+    return render_ranges(text, sp, choice)[0]
+
+
+def render_ranges(text: str, sp: list[Span], choice: list[int]) -> tuple[str, list[tuple[int, int]]]:
+    """render() plus each span's [start, end) in the RENDERED label. Callers map label tokens to spans with these
+    ranges; recomputing them from the candidate lengths drifts by 2 after a stripped "a " (retrain-3 review: every
+    span after "a hundred" marked the wrong words)."""
+    parts, pos, ranges = [], 0, []
     for s, c in zip(sp, choice):
-        parts.append(text[pos:s.start])
+        gap = text[pos:s.start]
+        if gap.endswith("-") and len(gap) >= 2 and gap[-2].isalpha():
+            gap = gap[:-1] + " "  # "mid-2015" -> "mid twenty fifteen"
+        parts.append(gap)
         w = s.cands[c]
         prev = "".join(parts).rstrip().split(" ")[-1].lower() if "".join(parts).strip() else ""
         if prev in ("a", "an") and w.startswith("a "):
@@ -481,13 +509,15 @@ def render(text: str, sp: list[Span], choice: list[int]) -> str:
         before = "".join(parts).rstrip()
         if not before or before[-1] in ".?!":
             w = w[0].upper() + w[1:]
+        start = len("".join(parts))
         parts.append(w)
+        ranges.append((start, start + len(w)))
         pos = s.end
         if pos < len(text) - 1 and text[pos] == "-" and text[pos + 1].isalpha():
             parts.append(" ")
             pos += 1
     parts.append(text[pos:])
-    return "".join(parts)
+    return "".join(parts), ranges
 
 
 WRITTEN = re.compile(r"[0-9$%€£/@&#]")
