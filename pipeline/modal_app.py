@@ -37,7 +37,8 @@ nemo_image = (
     .uv_pip_install("langid", "transformers")
     .env({"HF_HOME": f"{VOL}/hf", "HF_HUB_ENABLE_HF_TRANSFER": "1"})
     .add_local_python_source("common", "data_e22", "data_replay", "data_fleurs", "ft_train", "ft_eval", "rescore", "preflight",
-                              "labeller", "readings", "label_gpu", "harvest", "beds")
+                              "labeller", "readings", "label_gpu", "harvest", "beds", "veto",
+                              "mix_build")
 )
 
 tts_image = (
@@ -579,20 +580,20 @@ class Labeller:
         return n
 
     @modal.method()
-    def shard(self, man: str, tag: str, keep_audio: bool = True) -> dict:
+    def shard(self, man: str, tag: str, keep_audio: bool = True, only_pct: bool = False) -> dict:
         import os
 
         import label_gpu
 
         if os.path.exists(f"{VOL}/d1/crops/{tag}.jsonl"):
             return {"shard": tag, "skipped": True}
-        st = label_gpu.label_shard(VOL, self.sc, man, tag, keep_audio)
+        st = label_gpu.label_shard(VOL, self.sc, man, tag, keep_audio, only_pct)
         vol.commit()
         return st
 
 
 @app.function(image=scan_image, volumes={VOL: vol}, timeout=12 * 3600)
-def s3_label(lang: str = "en", limit: int = 0, only: str = ""):
+def s3_label(lang: str = "en", limit: int = 0, only: str = "", only_pct: bool = False):
     """Relabel every fetched English shard (S3); `only` = comma list of shard tags."""
     import glob
     import json
@@ -605,7 +606,9 @@ def s3_label(lang: str = "en", limit: int = 0, only: str = ""):
     mans = mans[: limit or None]
     print(f"{len(mans)} shards")
     tot = {"rows": 0, "crops": 0, "crop_h": 0.0, "dropped": 0}
-    for st in Labeller().shard.starmap([(m, os.path.basename(m)[:-6]) for m in mans], return_exceptions=True):
+    suffix = "_pct" if only_pct else ""
+    jobs = [(m, os.path.basename(m)[:-6] + suffix, True, only_pct) for m in mans]
+    for st in Labeller().shard.starmap(jobs, return_exceptions=True):
         if isinstance(st, Exception):
             print("FAIL", repr(st)[:400])
             continue
@@ -703,7 +706,7 @@ def retrain_mix(arm: str, tts_h: float = 6.0) -> list:
     """The V2 SPEC mix per arm. main/stockinit: everything; abl_en: v10pt mix + English real only;
     abl_nonen: v10pt mix + non-English real only. Hours <= 0 = all rows of that manifest."""
     base = [("tts/v10pt/train_ok.jsonl", tts_h, "free"), ("tts/d9sup/train_ok.jsonl", 0, "free"),
-            ("replay/lspc_train.jsonl", 20.0, "anchor"), ("replay/lspc_train_numwords.jsonl", 5.0, "anchor"),
+            ("replay/lspc_train.jsonl", 35.0, "anchor"), ("replay/lspc_train_numwords.jsonl", 5.0, "anchor"),
             ("replay/fleurs_train_multi.jsonl", 3.0, "nonen"), ("replay/icsi_train.jsonl", 0, "anchor")]
     en = [("mix/d1.jsonl", 0, "span"), ("mix/d1p.jsonl", 0, "anchor"), ("mix/d10n.jsonl", 0, "span"),
           ("mix/d10p.jsonl", 0, "anchor")]
@@ -718,17 +721,22 @@ def retrain_mix(arm: str, tts_h: float = 6.0) -> list:
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-40GB", cpu=8, memory=32768, timeout=6 * 3600,
               retries=modal.Retries(max_retries=2, initial_delay=30.0))
 def retrain(run: str, arm: str = "main", seed: int = 1, max_steps: int = 3000, kl_tok: float = 1.0,
-            init_from: str = "v10pt@1500", lr: float = 1e-4, warmup: int = 50, frac: float = 1.0,
-            kl_terms: str = "blank,gnorm,blankspan"):
+            init_from: str = "v10pt@1500", lr: float = 1e-4, warmup: int = 50, save_every: int = 500,
+            kl_terms: str = "blank,gnorm,blankspan", check_share: bool = True):
     """One arm of the real-speech retrain. Resumes from exp/<run>/last.ckpt after a preemption (retries).
-    `frac` < 1 takes that share of every manifest (dress rehearsal)."""
+    Dress rehearsal = the same mix with a small max_steps/save_every (manifests are read lazily: no frac needed)."""
+    import json
+
     import ft_train
+    import mix_build
 
     vol.reload()
     mix = retrain_mix(arm)
-    if frac < 1.0:
-        mix = [(p, (h if h > 0 else 50.0) * frac, t) for p, h, t in mix]
-    k = dict(RETRAIN_K)
+    share = mix_build.mix_share(VOL, mix)
+    print("MIX", json.dumps(share))
+    if check_share and arm in ("main", "stockinit"):
+        assert 0.35 <= share["share"] <= 0.40, f"number share {share['share']} outside 35-40% (V2 stop rule)"
+    k = dict(RETRAIN_K, save_every=save_every)
     ft_train.train(VOL, ultra_path(), run, mix=mix, max_steps=max_steps, lr=lr, warmup=warmup, seed=seed,
                    init_from="" if arm == "stockinit" else init_from, kl_terms=kl_terms, kl_tok=kl_tok,
                    on_save=vol.commit, **k)
@@ -749,3 +757,37 @@ def eval_retrain(run: str, step: int = 0, sealed: bool = False):
     ft_eval.eval_retrain(VOL, m.cuda().eval(), f"{run}@{step}" if run != "ultra" else "ultra_rt",
                          sealed=sealed)
     vol.commit()
+
+
+@app.cls(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=2 * 3600, max_containers=6, retries=1)
+class Vetoer:
+    @modal.enter()
+    def load(self):
+        import veto
+
+        self.v = veto.Veto()
+
+    @modal.method()
+    def tag(self, tag: str) -> dict:
+        st = self.v.rows(VOL, tag)
+        vol.commit()
+        return st
+
+
+@app.function(image=scan_image, volumes={VOL: vol}, timeout=6 * 3600)
+def s3_veto(tags: str = ""):
+    import glob
+    import json
+    import os
+
+    vol.reload()
+    ts = tags.split(",") if tags else sorted(os.path.basename(f)[:-6] for f in glob.glob(f"{VOL}/d1/rows/*.jsonl"))
+    tot = [0, 0]
+    for st in Vetoer().tag.map(ts, return_exceptions=True):
+        if isinstance(st, Exception):
+            print("FAIL", repr(st)[:300])
+            continue
+        print(json.dumps(st))
+        tot[0] += st["spans"]
+        tot[1] += st["vetoes"]
+    print(f"TOTAL spans {tot[0]} vetoes {tot[1]}")

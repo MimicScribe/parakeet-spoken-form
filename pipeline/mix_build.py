@@ -115,8 +115,8 @@ class Degrader:
         return kind
 
 
-def build(vol: str, seed: int = 1, aug_frac: float = 0.25, d10_h: float = 6.0, d1p_h: float = 10.0,
-          d2p_h: float = 12.0, max_jobs: int = 0) -> dict:
+def build(vol: str, seed: int = 1, aug_frac: float = 0.25, d10_h: float = 4.0, d1p_h: float = 10.0,
+          d2p_h: float = 12.0, d1_h: float = 16.0, d2_h: float = 11.0) -> dict:
     r = random.Random(seed)
     out = f"{vol}/mix"
     os.makedirs(f"{out}/wav", exist_ok=True)
@@ -136,18 +136,48 @@ def build(vol: str, seed: int = 1, aug_frac: float = 0.25, d10_h: float = 6.0, d
 
     def dedupe(rows, name):
         # a row overlapping eval text drops its whole video (an earnings call on YouTube is the same call)
-        hit = [x for x in rows if ngrams(x["text"]) & eval_ng]
-        bad_v = {x.get("video") for x in hit if x.get("video")}
-        keep = [x for x in rows if not (x in hit or (x.get("video") and x["video"] in bad_v))]
+        hit = {id(x) for x in rows if ngrams(x["text"]) & eval_ng}
+        bad_v = {x.get("video") for x in rows if id(x) in hit and x.get("video")}
+        keep = [x for x in rows if not (id(x) in hit or (x.get("video") and x["video"] in bad_v))]
         stats[f"{name}_dedupe_dropped"] = len(rows) - len(keep)
         stats[f"{name}_dedupe_videos"] = len(bad_v)
         return keep
 
-    # d1 + dev split by video
-    d1 = dedupe(_rows(f"{vol}/d1/crops/*.jsonl"), "d1")
+    # d1 + dev split by video. Percent-pass crops (*_pct) replace the original crops of the same rows (Opus B2);
+    # HuBERT-vetoed readings drop the crops that contain them (Opus H1).
+    crops_all, pct_src = [], set()
+    for f in sorted(glob.glob(f"{vol}/d1/crops/*.jsonl")):
+        rows_f = [json.loads(line) for line in open(f)]
+        if f.endswith("_pct.jsonl"):
+            pct_src |= {x["src"] for x in rows_f}
+        crops_all.append((f.endswith("_pct.jsonl"), rows_f))
+    d1 = [x for is_pct, rows_f in crops_all for x in rows_f if is_pct or x["src"] not in pct_src]
+    vetoed = {}
+    for f in glob.glob(f"{vol}/d1/veto/*.json"):
+        for u, rd in json.load(open(f))["vetoed"].items():
+            vetoed.setdefault(u, set()).update(rd)
+    has = lambda text, w: re.search(r"(?<![\w'])" + re.escape(w) + r"(?![\w'])", text, re.I) is not None  # noqa
+    before = len(d1)
+    d1 = [x for x in d1 if not any(has(x["text"], w) for w in vetoed.get(x["src"], ()))]
+    stats["d1_vetoed_crops"] = before - len(d1)
+    # crops carrying a decided MULTI-reading span are the informative ones (Opus B1): they fill D1 first
+    amb = {}
+    for rec in _rows(f"{vol}/d1/rows/*.jsonl"):
+        for sp_ in rec.get("spans") or []:
+            if sp_.get("decided") and sp_.get("n", 1) > 1:
+                amb.setdefault(rec["utt_id"], set()).add(sp_["cands"][sp_["pick"]])
+    for x in d1:
+        x["amb"] = any(has(x["text"], w) for w in amb.get(x["src"], ()))
+    d1 = dedupe(d1, "d1")
     dev_v = {x["video"] for x in d1 if zlib.crc32(x["video"].encode()) % 100 < 3}
     d1_dev = [x for x in d1 if x["video"] in dev_v]
-    d1 = [x for x in d1 if x["video"] not in dev_v and x["duration"] <= 20 and not WRITTEN_FORM.search(x["text"])]
+    d1 = [x for x in d1 if x["video"] not in dev_v and x["duration"] <= 20 and not WRITTEN_FORM.search(x["text"])
+          and "+" not in x["text"]]
+    d1 = trim_edges(d1, f"{out}/wav", stats)
+    r.shuffle(d1)
+    d1 = sorted(d1, key=lambda x: not x["amb"])  # stable: informative crops first, random within
+    d1 = _take(d1, d1_h)
+    stats["d1_amb_h"] = round(sum(x["duration"] for x in d1 if x["amb"]) / 3600, 2)
     _write(f"{out}/d1_dev.jsonl", d1_dev)
 
     # d1p: number-free YODAS rows with a clean caption
@@ -171,9 +201,14 @@ def build(vol: str, seed: int = 1, aug_frac: float = 0.25, d10_h: float = 6.0, d
         d2 += [json.loads(line) for line in open(f)]
     for f in sorted(glob.glob(f"{vol}/d2/*/plain.jsonl")):
         d2p += [json.loads(line) for line in open(f)]
+    # "⁇" = stock's unknown-piece placeholder (Greek final sigma, Maltese letters): never a target (Opus B3)
+    stats["d2_unk_dropped"] = sum("\u2047" in x["text"] for x in d2 + d2p)
+    d2 = [x for x in d2 if "\u2047" not in x["text"]]
+    d2p = [x for x in d2p if "\u2047" not in x["text"]]
     d2, d2p = dedupe(d2, "d2"), dedupe(d2p, "d2p")
-    r.shuffle(d2p)
-    d2p = _take_per_lang(d2p, d2p_h)
+    d2 = _take_per_lang_src(d2, d2_h, r)
+    d2p = _take_per_lang_src(d2p, d2p_h, r)
+    stats["d2_src_h"] = {k: round(sum(x["duration"] for x in d2 if x["src"] == k) / 3600, 2) for k in ("vox", "yodas", "fleurs")}
 
     # AUG in place
     deg = Degrader(f"{vol}/slr28/RIRS_NOISES", seed)
@@ -218,6 +253,7 @@ def build(vol: str, seed: int = 1, aug_frac: float = 0.25, d10_h: float = 6.0, d
     d10n = speed_copies(d1, d10_h, "n")
     plain_src = d1p + _rows(f"{vol}/replay/lspc_train.jsonl")[:3000] + _rows(f"{vol}/replay/icsi_train.jsonl")
     d10p = speed_copies([x for x in plain_src if x["duration"] <= 20], _h(d10n), "p")
+    stats["d1p_short_of_target_h"] = round(max(0.0, d1p_h - _h(d1p)), 2)
     for name, rows in (("d1", d1), ("d1p", d1p), ("d2", d2), ("d2p", d2p), ("d10n", d10n), ("d10p", d10p)):
         _write(f"{out}/{name}.jsonl", rows)
         stats[f"{name}_h"] = round(_h(rows), 2)
@@ -246,3 +282,84 @@ def _take_per_lang(rows, hours):
     for lang in langs:
         out += _take([x for x in rows if x["lang"] == lang], per)
     return out
+
+
+def _take_per_lang_src(rows, hours, r):
+    """Equal hours per language; within a language VoxPopuli/YODAS first and FLEURS (read speech, the same domain as
+    the FLEURS gates) at most 40% (Opus H2)."""
+    langs = sorted({x["lang"] for x in rows})
+    per = hours / max(len(langs), 1)
+    out = []
+    for lang in langs:
+        mine = [x for x in rows if x["lang"] == lang]
+        r.shuffle(mine)
+        other = [x for x in mine if x["src"] != "fleurs"]
+        fl = [x for x in mine if x["src"] == "fleurs"]
+        got = _take(other, per)
+        room = max(0.0, per - _h(got))
+        cap_fl = 0.4 * per if other else per  # a language with no other source keeps FLEURS (reported)
+        got += _take(fl, min(room, cap_fl))
+        out += got
+    return out
+
+
+def _rms_frames(x, hop=320):
+    n = len(x) // hop
+    return np.sqrt(np.mean(x[:n * hop].reshape(n, hop) ** 2, axis=1) + 1e-12) if n else np.zeros(0)
+
+
+def _trim_one(args):
+    x_path, out_path = args
+    import soundfile as sf
+
+    x, sr = sf.read(x_path, dtype="float32")
+    if x.ndim > 1:
+        x = x.mean(1)
+    fr = _rms_frames(x)
+    if len(fr) < 20:
+        return None
+    speech = np.median(fr[fr > np.percentile(fr, 30)])
+    w = min(8, len(fr) // 4)  # 160 ms windows at each edge
+    a = int(np.argmin(fr[:w]))
+    b = len(fr) - w + int(np.argmin(fr[-w:]))
+    if fr[a] > 0.3 * speech or fr[b] > 0.3 * speech:
+        return "loud"
+    y = x[a * 320:(b + 1) * 320]
+    sf.write(out_path, y, 16000, subtype="PCM_16")
+    return len(y) / 16000
+
+
+def trim_edges(rows, wav_dir, stats):
+    """Move each crop edge to the quietest 20 ms frame in its outer 160 ms and drop crops whose edges stay inside speech
+    (the wav2vec2 alignment midpoints often landed in the previous word: Opus H3)."""
+    from multiprocessing import Pool
+
+    jobs = [(x["audio_filepath"], f"{wav_dir}/trim_{i}.wav") for i, x in enumerate(rows)]
+    with Pool(8) as p:
+        res = p.map(_trim_one, jobs, chunksize=64)
+    out, loud = [], 0
+    for x, (_, o), d in zip(rows, jobs, res):
+        if d == "loud":
+            loud += 1
+        elif d:
+            out.append({**x, "audio_filepath": o, "duration": round(d, 3)})
+    stats["trim_dropped_loud_edge"] = loud
+    stats["trim_kept"] = len(out)
+    return out
+
+
+NUMBER_PART = {"tts/v10pt/train_ok.jsonl": 0.9, "tts/d9sup/train_ok.jsonl": 1.0, "replay/lspc_train_numwords.jsonl": 1.0,
+               "mix/d1.jsonl": 1.0, "mix/d10n.jsonl": 1.0, "mix/d2.jsonl": 1.0}
+
+
+def mix_share(vol: str, mix: list) -> dict:
+    """Hours each part contributes (as write_mix takes them) and the number-bearing share (V2: 35-40%)."""
+    tot = num = 0.0
+    parts = {}
+    for path, hours, _tag in mix:
+        h = _h(_rows(f"{vol}/{path}"))
+        take = min(h, hours) if hours > 0 else h
+        parts[path] = round(take, 2)
+        tot += take
+        num += take * NUMBER_PART.get(path, 0.0)
+    return {"parts": parts, "total_h": round(tot, 2), "number_h": round(num, 2), "share": round(num / max(tot, 1e-9), 4)}

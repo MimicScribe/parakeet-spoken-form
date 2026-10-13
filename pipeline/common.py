@@ -12,7 +12,9 @@ NUMBER_WORDS = re.compile(
     r"\b(zero|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|"
     r"fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|"
     r"seventy|eighty|ninety|hundred|thousand|million|billion|trillion|percent|"
-    r"third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|twelfth|twentieth)\b",
+    r"third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|"
+    r"seventeenth|eighteenth|nineteenth|twentieth|thirtieth|fortieth|fiftieth|sixtieth|seventieth|eightieth|"
+    r"ninetieth|hundredth|thousandth|millionth)\b",
     re.I,
 )
 
@@ -53,6 +55,10 @@ def number_span(words: list[str]) -> list[bool]:
     [False, False, False, False, False, False, False]
     >>> number_span("we made five million and a dog".split())
     [False, False, True, True, False, False, False]
+    >>> number_span("about a hundred people".split())
+    [False, True, True, False]
+    >>> number_span("the twenty first century".split())
+    [False, True, True, False]
     """
     raw_w = [x.lower() for x in words]
     clean_w = [re.sub(r"^[^\w]+|[^\w]+$", "", x) for x in raw_w]
@@ -60,6 +66,12 @@ def number_span(words: list[str]) -> list[bool]:
     m = [bool(NUMBER_WORDS.search(cw)) if cw else False for cw in clean_w]
 
     for j, cw in enumerate(clean_w):
+        # "about a hundred", "a thousand": the article belongs to the number (Opus review)
+        if cw == "a" and j + 1 < len(clean_w) and clean_w[j + 1] in ("hundred", "thousand", "million", "billion"):
+            m[j] = True
+        # "twenty first", "thirty second": ordinal tails NUMBER_WORDS leaves out on purpose
+        if cw in ("first", "second") and j > 0 and re.fullmatch(r"(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)", clean_w[j - 1]):
+            m[j] = True
         if cw == "point" and ((j > 0 and (clean_w[j - 1] in SPAN_CORE or m[j - 1])) or
                               (j + 1 < len(clean_w) and (clean_w[j + 1] in SPAN_CORE or m[j + 1]))):
             m[j] = True

@@ -13,8 +13,6 @@ import re
 import sys
 from collections import defaultdict
 
-import jiwer
-
 import labeller as L
 
 EN_NUM = re.compile(r"\b(two|three|four|five|seven|eight|nine|eleven|twelve|thirteen|fourteen|fifteen|sixteen|"
@@ -39,7 +37,18 @@ def wer(rows):
     rows = [r for r in rows if norm(r["ref"])]
     if not rows:
         return None
-    return round(100 * jiwer.wer([norm(r["ref"]) for r in rows], [norm(r["hyp"]) or "x" for r in rows]), 2)
+    err = tot = 0
+    for r in rows:
+        a, b = norm(r["ref"]).split(), norm(r["hyp"]).split()
+        prev = list(range(len(b) + 1))
+        for i, x in enumerate(a, 1):
+            cur = [i] + [0] * len(b)
+            for j, y in enumerate(b, 1):
+                cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x != y))
+            prev = cur
+        err += prev[-1]
+        tot += len(a)
+    return round(100 * err / max(tot, 1), 2)
 
 
 def values_spoken(text):
@@ -52,6 +61,44 @@ def values_spoken(text):
     for d in re.findall(r"\d[\d,.]*", text):
         out.add(d.replace(",", "").rstrip("."))
     return out
+
+
+def has_words(hyp, words):
+    return re.search(r"(?<![\w'])" + re.escape(norm(words)) + r"(?![\w'])", norm(hyp)) is not None
+
+
+def _num_norm(v):
+    v = v.strip().replace("\u00a0", "").replace(" ", "")
+    m = re.match(r"^(.*?)[.,](\d{1,2})$", v)
+    if m and len(v) - len(m.group(2)) - 1 > 0 and not re.match(r"^\d{1,3}([.,]\d{3})+$", v):
+        return re.sub(r"[.,]", "", m.group(1)) + "." + m.group(2)
+    return re.sub(r"[.,]", "", v)
+
+
+def adv_ok(text, exp, lang, hyp):
+    if lang == "en":
+        sp = [x for x in L.spans(text) if x.kind != "spelled"]
+        if sp:
+            return all(any(has_words(hyp, c) for c in x.cands) for x in sp)
+        # spoken-form script rows: every run of number words must be heard exactly as said
+        from common import number_span
+        words = text.split()
+        flags = number_span(words)
+        runs, cur = [], []
+        for w, f in zip(words, flags):
+            if f:
+                cur.append(w)
+            elif cur:
+                runs.append(" ".join(cur))
+                cur = []
+        if cur:
+            runs.append(" ".join(cur))
+        if not runs:  # homophone rows ("We won one deal today."): the sentence itself must come out
+            return norm(hyp) == norm(text)
+        return all(has_words(hyp, r) for r in runs)
+    want = [w for w in exp.split("|") if w]
+    got = {_num_norm(t) for t in re.findall(r"\d+(?:[.,\u00a0 ]\d+)*", hyp)}
+    return all(_num_norm(w) in got for w in want)
 
 
 def lang_of(r):
@@ -81,44 +128,119 @@ def score(root, run, want_split="dev", exclude=frozenset()):
     nz = load(root, run, "noise")
     s["noise_numbers"] = sum(bool(EN_NUM.search(r["hyp"]) or re.search(r"\d", r["hyp"])) for r in nz)
     s["noise_words"] = sum(len(r["hyp"].split()) for r in nz)
-    # adversarial: refs carry "expected" values after a tab: "text\tv1|v2|lang|category"
+    # adversarial (dev or sealed split; D.2 exclusions): English = every caption number heard as one of its spoken
+    # readings (labeller candidates, word-boundary match); other languages = every expected value present as digits.
     adv = defaultdict(lambda: [0, 0])
     adv_leak = 0
     for r in load(root, run, "adv"):
         text, exp, lang, cat, split = r["ref"].split("\t")
         if split != want_split or r["id"] in exclude:
             continue
-        want = [x for x in exp.split("|") if x]
-        got = values_spoken(r["hyp"]) if lang == "en" else {d.replace(",", "").replace(" ", "") for d in
-                                                              re.findall(r"\d[\d,. ]*\d|\d", r["hyp"])}
+        ok = adv_ok(text, exp, lang, r["hyp"])
         if lang != "en":
-            got |= {g.replace(".", "") for g in got}
             adv_leak += bool(EN_NUM.search(r["hyp"]))
-        ok = all(w.replace(",", "").replace(".", "") in {g.replace(".", "") for g in got} or w in got for w in want)
         key = ("en" if lang == "en" else "xx") + ":" + cat
         adv[key][0] += 1
         adv[key][1] += ok
     s["adv"] = {k: f"{v[1]}/{v[0]}" for k, v in sorted(adv.items())}
     s["adv_en_ok"] = sum(v[1] for k, v in adv.items() if k.startswith("en:"))
+    s["adv_en_n"] = sum(v[0] for k, v in adv.items() if k.startswith("en:"))
     s["adv_xx_ok"] = sum(v[1] for k, v in adv.items() if k.startswith("xx:"))
+    s["adv_xx_n"] = sum(v[0] for k, v in adv.items() if k.startswith("xx:"))
     s["adv_xx_leak"] = adv_leak
-    # fast: refs "caption\tgold" (gold = the spoken reading, or the value for E22)
+    # fast: refs "caption\tgold\ttag"; D1 (macOS say, literal readings) = reading match with word boundaries;
+    # E22 = value match. Arm selection uses D1 only (D.9 / Opus H4); E22 is reported.
     fast = defaultdict(lambda: [0, 0])
     for r in load(root, run, "fast"):
         cap, gold, tag = r["ref"].split("\t")
-        ok = norm(gold) in norm(r["hyp"]) if not gold.isdigit() else gold in values_spoken(r["hyp"])
+        ok = has_words(r["hyp"], gold) if not gold.isdigit() else gold in values_spoken(r["hyp"])
         fast[tag][0] += 1
         fast[tag][1] += ok
     s["fast"] = {k: f"{v[1]}/{v[0]}" for k, v in sorted(fast.items())}
+    s["fast_d1_ok"] = sum(v[1] for k, v in fast.items() if k.startswith("d1_"))
+    s["fast_d1_n"] = sum(v[0] for k, v in fast.items() if k.startswith("d1_"))
     eo = load(root, run, "e22_other")
     mins = sum(len(r["ref"].split()) for r in eo) / 150 or 1  # ~150 wpm proxy for minutes
     s["fillers_per_min_e22_other"] = round(sum(len(FILL.findall(r["hyp"])) for r in eo) / mins, 3)
     return s
 
 
+def exclusions(root, stock_run, v10_run):
+    """D.2: adversarial rows that BOTH stock and v10pt get wrong are excluded (the TTS or the script is suspect)."""
+    def wrong(run):
+        out = set()
+        for r in load(root, run, "adv"):
+            text, exp, lang, cat, split = r["ref"].split("\t")
+            if not adv_ok(text, exp, lang, r["hyp"]):
+                out.add(r["id"])
+        return out
+    return wrong(stock_run) & wrong(v10_run)
+
+
+def e21x_values(root, run, refs_dir):
+    """SEALED Earnings-21 (33 calls): numbers by VALUE per call. Reference values = digit tokens of the transcript;
+    hypothesis values = digits + spelled numbers. Returns matched / ref / hyp counts (recall, invented)."""
+    import glob
+    import os
+    from collections import Counter
+
+    by = defaultdict(list)
+    for r in load(root, run, "sealed/e21x"):
+        by[r["id"].rsplit("_", 1)[0]].append((r["id"], r["hyp"]))
+    tot = Counter()
+    for f in glob.glob(f"{refs_dir}/*.txt"):
+        fid = os.path.basename(f)[:-4]
+        if fid not in by:
+            continue
+        ref = Counter(re.sub(r"[,]", "", d).rstrip(".") for d in re.findall(r"\d[\d,.]*", open(f).read()))
+        hyp = Counter()
+        for _, h in sorted(by[fid]):
+            for v in values_spoken(h):
+                hyp[v] += 1
+        m = sum((ref & hyp).values())
+        tot["matched"] += m
+        tot["ref"] += sum(ref.values())
+        tot["hyp"] += sum(hyp.values())
+    return dict(tot)
+
+
+SELECT_ORDER = [("leak", -1), ("fast_d1_ok", +1), ("adv_en_ok", +1), ("wer_dev", -1)]
+
+
+def sel_metrics(s):
+    return {"leak": s["leak_vox_dev_total"] + s["leak_fleurs_num_total"] + s["adv_xx_leak"],
+            "fast_d1_ok": s["fast_d1_ok"], "adv_en_ok": s["adv_en_ok"],
+            "wer_dev": (s["wer_lspc_dev"] or 0) + (s["wer_d1_dev"] or 0)}
+
+
+def select(res, main_runs, stock_runs):
+    """Pre-registered (V2 'Selection'): MAIN ships unless STOCK-INIT beats it, on the first metric in SELECT_ORDER
+    where the arm means differ by more than the larger within-arm seed spread. Within the chosen arm, seeds are
+    ranked lexicographically by SELECT_ORDER."""
+    m = {r: sel_metrics(res[r]) for r in main_runs + stock_runs}
+    arm = "main"
+    for k, sign in SELECT_ORDER:
+        a = [m[r][k] for r in main_runs]
+        b = [m[r][k] for r in stock_runs]
+        spread = max(max(a) - min(a), max(b) - min(b))
+        diff = (sum(b) / len(b) - sum(a) / len(a)) * sign
+        if abs(diff) > spread:
+            arm = "stockinit" if diff > 0 else "main"
+            break
+    runs = main_runs if arm == "main" else stock_runs
+    best = sorted(runs, key=lambda r: tuple(-sign * m[r][k] for k, sign in SELECT_ORDER))[0]
+    return {"arm": arm, "run": best, "metrics": m}
+
+
 if __name__ == "__main__":
     root, runs = sys.argv[1], sys.argv[2].split(",")
-    res = {run: score(root, run) for run in runs}
+    excl = frozenset()
+    if "--exclude-from" in sys.argv:
+        st, v10 = sys.argv[sys.argv.index("--exclude-from") + 1].split(",")
+        excl = frozenset(exclusions(root, st, v10))
+        print(f"D.2 exclusions: {len(excl)}")
+    split = sys.argv[sys.argv.index("--split") + 1] if "--split" in sys.argv else "dev"
+    res = {run: score(root, run, split, excl) for run in runs}
     print(json.dumps(res, indent=1))
     if "--json" in sys.argv:
         json.dump(res, open(sys.argv[sys.argv.index("--json") + 1], "w"), indent=1)

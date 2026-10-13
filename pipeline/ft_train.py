@@ -40,6 +40,7 @@ class SaveEvery(pl.Callback):
             if self.last:  # full state (optimizer, scheduler, step) for a resume after preemption
                 trainer.save_checkpoint(self.last + ".tmp")
                 os.replace(self.last + ".tmp", self.last)
+                open(self.last + ".step", "w").write(str(step))
             open(f"{self.exp}/step{step}.pt.done", "w").close()
             self.on_save()
 
@@ -437,6 +438,13 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
 
     exp = f"{vol}/exp/{run}"
     os.makedirs(exp, exist_ok=True)
+    last = f"{exp}/last.ckpt"
+    resuming = resume and os.path.exists(last)
+    if resuming:
+        # lhotse restarts its sampler on resume: a NEW data seed so the resumed run does not replay the batches it
+        # already saw (NeMo lhotse docs; Opus review B5). Loss continuity is checked within noise, not identity.
+        seed = seed + 1000 * int(open(last + ".step").read().strip() or 0)
+        print(f"resume: data seed -> {seed}")
     replay_texts = set()
     tagged: dict = {}
     hours = write_mix(vol, f"{exp}/train_manifest.jsonl", mix, seed=seed, replay_texts=replay_texts,
@@ -471,14 +479,14 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         m.spec_augmentation = None
         print("SpecAugment off")
     m.encoder.freeze()
+    if "blankspan" in kl_terms:
+        assert kl_replay_only, "blankspan only works with kl_replay_only (span rows are matched by label)"
     if kl_weight or kl_punct:
         add_blank_duration_kl(m, kl_weight, only_texts=replay_texts if kl_replay_only else None, terms=kl_terms,
                               blank_scale=kl_blank_scale, punct_weight=kl_punct, punct_rows=kl_punct_rows,
                               span_texts=span_texts, nonen_texts=nonen_texts, tok_weight=kl_tok)
         print(f"KL to stock ({kl_terms}), weight {kl_weight}"
               + (f", replay rows only ({len(replay_texts)} labels)" if kl_replay_only else ""))
-    last = f"{exp}/last.ckpt"
-    resuming = resume and os.path.exists(last)
     if init_from and not resuming:
         src, _, step = init_from.partition("@")
         path = f"{vol}/exp/{src}/step{step}.pt" if step else f"{vol}/exp/{src}/decoder_joint.pt"

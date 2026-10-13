@@ -2,9 +2,11 @@
 
 Checks, all must pass for a number span (else every crop containing it is dropped):
 1. stock-value precheck: stock Ultra's decode contains the caption's digits (spans worth >= 10);
-2. two scorers agree: full-row TDT NLL under v10pt and CTC NLL under wav2vec2-large-960h-lv60-self pick the same
-   candidate, each by >= MARGIN nats (other spans fixed at their current choice; one coordinate pass);
-3. absolute fit: the chosen words appear in wav2vec2's own greedy transcript (<= 1 word edit per 3 words).
+2. CTC NLL under wav2vec2-large-960h-lv60-self picks the reading by >= MARGIN nats over every candidate with
+   different words (other spans fixed at their current choice; one coordinate pass); v10pt TDT only picks the
+   orthography among same-word candidates (both Parakeet decoders carry the prior being corrected; see the plan's
+   execution log, 2026-10-13);
+3. absolute fit: the chosen words appear verbatim in wav2vec2's own greedy transcript.
 Rows also need caption-vs-stock CER <= 15%. Crops: wav2vec2 forced alignment of the final label, <= 15 s windows cut in
 word gaps, never inside a number span; some preview-shaped 2-8 s crops.
 
@@ -30,6 +32,7 @@ def norm_ctc(text: str) -> str:
     t = re.sub(r"[^A-Z' ]+", " ", t)
     t = re.sub(r"\bOH\b", "O", t)
     t = re.sub(r"\b([AP])M\b", r"\1 M", t)
+    t = re.sub(r"\bPERCENT\b", "PER CENT", t)  # LibriSpeech spelling (Opus review B2: 238/240 percent spans failed fit)
     return re.sub(r"\s+", " ", t).strip()
 
 
@@ -253,8 +256,8 @@ def crops(words, times, bad_tok, num_tok, dur, rnd, max_s=15.0):
     out = []
     a = 0
     while a < n:
-        if bad_tok[a]:
-            a += 1
+        if bad_tok[a] or (a > 0 and num_tok[a] and num_tok[a] == num_tok[a - 1]):
+            a += 1  # never start on a bad token or in the middle of a number span
             continue
         start = max(0.0, times[a][0] - 0.15)
         b = a
@@ -285,10 +288,12 @@ def crops(words, times, bad_tok, num_tok, dur, rnd, max_s=15.0):
     return out + extra
 
 
-def label_shard(vol: str, sc: Scorer, man: str, out_tag: str, keep_audio=True):
+def label_shard(vol: str, sc: Scorer, man: str, out_tag: str, keep_audio=True, only_pct: bool = False):
     import soundfile as sf
 
     rows = [json.loads(l) for l in open(man)]
+    if only_pct:  # relabel pass for rows with a percent sign (Opus review B2)
+        rows = [r for r in rows if r["kind"] != "plain" and ("%" in r["text"] or "percent" in r["text"].lower())]
     num = [r for r in rows if r["kind"] != "plain"]
     plain = [r for r in rows if r["kind"] == "plain"]
     os.makedirs(f"{vol}/d1/rows", exist_ok=True)
@@ -297,7 +302,7 @@ def label_shard(vol: str, sc: Scorer, man: str, out_tag: str, keep_audio=True):
     os.makedirs(wav_dir, exist_ok=True)
     paths = [r["audio_filepath"] for r in rows]
     stock_txt = sc.decode(sc.stock, paths)
-    v10_txt = sc.decode(sc.v10, paths)
+    v10_txt = [""] * len(paths) if only_pct else sc.decode(sc.v10, paths)
     rnd = random.Random(out_tag)
     out_rows, out_crops = [], []
     for r, st, vt in zip(rows, stock_txt, v10_txt):

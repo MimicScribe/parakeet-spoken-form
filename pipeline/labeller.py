@@ -426,9 +426,14 @@ def spans(text: str) -> list[Span]:
         add(mt.start(), mt.end(), _uniq([f"{pre_w} {x}{post_w}" for x in nums]), "code")
     for mt in TOKEN.finditer(text):
         a = mt.start()
-        if a > 0 and (text[a - 1].isalnum() or text[a - 1] in "-/.:"):
+        if a > 0 and (text[a - 1].isalnum() or text[a - 1] in "/.:" or
+                      (text[a - 1] == "-" and a > 1 and text[a - 2] != " ")):
             continue
         cands, kind = _token_cands(mt)
+        if a > 0 and text[a - 1] == "-" and (a == 1 or text[a - 2] == " ") and kind in ("int", "decimal", "percent"):
+            cands = [f"{p} {c}" for p in ("minus", "negative") for c in cands[:3]]  # "-5 degrees"
+            add(a - 1, mt.end(), cands, "negative")
+            continue
         if kind == "bad":
             add(mt.start(), mt.end(), ["\x00"], "bad")
             continue
@@ -464,16 +469,23 @@ def spans(text: str) -> list[Span]:
 
 
 def render(text: str, sp: list[Span], choice: list[int]) -> str:
-    """The caption with each span replaced by its chosen candidate (sentence-initial capital kept)."""
+    """The caption with each span replaced by its chosen candidate (sentence-initial capital kept). A hyphen joining
+    the number to a following word ("20-foot", "twenty-second") becomes a space: no hyphens in number words."""
     parts, pos = [], 0
     for s, c in zip(sp, choice):
         parts.append(text[pos:s.start])
         w = s.cands[c]
+        prev = "".join(parts).rstrip().split(" ")[-1].lower() if "".join(parts).strip() else ""
+        if prev in ("a", "an") and w.startswith("a "):
+            w = w[2:]  # the caption already has the "a" of "a hundred" (Opus review: "a a hundred")
         before = "".join(parts).rstrip()
         if not before or before[-1] in ".?!":
             w = w[0].upper() + w[1:]
         parts.append(w)
         pos = s.end
+        if pos < len(text) - 1 and text[pos] == "-" and text[pos + 1].isalpha():
+            parts.append(" ")
+            pos += 1
     parts.append(text[pos:])
     return "".join(parts)
 
