@@ -158,6 +158,13 @@ def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"
     s["e21_dev_blend_hits"] = [m.group(0) + " @ " + r["id"] for r in e21 for m in BLEND.finditer(r["hyp"])][:40]
     s["e21_dev_wf_windows"] = sum(bool(WF.search(r["hyp"])) for r in e21)
     s["e21_dev_chimeras"] = sum(len(CHIMERA.findall(r["hyp"])) for r in e21)
+    # the blend precursor (R3.18): one spoken year read "two thousand X" and "twenty X" by overlapping windows
+    import yearflip
+
+    wins = [{"call": r["id"].split("_")[0], "start": int(r["id"].split("_")[1]) / 16000, "duration": 14.96,
+             "id": r["id"], "hyp": r["hyp"]} for r in e21]
+    yf = yearflip.flips(wins, "hyp") if wins else {"flips": 0, "year_occurrences": 0}
+    s["e21_dev_year_flips"], s["e21_dev_year_occ"] = yf["flips"], yf["year_occurrences"]
     biz = load(root, run, "biz_dev")
     if biz:
         s["wer_biz_dev"] = wer(biz)

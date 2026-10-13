@@ -38,7 +38,7 @@ nemo_image = (
     .env({"HF_HOME": f"{VOL}/hf", "HF_HUB_ENABLE_HF_TRANSFER": "1"})
     .add_local_python_source("common", "data_e22", "data_replay", "data_fleurs", "ft_train", "ft_eval", "rescore", "preflight",
                               "labeller", "readings", "label_gpu", "harvest", "beds", "veto",
-                              "mix_build", "recrop", "score_retrain")
+                              "mix_build", "recrop", "score_retrain", "yearflip")
 )
 
 tts_image = (
