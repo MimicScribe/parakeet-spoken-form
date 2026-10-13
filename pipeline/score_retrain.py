@@ -341,15 +341,17 @@ def e21x_values(root, run, refs_dir):
 # RETRAIN-3 frozen selection order (plan R3.12.5; written before any retrain-3 number was read). Lexicographic; a
 # difference within the stated noise band passes to the next key.
 SELECT_ORDER = [("blend", -1, 0), ("en_wf", -1, 2), ("chimeras", -1, 0), ("adv_en_ok", +1, 3), ("fast_d1_ok", +1, 5),
-                ("nonen_leak", -1, 1), ("fleurs_worst", -1, 0.1), ("wer_dev", -1, 0.1)]
+                ("nonen_leak", -1, 1), ("fleurs_worst", -1, 0), ("wer_dev", -1, 0.1)]
 
 
 def sel_metrics(s):
     fl = [v for v in (s.get("wer_fleurs_delta") or {}).values() if v is not None]
+    boot = next((v for k, v in s.items() if k.startswith("fleurs_bootstrap_vs_")), None)
     return {"blend": s["blend_twenty_thousand"], "en_wf": s["digits_e22_numbers"] + s["digits_d1_dev"],
             "chimeras": s["chimeras"], "adv_en_ok": s["adv_en_ok"], "fast_d1_ok": s["fast_d1_ok"],
             "nonen_leak": s["leak_vox_dev_total"] + s["leak_fleurs_num_total"],
-            "fleurs_worst": max(fl) if fl else 0.0,
+            # R3.17 M2 (final fresh-eyes review): languages failing the paired bootstrap, not the raw worst delta
+            "fleurs_worst": sum(x["fail"] for x in boot.values()) if boot else (max(fl) if fl else 0.0),
             "wer_dev": (s["wer_lspc_dev"] or 0) + (s["wer_d1_dev"] or 0)}
 
 

@@ -1218,7 +1218,7 @@ def cache_beds3(sealed: bool = False):
 
 
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", cpu=8, memory=65536, timeout=6 * 3600)
-def eval_multi(runs: str, sealed: bool = False, tag: str = ""):
+def eval_multi(runs: str, sealed: bool = False, tag: str = "", skip: str = ""):
     """Decode every cached retrain-3 bed with each checkpoint in `runs` ("v10pt@1500,ultra,S-A@1000,...";
     "<path>.pt" also works). One encoder pass serves all of them. Hyps go to hyps/<run>@<step><tag>."""
     import os
@@ -1231,6 +1231,7 @@ def eval_multi(runs: str, sealed: bool = False, tag: str = ""):
     m = ft_eval.load_model(VOL, "ultra", ultra_path())
     stock = {k: v.clone() for k, v in m.state_dict().items() if not k.startswith(("encoder.", "preprocessor."))}
     sets = ft_eval.RETRAIN3_SETS + ([(a, b, 0) for a, b in ft_eval.SEALED3_SETS] if sealed else [])
+    sets = [x for x in sets if x[1] not in skip.split(",")]  # screening: skip=e21_dev (report-only, 25 h of audio)
     for run in runs.split(","):
         if run == "ultra":
             sd, name = stock, "ultra_rt"
