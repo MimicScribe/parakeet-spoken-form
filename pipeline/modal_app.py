@@ -1033,11 +1033,14 @@ R3_ARMS = {"S-A": dict(wf_weight=1.0, l2sp_c=0.3, lr=1e-4), "S-B": dict(wf_weigh
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-40GB", cpu=8, memory=32768, timeout=24 * 3600,
               retries=modal.Retries(max_retries=2, initial_delay=30.0))
 def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, save_every: int = 250,
-             en_weight: float = 1.0, check_share: bool = True, warmup: int = 50):
+             en_weight: float = 1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False):
     """One retrain-3 run (R3.13): r3 losses, decoupled L2-SP to v10pt@1500, 200 s x 2 accumulated batches.
     Rehearsal (E2) = a small max_steps. Resumes from exp/<run>/last.ckpt after a preemption."""
     import json
+    import os
 
+    if gradshare:
+        os.environ["R3_GRADSHARE"] = "1"
     import ft_train
     import mix_build
 
@@ -1045,7 +1048,10 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     cfg = R3_ARMS[arm]
     mix = retrain3_mix()
     share = mix_build.mix_share(VOL, mix)
-    print("MIX", json.dumps(share), "ARM", arm, json.dumps(cfg))
+    import shutil
+
+    print("MIX", json.dumps(share), "ARM", arm, json.dumps(cfg), "DISK /tmp free GB",
+          round(shutil.disk_usage("/tmp").free / 1e9, 1))
     if check_share:
         assert 0.35 <= share["share"] <= 0.40, f"number share {share['share']} outside 35-40% (R3.17 F4)"
     ft_train.train(VOL, ultra_path(), run, mix=mix, max_steps=max_steps, lr=cfg["lr"], warmup=warmup, seed=seed,

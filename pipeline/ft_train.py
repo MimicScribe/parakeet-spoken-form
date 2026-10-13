@@ -597,6 +597,22 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
         m._r3_parts = {"rnnt": out["loss"].detach(), "kl_b": kl_b.detach(), "kl_p": kl_p.detach(),
                        "kl_t": kl_t.detach(), "wf": wf_pen.detach(), "en": en_pen.detach(),
                        "th": th_pen.detach()}
+        if os.environ.get("R3_GRADSHARE") and batch_idx % 10 == 0:
+            # E2 acceptance (R3.12.3): each term's gradient on the joint's last layer, overall and on the written-form
+            # output rows (wf_pen must reach >= 10% of the RNNT gradient there)
+            W = m.joint.joint_net[-1].weight
+            wf_rows = wf.clamp(max=W.shape[0] - 1)
+            gs = {}
+            for k, term in (("rnnt", out["loss"]), ("kl_b", kl_weight * kl_b), ("kl_p", punct_weight * kl_p),
+                            ("kl_t", tok_weight * kl_t), ("wf", wf_weight * wf_pen), ("en", en_weight * en_pen),
+                            ("th", wf_weight * th_pen)):
+                if not term.requires_grad:
+                    gs[k] = (0.0, 0.0)
+                    continue
+                g = torch.autograd.grad(term, W, retain_graph=True, allow_unused=True)[0]
+                gs[k] = (0.0, 0.0) if g is None else (g.norm().item(), g[wf_rows].norm().item())
+            print("r3grad " + " ".join(f"{k} {a:.4g}/{b:.4g}" for k, (a, b) in gs.items())
+                  + f" wf_share_at_wf_rows {gs['wf'][1] / max(gs['rnnt'][1], 1e-12):.3f}", flush=True)
         out["loss"] = out["loss"] + aux
         if batch_idx % 10 == 0:
             print("r3 " + " ".join(f"{k} {v.item():.5f}" for k, v in m._r3_parts.items())
