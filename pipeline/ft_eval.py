@@ -103,3 +103,25 @@ def eval_sets(vol: str, m, run: str, tts: str, suffix: str = "") -> None:
     transcribe_loaded(vol, m, run, e22_other(vol), "e22_other" + suffix)
     transcribe_loaded(vol, m, run, f"tts/{tts}/dev_ok.jsonl", "tts_dev" + suffix)
     transcribe_loaded(vol, m, run, "replay/lspc_dev.jsonl", "lspc_dev" + suffix, limit=600)
+
+
+# Real-speech retrain (2026-10-12): every bed, per checkpoint. Sealed beds are decoded with the rest but their hyps sit
+# under hyps/<run>/sealed/ and are scored once, at the end, for the chosen model only.
+RETRAIN_SETS = [
+    ("e22/numbers.jsonl", "e22_numbers", 0), ("e22/other.jsonl", "e22_other", 0),
+    ("replay/lspc_dev.jsonl", "lspc_dev", 600), ("mix/d1_dev.jsonl", "d1_dev", 0),
+    ("beds/vox/dev.jsonl", "vox_dev", 0), ("beds/fleurs/wer.jsonl", "fleurs_wer", 0),
+    ("beds/fleurs/num.jsonl", "fleurs_num", 0), ("beds/noise/all.jsonl", "noise", 0),
+    ("beds/adv/all.jsonl", "adv", 0), ("beds/fast/all.jsonl", "fast", 0), ("tts/d9sup/dev_ok.jsonl", "d9_dev", 0),
+]
+SEALED_SETS = [("beds/vox/sealed.jsonl", "sealed/vox"), ("beds/e21x/sealed.jsonl", "sealed/e21x")]
+
+
+def eval_retrain(vol: str, m, run: str, suffix: str = "", sealed: bool = False) -> None:
+    e22_other(vol)
+    os.makedirs(f"{vol}/hyps/{run}/sealed", exist_ok=True)
+    for man, name, limit in RETRAIN_SETS:
+        transcribe_loaded(vol, m, run, man, name + suffix, limit=limit)
+    if sealed:
+        for man, name in SEALED_SETS:
+            transcribe_loaded(vol, m, run, man, name + suffix)

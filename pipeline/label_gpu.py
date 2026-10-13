@@ -61,7 +61,7 @@ def fits(span_words: list[str], hyp_words: list[str]) -> bool:
     n = len(span_words)
     if not n:
         return True
-    tol = n // 3
+    tol = 0  # exact: a caption missing words pushes both scorers toward longer readings (validation 2026-10-13)
     for k in range(max(1, n - tol), n + tol + 1):
         for i in range(0, max(1, len(hyp_words) - k + 1)):
             if word_edit(span_words, hyp_words[i:i + k]) <= tol:
@@ -374,3 +374,36 @@ def label_shard(vol: str, sc: Scorer, man: str, out_tag: str, keep_audio=True):
     return {"shard": out_tag, "rows": len(num), "plain": len(plain), "crops": len(out_crops),
             "crop_h": sum(c["duration"] for c in out_crops) / 3600,
             "dropped": sum(1 for r in out_rows if r.get("drop"))}
+
+
+def decide_text(sc: Scorer, x, text: str, stock_text: str) -> dict:
+    """The per-row decision without crops (validation): spans, picks, and why each span is (un)decided."""
+    sp = L.spans(text)
+    f, el, lp = sc.encode(x)
+    pre = [precheck(s, digit_runs(stock_text), stock_text) for s in sp]
+    choice, info = choose(sc, f, el, lp, text, sp)
+    w2v = norm_ctc(sc.greedy_w2v(lp)).split()
+    out = []
+    for s, c, inf, p in zip(sp, choice, info, pre):
+        fit = fits(norm_ctc(s.cands[c]).split(), w2v)
+        out.append({"text": s.text, "kind": s.kind, "pick": s.cands[c], "gold": s.gold, "n": len(s.cands),
+                    "pre": p, "fit": fit, **inf, "decided": bool(p and fit and inf.get("ok", True))})
+    return {"spans": out, "label": L.render(text, sp, choice), "w2v": " ".join(w2v)}
+
+
+def validate(vol: str, sc: Scorer, items_path: str, out_path: str):
+    """items: [{"id", "wav" (volume-relative), "caption"}] -> per-item decisions."""
+    import soundfile as sf
+
+    items = json.load(open(items_path))
+    stock = sc.decode(sc.stock, [f"{vol}/{it['wav']}" for it in items])
+    res = []
+    for it, st in zip(items, stock):
+        x, _ = sf.read(f"{vol}/{it['wav']}", dtype="float32")
+        if x.ndim > 1:
+            x = x.mean(1)
+        r = decide_text(sc, x, it["caption"], st)
+        r.update({"id": it["id"], "stock": st, "caption": it["caption"]})
+        res.append(r)
+    json.dump(res, open(out_path, "w"), indent=0)
+    return len(res)

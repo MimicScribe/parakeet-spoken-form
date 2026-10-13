@@ -38,11 +38,17 @@ def _runs(t):
     return [re.sub(r"[,.\s]", "", m) for m in re.findall(r"\d[\d,.\s]*\d|\d", t)]
 
 
+FLEURS_CODE = {"bg": "bg_bg", "hr": "hr_hr", "cs": "cs_cz", "da": "da_dk", "nl": "nl_nl", "et": "et_ee", "fi": "fi_fi",
+               "fr": "fr_fr", "de": "de_de", "el": "el_gr", "hu": "hu_hu", "it": "it_it", "lv": "lv_lv", "lt": "lt_lt",
+               "mt": "mt_mt", "pl": "pl_pl", "pt": "pt_br", "ro": "ro_ro", "sk": "sk_sk", "sl": "sl_si", "es": "es_419",
+               "sv": "sv_se", "ru": "ru_ru", "uk": "uk_ua"}
+
+
 def sources(lang: str, yodas_shards: int = 40, vox_files: int = 4):
     from huggingface_hub import HfApi
 
     api = HfApi()
-    out = []
+    out = [("fleurs", f"{FLEURS_CODE[lang]}/train/0000.parquet")]
     if lang in VOX:
         fl = sorted(f for f in api.list_repo_files("facebook/voxpopuli", repo_type="dataset")
                     if f.startswith(f"{lang}/train-"))
@@ -52,8 +58,12 @@ def sources(lang: str, yodas_shards: int = 40, vox_files: int = 4):
     import random
 
     random.Random(lang).shuffle(fl)
-    out += [("yodas", f) for f in fl[:yodas_shards]]
-    return out
+    yod = [("yodas", f) for f in fl[:yodas_shards]]
+    # interleave so both domains (parliament, YouTube) fill the quota
+    mixed = []
+    for i in range(max(len(out), len(yod))):
+        mixed += out[i:i + 1] + yod[i:i + 1]
+    return mixed
 
 
 def rows_of(kind: str, path: str):
@@ -61,10 +71,15 @@ def rows_of(kind: str, path: str):
     import soundfile as sf
     from huggingface_hub import hf_hub_download
 
-    repo = "facebook/voxpopuli" if kind == "vox" else "espnet/yodas-granary"
-    local = hf_hub_download(repo, path, repo_type="dataset", local_dir="/tmp/src")
+    if kind == "fleurs":
+        local = hf_hub_download("google/fleurs", path, repo_type="dataset", revision="refs/convert/parquet",
+                                local_dir="/tmp/src")
+        cols = ["id", "audio", "raw_transcription"]
+    else:
+        repo = "facebook/voxpopuli" if kind == "vox" else "espnet/yodas-granary"
+        local = hf_hub_download(repo, path, repo_type="dataset", local_dir="/tmp/src")
+        cols = ["audio_id", "audio", "raw_text"] if kind == "vox" else ["utt_id", "audio", "text", "duration"]
     pf = pq.ParquetFile(local)
-    cols = ["audio_id", "audio", "raw_text"] if kind == "vox" else ["utt_id", "audio", "text", "duration"]
     for rg in range(pf.metadata.num_row_groups):
         for r in pf.read_row_group(rg, columns=cols).to_pylist():
             x, sr = sf.read(io.BytesIO(r["audio"]["bytes"]), dtype="float32")
@@ -77,12 +92,13 @@ def rows_of(kind: str, path: str):
             d = len(x) / 16000
             if d < 1.0 or d > 20.0:
                 continue
-            yield {"id": (r.get("audio_id") or r.get("utt_id")), "caption": r.get("raw_text") or r.get("text") or "",
+            rid = r.get("audio_id") or r.get("utt_id") or f"fleurs_{r.get('id')}"
+            yield {"id": rid, "caption": r.get("raw_text") or r.get("text") or r.get("raw_transcription") or "",
                    "x": x, "dur": d, "src": kind}
     os.remove(local)
 
 
-def harvest(vol: str, model, lang: str, digit_h: float = 1.2, plain_h: float = 1.2, max_decode_h: float = 40.0,
+def harvest(vol: str, model, lang: str, digit_h: float = 1.2, plain_h: float = 1.2, max_decode_h: float = 25.0,
             exclude_ids: set | None = None):
     import langid
     import soundfile as sf
@@ -93,7 +109,7 @@ def harvest(vol: str, model, lang: str, digit_h: float = 1.2, plain_h: float = 1
     out = f"{vol}/d2/{lang}"
     os.makedirs(f"{out}/wav", exist_ok=True)
     got = {"digit": [], "plain": []}
-    hours = {"digit": 0.0, "plain": 0.0}
+    hours = {"digit": 0.0, "plain": 0.0}  # plus (kind, source) running totals: no source fills > 60%
     audit = open(f"{out}/audit.jsonl", "w")
     decoded = 0.0
     quota = {"digit": digit_h, "plain": plain_h}
@@ -156,7 +172,12 @@ def _process(batch, model, lang, out, got, hours, audit, stats, langid, sf, ft_e
             stats["cer_reject"] += 1
         dec["kept"] = kind
         audit.write(json.dumps(dec, ensure_ascii=False) + "\n")
-        if kind and hours[kind] < quota[kind]:
+        src_h = hours.setdefault((kind, r["src"]), 0.0) if kind else 0.0
+        if kind == "plain" and r["src"] == "fleurs":
+            kind = None  # FLEURS number-free train rows are already in the replay mix
+        cap = 0.6 if lang in VOX else 1.0
+        if kind and hours[kind] < quota[kind] and src_h < cap * quota[kind]:
+            hours[(kind, r["src"])] = src_h + r["dur"] / 3600
             wav = f"{out}/wav/{r['id']}.wav"
             sf.write(wav, r["x"], 16000, subtype="PCM_16")
             got[kind].append({"audio_filepath": wav, "duration": round(r["dur"], 3), "text": h, "lang": lang,

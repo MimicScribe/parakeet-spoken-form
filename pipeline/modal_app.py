@@ -33,10 +33,11 @@ nemo_image = (
         "soundfile",
         "hf_transfer",
     )
+    .apt_install("unzip")
     .uv_pip_install("langid", "transformers")
     .env({"HF_HOME": f"{VOL}/hf", "HF_HUB_ENABLE_HF_TRANSFER": "1"})
     .add_local_python_source("common", "data_e22", "data_replay", "data_fleurs", "ft_train", "ft_eval", "rescore", "preflight",
-                              "labeller", "readings", "label_gpu", "harvest")
+                              "labeller", "readings", "label_gpu", "harvest", "beds")
 )
 
 tts_image = (
@@ -570,6 +571,14 @@ class Labeller:
         self.sc = label_gpu.Scorer(VOL, ultra_path())
 
     @modal.method()
+    def validate(self, items: str, out: str) -> int:
+        import label_gpu
+
+        n = label_gpu.validate(VOL, self.sc, f"{VOL}/{items}", f"{VOL}/{out}")
+        vol.commit()
+        return n
+
+    @modal.method()
     def shard(self, man: str, tag: str, keep_audio: bool = True) -> dict:
         import os
 
@@ -609,10 +618,12 @@ def s3_label(lang: str = "en", limit: int = 0, only: str = ""):
 @app.function(image=nemo_image, volumes={VOL: vol}, secrets=[hf_secret], gpu="L4", timeout=4 * 3600, max_containers=8,
               retries=1)
 def d2_harvest_lang(lang: str, digit_h: float = 1.2, plain_h: float = 1.2) -> dict:
+    import os
+
+    os.environ["HF_HOME"] = "/tmp/hf"  # HF/xet logs on the volume block vol.commit/reload across inputs
     import ft_eval
     import harvest
 
-    vol.reload()
     m = ft_eval.load_model(VOL, "ultra", ultra_path())
     st = harvest.harvest(VOL, m, lang, digit_h, plain_h)
     vol.commit()
@@ -631,3 +642,110 @@ def d2_harvest(langs: str = "bg,cs,da,de,el,es,et,fi,fr,hr,hu,it,lt,lv,nl,pl,pt,
         tot += st["digit_h"]
         print(json.dumps(st))
     print(f"digit hours total {tot:.1f}")
+
+
+@app.local_entrypoint()
+def validate_labeller(items: str = "lv/items.json", out: str = "lv/out.json"):
+    print(Labeller().validate.remote(items, out))
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, secrets=[hf_secret], gpu="L4", cpu=4, memory=32768,
+              timeout=4 * 3600)
+def build_beds(which: str = "vox,fleurs,noise"):
+    import json
+    import os
+
+    os.environ["HF_HOME"] = "/tmp/hf"
+
+    import beds
+    import ft_eval
+
+    vol.reload()
+    if "noise" in which:
+        print("noise", beds.noise(VOL))
+        vol.commit()
+    if "fleurs" in which:
+        print("fleurs", json.dumps(beds.fleurs(VOL)))
+        vol.commit()
+    if "e21x" in which:
+        print("e21x", json.dumps(beds.e21x(VOL)))
+        vol.commit()
+    if "vox" in which:
+        m = ft_eval.load_model(VOL, "ultra", ultra_path())
+        print("vox", json.dumps(beds.vox(VOL, m)))
+        vol.commit()
+
+
+mix_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .apt_install("ffmpeg")
+    .uv_pip_install("numpy", "scipy", "soundfile", "librosa")
+    .add_local_python_source("common", "mix_build")
+)
+
+
+@app.function(image=mix_image, volumes={VOL: vol}, cpu=8, memory=32768, timeout=8 * 3600)
+def build_mix(seed: int = 1):
+    import json
+
+    import mix_build
+
+    vol.reload()
+    print(json.dumps(mix_build.build(VOL, seed=seed), indent=1))
+    vol.commit()
+
+
+RETRAIN_K = dict(batch_duration=400, spec_augment=False, kl_weight=10.0, kl_replay_only=True, kl_punct=30.0,
+                 kl_punct_rows="replay", save_every=500)
+
+
+def retrain_mix(arm: str, tts_h: float = 6.0) -> list:
+    """The V2 SPEC mix per arm. main/stockinit: everything; abl_en: v10pt mix + English real only;
+    abl_nonen: v10pt mix + non-English real only. Hours <= 0 = all rows of that manifest."""
+    base = [("tts/v10pt/train_ok.jsonl", tts_h, "free"), ("tts/d9sup/train_ok.jsonl", 0, "free"),
+            ("replay/lspc_train.jsonl", 20.0, "anchor"), ("replay/lspc_train_numwords.jsonl", 5.0, "anchor"),
+            ("replay/fleurs_train_multi.jsonl", 3.0, "nonen"), ("replay/icsi_train.jsonl", 0, "anchor")]
+    en = [("mix/d1.jsonl", 0, "span"), ("mix/d1p.jsonl", 0, "anchor"), ("mix/d10n.jsonl", 0, "span"),
+          ("mix/d10p.jsonl", 0, "anchor")]
+    nonen = [("mix/d2.jsonl", 0, "nonen"), ("mix/d2p.jsonl", 0, "nonen")]
+    if arm == "abl_en":
+        return base + en
+    if arm == "abl_nonen":
+        return base + nonen
+    return base + en + nonen
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-40GB", cpu=8, memory=32768, timeout=6 * 3600,
+              retries=modal.Retries(max_retries=2, initial_delay=30.0))
+def retrain(run: str, arm: str = "main", seed: int = 1, max_steps: int = 3000, kl_tok: float = 1.0,
+            init_from: str = "v10pt@1500", lr: float = 1e-4, warmup: int = 50, frac: float = 1.0,
+            kl_terms: str = "blank,gnorm,blankspan"):
+    """One arm of the real-speech retrain. Resumes from exp/<run>/last.ckpt after a preemption (retries).
+    `frac` < 1 takes that share of every manifest (dress rehearsal)."""
+    import ft_train
+
+    vol.reload()
+    mix = retrain_mix(arm)
+    if frac < 1.0:
+        mix = [(p, (h if h > 0 else 50.0) * frac, t) for p, h, t in mix]
+    k = dict(RETRAIN_K)
+    ft_train.train(VOL, ultra_path(), run, mix=mix, max_steps=max_steps, lr=lr, warmup=warmup, seed=seed,
+                   init_from="" if arm == "stockinit" else init_from, kl_terms=kl_terms, kl_tok=kl_tok,
+                   on_save=vol.commit, **k)
+    vol.commit()
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=4 * 3600, max_containers=6)
+def eval_retrain(run: str, step: int = 0, sealed: bool = False):
+    """Decode every retrain bed with exp/<run>/step<step>.pt ("v10pt"/"ultra" baselines: their own weights)."""
+    import torch
+
+    import ft_eval
+
+    vol.reload()
+    m = ft_eval.load_model(VOL, "ultra", ultra_path())
+    if run != "ultra":
+        m.load_state_dict(torch.load(f"{VOL}/exp/{run}/step{step}.pt", map_location="cpu"), strict=False)
+    ft_eval.eval_retrain(VOL, m.cuda().eval(), f"{run}@{step}" if run != "ultra" else "ultra_rt",
+                         sealed=sealed)
+    vol.commit()
