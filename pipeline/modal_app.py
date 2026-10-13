@@ -708,7 +708,8 @@ def retrain_mix(arm: str, tts_h: float = 6.0) -> list:
     base = [("tts/v10pt/train_ok.jsonl", tts_h, "free"), ("tts/d9sup/train_ok.jsonl", 0, "free"),
             ("replay/lspc_train.jsonl", 35.0, "anchor"), ("replay/lspc_train_numwords.jsonl", 5.0, "anchor"),
             ("replay/fleurs_train_multi.jsonl", 3.0, "nonen"), ("replay/icsi_train.jsonl", 0, "anchor")]
-    en = [("mix/d1.jsonl", 0, "span"), ("mix/d1p.jsonl", 0, "anchor"), ("mix/d10n.jsonl", 0, "span"),
+    en = [("mix/d1.jsonl", 0, "span"), ("mix/d1_up.jsonl", 0, "span"), ("mix/d1p.jsonl", 0, "anchor"),
+          ("mix/d10n.jsonl", 0, "span"),
           ("mix/d10p.jsonl", 0, "anchor")]
     nonen = [("mix/d2.jsonl", 0, "nonen"), ("mix/d2p.jsonl", 0, "nonen")]
     if arm == "abl_en":
@@ -794,3 +795,28 @@ def s3_veto(tags: str = ""):
         tot[0] += st["spans"]
         tot[1] += st["vetoes"]
     print(f"TOTAL spans {tot[0]} vetoes {tot[1]}")
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=3 * 3600)
+def decode_mix(run: str = "v10pt", step: int = 1500, parts: str = "mix/d1.jsonl,mix/d1p.jsonl",
+               out: str = "mix/v10_decode.json"):
+    """Greedy decodes of mix manifests (filler restoration: what v10pt hears where the captions dropped fillers)."""
+    import json
+
+    import torch
+
+    import ft_eval
+
+    vol.reload()
+    m = ft_eval.load_model(VOL, "ultra", ultra_path())
+    m.load_state_dict(torch.load(f"{VOL}/exp/{run}/step{step}.pt", map_location="cpu"), strict=False)
+    m = m.cuda().eval()
+    res = {}
+    for p in parts.split(","):
+        rows = [json.loads(line) for line in open(f"{VOL}/{p}")]
+        hyps = ft_eval.decode(m, [r["audio_filepath"] for r in rows], batch_size=32)
+        for r, h in zip(rows, hyps):
+            res[r["audio_filepath"]] = h["text"]
+        print(p, len(rows))
+    json.dump(res, open(f"{VOL}/{out}", "w"))
+    vol.commit()
