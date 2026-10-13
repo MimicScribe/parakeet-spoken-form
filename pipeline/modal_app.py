@@ -777,7 +777,9 @@ def decode_manifest(manifest: str = "d1/plain3.jsonl", out: str = "d1/plain3_v10
     import json
 
     vol.reload()
-    paths = [json.loads(line)["audio_filepath"] for line in open(f"{VOL}/{manifest}")]
+    import glob
+
+    paths = [json.loads(line)["audio_filepath"] for f in sorted(glob.glob(f"{VOL}/{manifest}")) for line in open(f)]
     parts = [paths[i::16] for i in range(16)]
     res = {}
     for d in CropDecoder().paths.map(parts, kwargs={"which": which}):
@@ -1053,6 +1055,48 @@ def eval_retrain(run: str, step: int = 0, sealed: bool = False, r3: bool = False
     ft_eval.eval_retrain(VOL, m.cuda().eval(), f"{run}@{step}" if run != "ultra" else "ultra_rt",
                          sealed=sealed, r3=r3)
     vol.commit()
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", cpu=8, memory=65536, timeout=4 * 3600)
+def cache_beds3(sealed: bool = False):
+    """R3.15 E-a: encode every retrain-3 bed once (frozen encoder) -> /vol/enc/."""
+    import json
+
+    import ft_eval
+
+    vol.reload()
+    m = ft_eval.load_model(VOL, "ultra", ultra_path())
+    sets = ft_eval.RETRAIN3_SETS + ([(a, b, 0) for a, b in ft_eval.SEALED3_SETS] if sealed else [])
+    print(json.dumps(ft_eval.cache_beds(VOL, m, sets)))
+    vol.commit()
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", cpu=8, memory=65536, timeout=6 * 3600)
+def eval_multi(runs: str, sealed: bool = False, tag: str = ""):
+    """Decode every cached retrain-3 bed with each checkpoint in `runs` ("v10pt@1500,ultra,S-A@1000,...";
+    "<path>.pt" also works). One encoder pass serves all of them. Hyps go to hyps/<run>@<step><tag>."""
+    import os
+
+    import torch
+
+    import ft_eval
+
+    vol.reload()
+    m = ft_eval.load_model(VOL, "ultra", ultra_path())
+    stock = {k: v.clone() for k, v in m.state_dict().items() if not k.startswith(("encoder.", "preprocessor."))}
+    sets = ft_eval.RETRAIN3_SETS + ([(a, b, 0) for a, b in ft_eval.SEALED3_SETS] if sealed else [])
+    for run in runs.split(","):
+        if run == "ultra":
+            sd, name = stock, "ultra_rt"
+        elif run.endswith(".pt"):
+            sd, name = torch.load(f"{VOL}/{run}", map_location="cpu"), os.path.basename(run)[:-3]
+        else:
+            r, _, step = run.partition("@")
+            sd, name = torch.load(f"{VOL}/exp/{r}/step{step}.pt", map_location="cpu"), run
+        m.load_state_dict(stock, strict=False)
+        m.load_state_dict(sd, strict=False)
+        ft_eval.eval_cached(VOL, m, name + tag, sets)
+        vol.commit()
 
 
 @app.cls(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=2 * 3600, max_containers=6, retries=1)

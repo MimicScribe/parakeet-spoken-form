@@ -138,3 +138,99 @@ def eval_retrain(vol: str, m, run: str, suffix: str = "", sealed: bool = False, 
     if sealed:
         for man, name in (SEALED3_SETS if r3 else SEALED_SETS):
             transcribe_loaded(vol, m, run, man, name + suffix)
+
+
+# ---- R3.15 E-a: multi-head eval. The encoder is frozen in every retrain, so a bed's encoder output is computed once
+# and every checkpoint (screening arms, soups, alpha blends) only runs the decoder + joint over the cache. -------------
+
+
+def _load_audio(path):
+    import soundfile as sf
+
+    x, sr = sf.read(path, dtype="float32")
+    if x.ndim > 1:
+        x = x.mean(1)
+    assert sr == 16000, (path, sr)
+    return torch.from_numpy(x)
+
+
+@torch.no_grad()
+def encode_rows(m, rows, batch_size: int = 16) -> list:
+    """Encoder output per row, fp16 [D, T] on CPU, in row order (batches sorted by length, like NeMo's bucketing)."""
+    order = sorted(range(len(rows)), key=lambda i: rows[i]["duration"])
+    out = [None] * len(rows)
+    for k in range(0, len(order), batch_size):
+        idx = order[k:k + batch_size]
+        wavs = [_load_audio(rows[i]["audio_filepath"]) for i in idx]
+        lens = torch.tensor([len(w) for w in wavs])
+        x = torch.zeros(len(wavs), int(lens.max()))
+        for j, w in enumerate(wavs):
+            x[j, :len(w)] = w
+        feats, flen = m.preprocessor(input_signal=x.cuda(), length=lens.cuda())
+        enc, elen = m.encoder(audio_signal=feats, length=flen)
+        for j, i in enumerate(idx):
+            out[i] = enc[j, :, :int(elen[j])].half().cpu()
+    return out
+
+
+@torch.no_grad()
+def decode_encoded(m, encs: list, batch_size: int = 32) -> list:
+    order = sorted(range(len(encs)), key=lambda i: encs[i].shape[1])
+    out = [None] * len(encs)
+    for k in range(0, len(order), batch_size):
+        idx = order[k:k + batch_size]
+        T = max(encs[i].shape[1] for i in idx)
+        D = encs[idx[0]].shape[0]
+        x = torch.zeros(len(idx), D, T, device="cuda")
+        lens = torch.tensor([encs[i].shape[1] for i in idx], device="cuda")
+        for j, i in enumerate(idx):
+            x[j, :, :encs[i].shape[1]] = encs[i].float().cuda()
+        hyps = m.decoding.rnnt_decoder_predictions_tensor(encoder_output=x, encoded_lengths=lens,
+                                                          return_hypotheses=True)
+        if isinstance(hyps, tuple):
+            hyps = hyps[0]
+        for j, i in enumerate(idx):
+            h = hyps[j]
+            ids = h.y_sequence.tolist() if torch.is_tensor(h.y_sequence) else list(h.y_sequence)
+            text = h.text if isinstance(h.text, str) else m.tokenizer.ids_to_text(ids)
+            out[i] = {"text": text, "ids": ids}
+    return out
+
+
+def cache_beds(vol: str, m, sets: list, cache_dir: str = "enc") -> dict:
+    """Encode each bed once -> /vol/<cache_dir>/<name>.pt (rows + fp16 encoder outputs)."""
+    os.makedirs(f"{vol}/{cache_dir}", exist_ok=True)
+    st = {}
+    for man, name, limit in sets:
+        out = f"{vol}/{cache_dir}/{name.replace('/', '__')}.pt"
+        if not os.path.exists(f"{vol}/{man}"):
+            st[name] = "not prepared"
+            continue
+        if os.path.exists(out) and os.path.getmtime(out) > os.path.getmtime(f"{vol}/{man}"):
+            st[name] = "cached"
+            continue
+        rows = [json.loads(line) for line in open(f"{vol}/{man}")]
+        rows = rows[:limit] if limit else rows
+        torch.save({"rows": rows, "enc": encode_rows(m, rows)}, out)
+        st[name] = len(rows)
+    return st
+
+
+def eval_cached(vol: str, m, run: str, sets: list, cache_dir: str = "enc") -> None:
+    """Same hyps files as transcribe_loaded, decoded from the cached encoder outputs."""
+    out_dir = f"{vol}/hyps/{run}"
+    os.makedirs(f"{out_dir}/sealed", exist_ok=True)
+    for _man, name, _limit in sets:
+        p = f"{vol}/{cache_dir}/{name.replace('/', '__')}.pt"
+        if not os.path.exists(p):
+            print(f"skip {name}: no cache")
+            continue
+        c = torch.load(p)
+        hyps = decode_encoded(m, c["enc"])
+        n_digit = 0
+        with open(f"{out_dir}/{name}.jsonl", "w") as f:
+            for r, h in zip(c["rows"], hyps):
+                n_digit += bool(WRITTEN_FORM.search(h["text"]))
+                f.write(json.dumps({"id": r.get("id", os.path.basename(r["audio_filepath"])), "ref": r["text"],
+                                    "hyp": h["text"], "ids": h["ids"]}) + "\n")
+        print(f"{run} {name}: {len(hyps)} decoded (cached encoder), {n_digit} with written-form characters")
