@@ -634,8 +634,10 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             W = m.joint.joint_net[-1].weight
             wf_rows = wf.clamp(max=W.shape[0] - 1)
             gs = {}
-            for k, term in (("rnnt", out["loss"]), ("wf", wf_weight * wf_pen), ("th", wf_weight * th_pen),
-                            ("kl_t", tok_weight * kl_t), ("kl_b", kl_weight * kl_b)):
+            # rnnt LAST: NeMo's TDT loss writes its gradient in place, so it cannot be backpropagated twice; on these
+            # measurement batches (E2 only, R3_GRADSHARE) the RNNT term is detached after being measured
+            for k, term in (("wf", wf_weight * wf_pen), ("th", wf_weight * th_pen), ("kl_t", tok_weight * kl_t),
+                            ("kl_b", kl_weight * kl_b), ("rnnt", out["loss"])):
                 torch.cuda.empty_cache()
                 if not term.requires_grad:
                     gs[k] = (0.0, 0.0)
@@ -644,6 +646,7 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                 gs[k] = (0.0, 0.0) if g is None else (g.norm().item(), g[wf_rows].norm().item())
             print("r3grad " + " ".join(f"{k} {a:.4g}/{b:.4g}" for k, (a, b) in gs.items())
                   + f" wf_share_at_wf_rows {gs['wf'][1] / max(gs['rnnt'][1], 1e-12):.3f}", flush=True)
+            out["loss"] = out["loss"].detach()
         out["loss"] = out["loss"] + aux
         if batch_idx % 10 == 0:
             print("r3 " + " ".join(f"{k} {v.item():.5f}" for k, v in m._r3_parts.items())
