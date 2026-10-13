@@ -461,6 +461,10 @@ EN_NUM_WORDS = ("eleven twelve thirteen fourteen fifteen sixteen seventeen eight
                 "sixty seventy eighty ninety hundred thousand first third").split()  # no "second" (fr), six, ten, nine
 
 
+TWENTY_PAIR = re.compile(r"\btwenty (?:ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|"
+                         r"twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\b")
+
+
 def wf_piece_ids(spm) -> list[int]:
     return [i for i in range(spm.get_piece_size()) if WF_CHARS.search(spm.id_to_piece(i))]
 
@@ -499,6 +503,7 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
     term_t = torch.tensor([i for i in range(spm.get_piece_size())
                            if spm.id_to_piece(i).lstrip("▁") in {".", "?", "!", "...", "…"}])
     wf_t, en_t = torch.tensor(wf_piece_ids(spm)), torch.tensor(en_num_piece_ids(spm))
+    th_t = torch.tensor([i for i in range(spm.get_piece_size()) if spm.id_to_piece(i) == "\u2581thousand"])
     print(f"R3 losses: wf pieces {len(wf_t)} e.g. {[spm.id_to_piece(int(i)) for i in wf_t[:12]]}; "
           f"en_num pieces {[spm.id_to_piece(int(i)) for i in en_t]}; tags {dict(collections.Counter(row_tags.values()))}",
           flush=True)
@@ -530,9 +535,13 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                 klu[i, :min(prefix_len(spm, row_toks[i]), W)] = True
         klu = klu.to(dev)
         is_nonen = torch.tensor([tg == "nonen" for tg in tags], device=dev)
-        tid, wf, en = term_t.to(dev), wf_t.to(dev), en_t.to(dev)
+        # anti-blend (review #6): English rows saying "twenty <10-99>" with no "thousand" anywhere in the label
+        texts = [spm.decode(t).lower() for t in row_toks]
+        is_yr = torch.tensor([tg != "nonen" and bool(TWENTY_PAIR.search(tx)) and "thousand" not in tx
+                              for tg, tx in zip(tags, texts)], device=dev)
+        tid, wf, en, th = term_t.to(dev), wf_t.to(dev), en_t.to(dev), th_t.to(dev)
 
-        def chunk(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, klu_sl, nonen_sl):
+        def chunk(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, klu_sl, nonen_sl, yr_sl):
             with NoDropout(m.joint):
                 s_logits = m.joint.joint(f_sl, s_sl).float()
             with torch.no_grad():
@@ -557,33 +566,37 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             emit = mask & (s_lnb.detach().exp() > emit_p)
 
             def pen(ids, rows_sl):
-                p = (s_logits[..., ids].logsumexp(-1) - s_nbz).exp().clamp(max=1 - 1e-6)
+                p = (s_logits[..., ids].logsumexp(-1) - s_nbz).exp().clamp(max=0.99)  # bounded: one cell cannot spike
                 e = emit & rows_sl[:, None, None]
                 per_row = (-torch.log1p(-p) * e).sum((1, 2)) / e.sum((1, 2)).clamp(min=1)
                 return per_row.sum(), rows_sl.sum()
 
             wf_s, wf_n = pen(wf, ~nonen_sl)
             en_s, en_n = pen(en, nonen_sl) if len(en) else (torch.zeros((), device=dev),) * 2
+            th_s, th_n = pen(th, yr_sl) if len(th) else (torch.zeros((), device=dev),) * 2
             return ((kl_blank * bmask).sum(), bmask.sum(), (kl_p * kmask).sum(), kmask.sum(),
-                    (kl_t * tmask).sum(), tmask.sum(), wf_s, wf_n.float(), en_s, en_n.float())
+                    (kl_t * tmask).sum(), tmask.sum(), wf_s, wf_n.float(), en_s, en_n.float(), th_s, th_n.float())
 
-        acc = [torch.zeros((), device=dev) for _ in range(10)]
+        acc = [torch.zeros((), device=dev) for _ in range(12)]
         for j in range(0, B, sub_batch):
             sl = torch.arange(j, min(B, j + sub_batch), device=dev)
             u = int(tokens_len[sl].max()) + 1
             t = int(enc_len[sl].max())
             r_ = torch.utils.checkpoint.checkpoint(
                 chunk, f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
-                enc_len[sl], tokens_len[sl], klu[sl], is_nonen[sl], use_reentrant=False)
+                enc_len[sl], tokens_len[sl], klu[sl], is_nonen[sl], is_yr[sl], use_reentrant=False)
             acc = [a + b for a, b in zip(acc, r_)]
         kl_b = acc[0] / acc[1].clamp(min=1)
         kl_p = acc[2] / acc[3].clamp(min=1)
         kl_t = acc[4] / acc[5].clamp(min=1)
         wf_pen = acc[6] / acc[7].clamp(min=1)
         en_pen = acc[8] / acc[9].clamp(min=1)
-        aux = kl_weight * kl_b + punct_weight * kl_p + tok_weight * kl_t + wf_weight * wf_pen + en_weight * en_pen
+        th_pen = acc[10] / acc[11].clamp(min=1)
+        aux = (kl_weight * kl_b + punct_weight * kl_p + tok_weight * kl_t + wf_weight * wf_pen + en_weight * en_pen
+               + wf_weight * th_pen)
         m._r3_parts = {"rnnt": out["loss"].detach(), "kl_b": kl_b.detach(), "kl_p": kl_p.detach(),
-                       "kl_t": kl_t.detach(), "wf": wf_pen.detach(), "en": en_pen.detach()}
+                       "kl_t": kl_t.detach(), "wf": wf_pen.detach(), "en": en_pen.detach(),
+                       "th": th_pen.detach()}
         out["loss"] = out["loss"] + aux
         if batch_idx % 10 == 0:
             print("r3 " + " ".join(f"{k} {v.item():.5f}" for k, v in m._r3_parts.items())
@@ -603,8 +616,8 @@ class L2SP(pl.Callback):
         self.anchor = None
 
     def on_train_batch_end(self, trainer, m, outputs, batch, batch_idx):
-        if not self.c:
-            return
+        if not self.c or (batch_idx + 1) % trainer.accumulate_grad_batches:
+            return  # once per OPTIMIZER step (gradient accumulation: several batches per step)
         if self.anchor is None:
             sd = torch.load(self.path, map_location="cpu")
             self.anchor = {n: sd[n].to(p.device, p.dtype) for n, p in m.named_parameters() if p.requires_grad and n in sd}
@@ -730,7 +743,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           seed: int = 1, kl_exempt: str = "", kl_blank_scale: float = 1.0, kl_punct: float = 0.0,
           kl_punct_rows: str = "all", kl_tok: float = 0.0, resume: bool = True, stage_dir: str = "",
           r3: bool = False, wf_weight: float = 1.0, en_weight: float = 1.0, l2sp_c: float = 0.0,
-          l2sp_anchor: str = ""):
+          l2sp_anchor: str = "", accumulate: int = 1):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
     entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists."""
@@ -834,8 +847,9 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     print(f"trainable params: {sum(groups.values()):,} {groups}")
 
     trainer = pl.Trainer(devices=1, accelerator="gpu", precision="bf16-mixed", max_steps=max_steps,
-                         limit_train_batches=max_steps, limit_val_batches=0, num_sanity_val_steps=0,
+                         limit_train_batches=max_steps * accumulate, limit_val_batches=0, num_sanity_val_steps=0,
                          use_distributed_sampler=False, gradient_clip_val=1.0, logger=False,
+                         accumulate_grad_batches=accumulate,
                          enable_checkpointing=False, enable_progress_bar=False,
                          callbacks=[KeepEncoderFrozen(), StepLog()] + extra + extra_cb
                          + ([SaveEvery(exp, save_every, on_save, last)] if save_every else []))
