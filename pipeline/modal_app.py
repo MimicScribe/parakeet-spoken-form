@@ -1078,6 +1078,45 @@ def patch_mix3():
     vol.commit()
 
 
+@app.function(image=nemo_image, volumes={VOL: vol}, cpu=4, memory=16384, timeout=1800)
+def soup3(run: str, steps: str = "3500,3750,4000", alphas: str = "1.0,0.85,0.7,0.5", base: str = "v10pt@1500",
+          name: str = ""):
+    """R3.16 #5 + R3.12.4: average `steps` of `run` (checkpoint soup), then blend with `base` (v10pt, NOT stock):
+    theta = base + a * (soup - base). The written-form output rows of the joint's last layer keep the soup's values
+    (a = 1, N2), so blending cannot undo the trained digit suppression. Writes exp/<name>_a<a>/step0.pt each."""
+    import torch
+
+    import ft_train
+
+    vol.reload()
+    sds = [torch.load(f"{VOL}/exp/{run}/step{s_}.pt", map_location="cpu") for s_ in steps.split(",")]
+    soup = {k: sum(sd[k].float() for sd in sds) / len(sds) for k in sds[0]}
+    b_run, _, b_step = base.partition("@")
+    b = torch.load(f"{VOL}/exp/{b_run}/step{b_step}.pt", map_location="cpu")
+    import nemo.collections.asr as nemo_asr
+
+    m = nemo_asr.models.ASRModel.restore_from(ultra_path(), map_location="cpu")
+    last = f"joint.joint_net.{len(m.joint.joint_net) - 1}."
+    wf = torch.tensor(ft_train.wf_piece_ids(m.tokenizer.tokenizer))
+    name = name or f"{run}_soup"
+    for a in (float(x) for x in alphas.split(",")):
+        out = {}
+        for k, v in soup.items():
+            if k not in b:
+                out[k] = v
+                continue
+            w = b[k].float() + a * (v - b[k].float())
+            if k.startswith(last) and w.shape[0] > int(wf.max()):
+                w[wf] = v[wf]
+            out[k] = w.to(sds[0][k].dtype)
+        import os
+
+        os.makedirs(f"{VOL}/exp/{name}_a{a}", exist_ok=True)
+        torch.save(out, f"{VOL}/exp/{name}_a{a}/step0.pt")
+        print("wrote", f"exp/{name}_a{a}/step0.pt")
+    vol.commit()
+
+
 # Screening arms (R3.12.4 + R3.14: S-D dropped). Each is a full 4000-step cosine run evaluated at step 1000; the winner
 # continues as final seed 1.
 R3_ARMS = {"S-A": dict(wf_weight=1.0, l2sp_c=0.3, lr=1e-4), "S-B": dict(wf_weight=3.0, l2sp_c=0.3, lr=1e-4),
