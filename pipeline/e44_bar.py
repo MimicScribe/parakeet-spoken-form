@@ -1,7 +1,8 @@
-"""The paired 44-call Earnings-21 app bar (plan R3.12.5), over two `fast_number_arm.py` outputs.
+"""Paired comparison of two number-scoring runs over the same 44 Earnings-21 calls.
 
-Each arm dir holds e11/ (the 11 gate calls) and e33/ (the 33 sealed calls), each with score.json (score_number_fidelity
-on the ITN'd rows) and rows/<fid>_after_orphan.json (the raw app ASR text, before ITN).
+Each arm dir holds e11/ (11 calls) and e33/ (33 held-out calls), each with score.json (a per-call number-fidelity
+score) and rows/<fid>_after_orphan.json (the transcript rows that were scored). The runs themselves come from the
+private app-side evaluation; this script only compares two of them.
 
     python e44_bar.py <base_arm_dir> <cand_arm_dir>
 """
