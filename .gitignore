@@ -5,3 +5,7 @@ __pycache__/
 .env
 .venv/
 *.pyc
+
+# copies of the private app NumberGrammar sources + the compiled dumper (rebuild per swiftdump/README.md)
+pipeline/swiftdump/src/
+pipeline/swiftdump/dump
