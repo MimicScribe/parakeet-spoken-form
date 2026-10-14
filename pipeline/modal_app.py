@@ -1044,6 +1044,25 @@ def retrain3_mix_v2(mp: str = "mp2", mp_repeat: int = 3, verbatim: bool = False)
     return [(sub.get(p, p), h, t) for p, h, t in retrain3_mix()] + [(f"tts/{mp}/train_ok_x{mp_repeat}.jsonl", 0, "free")]
 
 
+def retrain3_mix_v3() -> list:
+    """R3.31d: the v2v recipe brought back inside the 35-40% number share (V2 stop rule): minimal pairs x2 (not x3),
+    tts/v10pt capped at 4 h, LibriSpeech plain 35 -> 40 h."""
+    hours = {"tts/v10pt/train_ok.jsonl": 4.0, "replay/lspc_train.jsonl": 40.0}
+    return [(p.replace("train_ok_x3", "train_ok_x2"), hours.get(p, h), t) for p, h, t in retrain3_mix_v2(verbatim=True)]
+
+
+@app.function(image=mix_image, volumes={VOL: vol}, cpu=8, memory=32768, timeout=3600)
+def share_v3():
+    import json
+
+    import mix_build
+
+    vol.reload()
+    print(json.dumps(mix_build.build3c(VOL, mp="mp2", mp_repeat=2)))
+    print("SHARE v3", json.dumps(mix_build.mix_share(VOL, retrain3_mix_v3())))
+    vol.commit()
+
+
 @app.function(image=mix_image, volumes={VOL: vol}, cpu=8, memory=32768, timeout=3600)
 def build_mix3c(mp: str = "mp2", mp_repeat: int = 3):
     import json
@@ -1235,8 +1254,8 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     cfg = dict(R3_ARMS[arm])
     if lr:  # R3.31 warm start: a lower peak LR than the arm's
         cfg["lr"] = lr
-    mix = {"mp": retrain3_mix_mp, "v2": lambda: retrain3_mix_v2(), "v2v": lambda: retrain3_mix_v2(verbatim=True)}.get(
-        mix, retrain3_mix)()
+    mix = {"mp": retrain3_mix_mp, "v2": lambda: retrain3_mix_v2(), "v2v": lambda: retrain3_mix_v2(verbatim=True),
+           "v3": retrain3_mix_v3}.get(mix, retrain3_mix)()
     # external review #4: a warm start anchors L2-SP to its own init, not v10pt (the prior being trained away)
     i_run, _, i_step = init_from.partition("@")
     anchor = f"{VOL}/exp/{i_run}/step{i_step}.pt" if anchor_init else f"{VOL}/exp/v10pt/step1500.pt"

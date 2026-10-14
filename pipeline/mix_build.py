@@ -352,7 +352,7 @@ NUMBER_PART = {"tts/v10pt/train_ok.jsonl": 0.9, "tts/d9sup/train_ok.jsonl": 1.0,
                "mix/d1.jsonl": 1.0, "mix/d1_up.jsonl": 1.0, "mix/d10n.jsonl": 1.0, "mix/d2.jsonl": 1.0,
                "tts/biz/train_ok.jsonl": 1.0, "mix3/d1.jsonl": 1.0, "mix3/d10n.jsonl": 1.0, "mix3/d2.jsonl": 1.0,
                "tts/biz/train_ok_np.jsonl": 1.0, "mix3b/d1.jsonl": 1.0, "mix3b/d10n.jsonl": 1.0, "tts/mp/train_ok.jsonl": 1.0,
-               "tts/mp2/train_ok_x3.jsonl": 1.0}
+               "tts/mp2/train_ok_x3.jsonl": 1.0, "tts/mp2/train_ok_x2.jsonl": 1.0}
 
 
 def mix_share(vol: str, mix: list) -> dict:
