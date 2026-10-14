@@ -37,7 +37,8 @@ def voice_rows(rows: list[dict], out_dir: str) -> list[dict]:
     os.makedirs(out_dir, exist_ok=True)
     out = []
     for row in rows:
-        seed = int(hashlib.md5(row["id"].encode()).hexdigest()[:8], 16)
+        # minimal pairs (R3.31) share a voice_key, so both readings get the same voice, speed and level
+        seed = int(hashlib.md5(row.get("voice_key", row["id"]).encode()).hexdigest()[:8], 16)
         r = random.Random(seed)
         voice = r.choice(DEV_VOICES if row["split"] == "dev" else TRAIN_VOICES)
         speed = round(r.uniform(row.get("speed_lo", 0.85), row.get("speed_hi", 1.3)), 2)
@@ -53,5 +54,6 @@ def voice_rows(rows: list[dict], out_dir: str) -> list[dict]:
         sf.write(path, x, 16000, subtype="PCM_16")
         out.append({"audio_filepath": path, "duration": round(len(x) / 16000, 3), "text": row["text"],
                     "id": row["id"], "split": row["split"], "voice": voice, "speed": speed,
-                    "kinds": row["kinds"], "template": row["template"]})
+                    "kinds": row["kinds"], "template": row["template"],
+                    **({k: row[k] for k in ("pair", "reading", "year") if k in row})})
     return out

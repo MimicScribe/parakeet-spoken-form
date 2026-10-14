@@ -56,6 +56,7 @@ tts_image = (
     .add_local_file(os.path.join(os.path.dirname(__file__), "carriers_year_b.txt"), "/root/carriers_year_b.txt")
     .add_local_file(os.path.join(os.path.dirname(__file__), "carriers_d9.txt"), "/root/carriers_d9.txt")
     .add_local_file(os.path.join(os.path.dirname(__file__), "carriers_biz.txt"), "/root/carriers_biz.txt")
+    .add_local_file(os.path.join(os.path.dirname(__file__), "carriers_mp.txt"), "/root/carriers_mp.txt")
 )
 
 
@@ -167,6 +168,50 @@ def make_tts(name: str, n_rows: int, seed: int = 1, shard: int = 200, multi_frac
     vol.commit()
 
 
+@app.function(image=tts_image, volumes={VOL: vol}, timeout=3 * 3600)
+def make_tts_mp(name: str = "mp", n_pairs: int = 1500, seed: int = 31, shard: int = 200):
+    """R3.31 minimal pairs (gen.minimal_pairs): each filled carrier voiced as "twenty X" and "two thousand X" with the
+    same voice. Writes /vol/tts/<name>/{train,dev}.jsonl; run filter_tts, then mp_balance keeps only complete pairs."""
+    import json
+    import os
+
+    import gen
+
+    rows = list(gen.minimal_pairs(n_pairs, seed))
+    shards = [rows[i:i + shard] for i in range(0, len(rows), shard)]  # even shard size keeps pairs together
+    out_dir = f"{VOL}/tts/{name}"
+    os.makedirs(out_dir, exist_ok=True)
+    done = []
+    for part in voice_shard.map(shards, kwargs={"out_dir": f"{out_dir}/wav"}):
+        done += part
+    for split in ("train", "dev"):
+        sel = [r for r in done if r["split"] == split]
+        with open(f"{out_dir}/{split}.jsonl", "w") as f:
+            for r in sel:
+                f.write(json.dumps(r) + "\n")
+        print(f"{name}/{split}: {len(sel)} clips, {sum(r['duration'] for r in sel) / 3600:.2f} h")
+    vol.commit()
+
+
+@app.function(image=tts_image, volumes={VOL: vol}, timeout=600)
+def mp_balance(name: str = "mp"):
+    """After filter_tts: keep a pair only when BOTH readings passed, so the set stays exactly 50/50 per context."""
+    import collections
+    import json
+
+    vol.reload()
+    for split in ("train", "dev"):
+        rows = [json.loads(l) for l in open(f"{VOL}/tts/{name}/{split}_ok.jsonl")]
+        n = collections.Counter(r["pair"] for r in rows)
+        keep = [r for r in rows if n[r["pair"]] == 2]
+        with open(f"{VOL}/tts/{name}/{split}_ok.jsonl", "w") as f:
+            for r in keep:
+                f.write(json.dumps(r) + "\n")
+        print(f"{name}/{split}: {len(rows)} passed filter, {len(keep)} in complete pairs "
+              f"({sum(r['duration'] for r in keep) / 3600:.2f} h)")
+    vol.commit()
+
+
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-40GB", cpu=8, memory=32768,
               timeout=2 * 3600)
 def killtest(run: str = "kill1", max_steps: int = 150, tts: str = "smoke", lr: float = 1e-4,
@@ -206,7 +251,7 @@ def baseline(tts: str = "smoke", run: str = "ultra", full: bool = False):
 
 
 @app.function(image=nemo_image, volumes={VOL: vol}, cpu=4, memory=16384, timeout=1800)
-def export_weights(run: str = "ultra", step: int = 0):
+def export_weights(run: str = "ultra", step: int = -1):
     """Decoder + joint tensors (fp32, NeMo names) as safetensors, for swap_weights.py."""
     import os
 
@@ -216,7 +261,7 @@ def export_weights(run: str = "ultra", step: int = 0):
     vol.reload()
     if run == "ultra":
         sd = torch.load(ultra_state(), map_location="cpu")
-    elif step:
+    elif step >= 0:  # step 0 = a soup checkpoint (exp/<soup>/step0.pt)
         sd = torch.load(f"{VOL}/exp/{run}/step{step}.pt", map_location="cpu")
         run = f"{run}@{step}"
     else:
@@ -981,6 +1026,27 @@ def retrain3_mix() -> list:
             ("mix3/fleurs_train_multi.jsonl", 3.0, "nonen"), ("mix3/d2.jsonl", 0, "nonen"), ("mix3/d2p.jsonl", 0, "nonen")]
 
 
+def retrain3_mix_mp() -> list:
+    """R3.31 treatment mix: retrain3_mix with mix3b (2000-2009 cap undone, year rows capped per video, repeated texts
+    dropped), tts/biz without k_twenty_pause, plus the tts/mp minimal pairs."""
+    sub = {"mix3/d1.jsonl": "mix3b/d1.jsonl", "mix3/d10n.jsonl": "mix3b/d10n.jsonl",
+           "tts/biz/train_ok.jsonl": "tts/biz/train_ok_np.jsonl"}
+    return [(sub.get(p, p), h, t) for p, h, t in retrain3_mix()] + [("tts/mp/train_ok.jsonl", 0, "free")]
+
+
+@app.function(image=mix_image, volumes={VOL: vol}, cpu=8, memory=32768, timeout=3600)
+def build_mix3b(per_video: int = 12):
+    import json
+
+    import mix_build
+
+    vol.reload()
+    print(json.dumps(mix_build.build3b(VOL, per_video=per_video), indent=1))
+    print("SHARE mix3", json.dumps(mix_build.mix_share(VOL, retrain3_mix())))
+    print("SHARE mix3b+mp", json.dumps(mix_build.mix_share(VOL, retrain3_mix_mp())))
+    vol.commit()
+
+
 @app.function(image=nemo_image, volumes={VOL: vol}, cpu=16, memory=32768, timeout=2 * 3600)
 def audit_mix3(fix: bool = True, tol: float = 0.1):
     """Every row of every retrain-3 mix part: the wav exists, is 16 kHz, and its real duration matches the manifest
@@ -1130,7 +1196,7 @@ R3_ARMS = {"S-A": dict(wf_weight=1.0, l2sp_c=1.0, lr=1e-4), "S-B": dict(wf_weigh
               retries=modal.Retries(max_retries=2, initial_delay=30.0))
 def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, save_every: int = 250,
              en_weight: float = 1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
-             dur_weight: float = 1.0):
+             dur_weight: float = 1.0, init_from: str = "v10pt@1500", lr: float = 0.0, mix: str = "mix3"):
     """One retrain-3 run (R3.13): r3 losses, decoupled L2-SP to v10pt@1500, 200 s x 2 accumulated batches.
     Rehearsal (E2) = a small max_steps. Resumes from exp/<run>/last.ckpt after a preemption."""
     import json
@@ -1142,8 +1208,10 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     import mix_build
 
     vol.reload()
-    cfg = R3_ARMS[arm]
-    mix = retrain3_mix()
+    cfg = dict(R3_ARMS[arm])
+    if lr:  # R3.31 warm start: a lower peak LR than the arm's
+        cfg["lr"] = lr
+    mix = retrain3_mix_mp() if mix == "mp" else retrain3_mix()
     share = mix_build.mix_share(VOL, mix)
     import shutil
 
@@ -1152,7 +1220,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     if check_share:
         assert 0.35 <= share["share"] <= 0.40, f"number share {share['share']} outside 35-40% (R3.17 F4)"
     ft_train.train(VOL, ultra_path(), run, mix=mix, max_steps=max_steps, lr=cfg["lr"], warmup=warmup, seed=seed,
-                   init_from="v10pt@1500", batch_duration=200, accumulate=2, spec_augment=False, kl_weight=10.0,
+                   init_from=init_from, batch_duration=200, accumulate=2, spec_augment=False, kl_weight=10.0,
                    kl_punct=30.0, kl_tok=1.0, save_every=save_every, on_save=vol.commit, stage_dir="/tmp/stage",
                    r3=True, wf_weight=cfg["wf_weight"], en_weight=en_weight, l2sp_c=cfg["l2sp_c"],
                    l2sp_anchor=f"{VOL}/exp/v10pt/step1500.pt", dur_weight=dur_weight)
@@ -1184,6 +1252,25 @@ def retrain(run: str, arm: str = "main", seed: int = 1, max_steps: int = 3000, k
     ft_train.train(VOL, ultra_path(), run, mix=mix, max_steps=max_steps, lr=lr, warmup=warmup, seed=seed,
                    init_from="" if arm == "stockinit" else init_from, kl_terms=kl_terms, kl_tok=kl_tok,
                    on_save=vol.commit, stage_dir="/tmp/stage", **k)
+    vol.commit()
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=3600)
+def eval_mp_dev(runs: str, name: str = "mp"):
+    """R3.31 diagnostic (not a gate; TTS beds measure our own templates): each checkpoint on the held-out minimal pairs
+    (held-out carriers + voices) -> hyps/<run>/mp_dev.jsonl. Reading accuracy per side comes from score_mp.py."""
+    import torch
+
+    import ft_eval
+
+    vol.reload()
+    m = ft_eval.load_model(VOL, "ultra", ultra_path())
+    stock = {k: v.clone() for k, v in m.state_dict().items()}
+    for spec in runs.split(","):
+        r, _, step = spec.partition("@")
+        m.load_state_dict(stock if r == "ultra" else torch.load(f"{VOL}/exp/{r}/step{step}.pt", map_location="cpu"),
+                          strict=False)
+        ft_eval.transcribe_loaded(VOL, m, spec, f"tts/{name}/dev_ok.jsonl", "mp_dev")
     vol.commit()
 
 

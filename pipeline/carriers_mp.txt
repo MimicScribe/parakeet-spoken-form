@@ -1,0 +1,35 @@
+# 2026-10-13 retrain-3 R3.31 minimal pairs: every carrier is voiced twice, once "twenty X" and once "two thousand X",
+# same voice and speed, so the words around a year cannot predict its reading. Mid-sentence year slots after the words
+# that carried the prior (in, by, since, of, through, until, fiscal, quarter, a date). No E21/E22/eval phrasing.
+We have been working with that supplier since {yr}, and it has gone well.
+By {yr} most of the old hardware should be retired.
+The policy changed in {yr} after the audit.
+Back in {yr} we only had two people on the team.
+The lease on the second building runs through {yr}.
+We don't expect the new plant to open until {yr}.
+Most of that debt was paid down during {yr}.
+Headcount at the end of {yr} was a little lower.
+The second half of {yr} was much busier for the sales team.
+Our plan for the rest of {yr} is mostly hiring.
+They first reached out to us in the spring of {yr}.
+The contract we signed in {yr} expires next summer.
+We've kept prices flat since {yr}, which customers noticed.
+That version stopped getting updates in {yr}.
+The warehouse was expanded twice, first in {yr}.
+Spending in fiscal {yr} was mostly on the new system.
+Results for the third quarter of {yr} were in line.
+Sometime in early {yr} we should have the new office.
+The goal is to be carbon neutral by {yr}.
+I joined the company in {yr}, right before the move.
+Things have been very different since {yr}.
+We were planning for {yr} the whole time.
+Revenue grew every year from then until {yr}.
+They opened the first store in {yr} and the second soon after.
+That rule has been in place since {yr} as far as I know.
+We expect most of the savings to show up in {yr}.
+The renewal date was pushed to {date_year} at their request.
+It all goes back to the agreement from {date_year}.
+The board approved it on {date_year}, if I remember right.
+Our numbers for {quarter_year} were better than planned.
+Compared with {quarter_year}, the margin was a bit thinner.
+We'll know more after {quarter_year} closes.

@@ -169,3 +169,72 @@ def readings_written_form(text: str) -> bool:
 
 if __name__ == "__main__":
     main()
+
+
+# --- retrain-3 R3.31 minimal pairs -----------------------------------------------------------------------------------
+# The real-speech misses are a left-context prior: after in/by/since/of/fiscal/quarter/a date, 86-100% of training years
+# read "twenty X" (every TTS year slot uses readings.year(), which only says "two thousand X" for 2000-2009). Each pair
+# voices one filled carrier twice, "twenty X" and "two thousand X", with the same voice, speed and level (voice_key),
+# so only the audio of the year itself tells the readings apart.
+
+MP_SLOTS = ("year", "year_any", "yr", "date", "quarter", "date_year", "quarter_year")
+_YR = "qqyrslotqq"  # lower case: tts_form spells capitals out as letters
+
+
+def mp_carriers() -> list[str]:
+    out = []
+    for f in ("carriers.txt", "carriers_biz.txt", "carriers_year.txt", "carriers_mp.txt"):
+        for c in load_carriers(os.path.join(HERE, f)):
+            n = sum(c.count("{" + k + "}") for k in MP_SLOTS)
+            if n == 1 and "{any}" not in c:
+                out.append(c)
+    return out
+
+
+def _fill_one_year(carrier: str, r: random.Random):
+    """Fill `carrier` with the year slot left as _YR; None when the slot's kind drew no year ("March third")."""
+    real_year = readings.year
+    readings.year = lambda y: _YR
+    try:
+        target, tts, kinds = carrier, carrier, []
+        for m in list(SLOT.finditer(carrier)):
+            kind = m.group(1)
+            slot = _YR if kind in ("year", "year_any", "yr") else readings.KINDS[kind](r)
+            kinds.append(kind)
+            target = target.replace(m.group(0), slot.replace("|", " "), 1)
+            tts = tts.replace(m.group(0), readings.tts_form(slot).replace("|", ", "), 1)
+    finally:
+        readings.year = real_year
+    if target.count(_YR) != 1:
+        return None
+    if carrier.startswith("{") and not target.startswith(_YR):  # a leading year is capitalised in minimal_pairs
+        target, tts = target[0].upper() + target[1:], tts[0].upper() + tts[1:]
+    return target, tts, kinds
+
+
+def minimal_pairs(n_pairs: int, seed: int, dev_frac: float = 0.2):
+    """2 x n_pairs rows. Years 2010-2039 (85% 2010-2029), the only range where both readings are common. Dev = held-out
+    carriers (hash split) and, in voice.py, held-out voices."""
+    r = random.Random(seed)
+    carriers = mp_carriers()
+    i = 0
+    while i < n_pairs:
+        carrier = r.choice(carriers)
+        filled = _fill_one_year(carrier, r)
+        if filled is None:
+            continue
+        target, tts, kinds = filled
+        state = r.getstate()
+        target = lead_in(target, r)
+        r.setstate(state)
+        tts = lead_in(tts, r)
+        y = r.randint(2010, 2029) if r.random() < 0.85 else r.randint(2030, 2039)
+        split = "dev" if is_dev_template(carrier, dev_frac) else "train"
+        for reading, words in (("twenty", readings.pair(y)), ("two_thousand", readings.cardinal(y))):
+            def put(s, w=words):
+                s = s.replace(_YR, w)
+                return s[0].upper() + s[1:] if s.startswith(w) else s
+            yield {"id": f"mp{seed}_{i}_{reading}", "voice_key": f"mp{seed}_{i}", "pair": f"mp{seed}_{i}",
+                   "reading": reading, "year": y, "split": split, "template": carrier, "kinds": kinds + ["mp_year"],
+                   "text": put(target), "tts_text": put(tts)}
+        i += 1

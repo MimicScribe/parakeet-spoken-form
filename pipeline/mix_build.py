@@ -350,7 +350,8 @@ def trim_edges(rows, wav_dir, stats):
 
 NUMBER_PART = {"tts/v10pt/train_ok.jsonl": 0.9, "tts/d9sup/train_ok.jsonl": 1.0, "replay/lspc_train_numwords.jsonl": 1.0,
                "mix/d1.jsonl": 1.0, "mix/d1_up.jsonl": 1.0, "mix/d10n.jsonl": 1.0, "mix/d2.jsonl": 1.0,
-               "tts/biz/train_ok.jsonl": 1.0, "mix3/d1.jsonl": 1.0, "mix3/d10n.jsonl": 1.0, "mix3/d2.jsonl": 1.0}
+               "tts/biz/train_ok.jsonl": 1.0, "mix3/d1.jsonl": 1.0, "mix3/d10n.jsonl": 1.0, "mix3/d2.jsonl": 1.0,
+               "tts/biz/train_ok_np.jsonl": 1.0, "mix3b/d1.jsonl": 1.0, "mix3b/d10n.jsonl": 1.0, "tts/mp/train_ok.jsonl": 1.0}
 
 
 def mix_share(vol: str, mix: list) -> dict:
@@ -651,3 +652,71 @@ def restore_unk_nonen(vol: str, min_h: float = 0.4, tol: float = 0.1) -> dict:
             os.replace(f"{vol}/mix3/d2.jsonl", base)
         _write(f"{vol}/mix3/d2.jsonl", d2)
     return {"added_rows": added, "h_by_lang": {k: round(v, 3) for k, v in sorted(have.items())}}
+
+
+def build3b(vol: str, per_video: int = 12, seed: int = 31) -> dict:
+    """R3.31 fixed mix -> /vol/mix3b/ (the warm-start experiment's treatment; the control keeps mix3 unchanged):
+    - the 2000-2009 cap (build3, R3.16 #2) is undone: the crops it dropped come back from d1/crops3_ok (same filters
+      as build3: not a dev video, 0.5-20 s, no written form, not in eval text or eval wavs, not already in d1);
+    - year rows per video are capped at `per_video` in d1 and in d10n (one call held 44 + 53);
+    - rows repeating another row's text are dropped;
+    - tts/biz without the k_twenty_pause rows (owner gold e2 refutes its premise) -> tts/biz/train_ok_np.jsonl."""
+    r = random.Random(seed)
+    out = f"{vol}/mix3b"
+    os.makedirs(out, exist_ok=True)
+    stats = {}
+    eval_ng, eval_paths = set(), set()
+    texts = []
+    for f in glob.glob(f"{vol}/beds/e21x/refs/*.txt"):
+        texts += re.split(r"(?<=[.?!])\s+", open(f).read())
+    for pat in ("e22/all.jsonl", "beds/fleurs/*.jsonl", "beds/vox/*.jsonl", "beds/adv/all.jsonl", "beds/e21_dev/*.jsonl",
+                "beds/fleurs3/*.jsonl", "beds/vox/*3.jsonl"):
+        for x in _rows(f"{vol}/{pat}"):
+            texts.append(x["text"].split("\t")[0])
+            eval_paths.add(os.path.basename(x.get("audio_filepath", "")))
+    for t in texts:
+        eval_ng |= ngrams(t)
+    assert len(texts) > 5000, len(texts)
+
+    d1 = _rows(f"{vol}/mix3/d1.jsonl")
+    dev_v = {x["video"] for x in _rows(f"{vol}/mix3/d1_dev.jsonl")}
+    have = {(x["src"], x["text"]) for x in _rows(f"{vol}/mix3/d1.pre_trim.jsonl")} | {(x["src"], x["text"]) for x in d1}
+    back = [x for x in _rows(f"{vol}/d1/crops3_ok/*.jsonl")
+            if TWO_K_0X.search(x["text"]) and not (x["onset"] or set(x["kinds"]) & KEEP_ALL_KINDS)
+            and x["video"] not in dev_v and 0.5 <= x["duration"] <= 20 and (x["src"], x["text"]) not in have
+            and not WRITTEN_FORM.search(x["text"]) and not re.search(r"[+#°¥⁇²³¹½¼¾]", x["text"])
+            and not (ngrams(x["text"]) & eval_ng) and os.path.basename(x["audio_filepath"]) not in eval_paths]
+    stats["cap_restored"] = len(back)
+    d1 = d1 + back
+
+    def year_row(x):
+        return bool(TWO_K_LOW.search(x["text"]) or TWENTY_YR.search(x["text"]))
+
+    def cap(rows, name):
+        r.shuffle(rows)
+        n, keep, seen, dup = {}, [], set(), 0
+        for x in rows:
+            if x["text"] in seen:
+                dup += 1
+                continue
+            seen.add(x["text"])
+            if year_row(x) and x.get("video"):
+                n[x["video"]] = n.get(x["video"], 0) + 1
+                if n[x["video"]] > per_video:
+                    continue
+            keep.append(x)
+        stats[f"{name}_rows"] = [len(rows), len(keep)]
+        stats[f"{name}_dup_text_dropped"] = dup
+        stats[f"{name}_h"] = [round(_h(rows), 2), round(_h(keep), 2)]
+        stats[f"{name}_year_ratio"] = {"two_thousand_1_29": sum(bool(TWO_K_LOW.search(x["text"])) for x in keep),
+                                       "twenty_10_29": sum(bool(TWENTY_YR.search(x["text"])) for x in keep)}
+        return keep
+
+    _write(f"{out}/d1.jsonl", cap(d1, "d1"))
+    _write(f"{out}/d10n.jsonl", cap(_rows(f"{vol}/mix3/d10n.jsonl"), "d10n"))
+    biz = _rows(f"{vol}/tts/biz/train_ok.jsonl")
+    nb = [x for x in biz if "twenty_pause" not in x["kinds"]]
+    stats["biz_twenty_pause_dropped"] = len(biz) - len(nb)
+    _write(f"{vol}/tts/biz/train_ok_np.jsonl", nb)
+    json.dump(stats, open(f"{out}/stats.json", "w"), indent=1)
+    return stats
