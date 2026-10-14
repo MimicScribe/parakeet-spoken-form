@@ -212,7 +212,7 @@ def _fill_one_year(carrier: str, r: random.Random):
     return target, tts, kinds
 
 
-def minimal_pairs(n_pairs: int, seed: int, dev_frac: float = 0.2):
+def minimal_pairs(n_pairs: int, seed: int, dev_frac: float = 0.2, and_frac: float = 0.0):
     """2 x n_pairs rows. Years 2010-2039 (85% 2010-2029), the only range where both readings are common. Dev = held-out
     carriers (hash split) and, in voice.py, held-out voices."""
     r = random.Random(seed)
@@ -230,7 +230,9 @@ def minimal_pairs(n_pairs: int, seed: int, dev_frac: float = 0.2):
         tts = lead_in(tts, r)
         y = r.randint(2010, 2029) if r.random() < 0.85 else r.randint(2030, 2039)
         split = "dev" if is_dev_template(carrier, dev_frac) else "train"
-        for reading, words in (("twenty", readings.pair(y)), ("two_thousand", readings.cardinal(y))):
+        # external review #4: owner gold heard "two thousand AND X" in 7/62 clips, so and_frac of the pairs say it
+        two_k = readings.cardinal(y, use_and=r.random() < and_frac)
+        for reading, words in (("twenty", readings.pair(y)), ("two_thousand", two_k)):
             def put(s, w=words):
                 s = s.replace(_YR, w)
                 return s[0].upper() + s[1:] if s.startswith(w) else s

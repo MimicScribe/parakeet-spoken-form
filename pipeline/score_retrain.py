@@ -87,7 +87,9 @@ def ref_years(ref):
 def year_value_kept(ref, hyp):
     h = _ynorm(hyp)
     ys = ref_years(ref)
-    return len(ys), sum(any(f" {x.lower()} " in h for x in year_readings(y)) for y in ys)
+    # external review #4: a reading must not be the head of a longer number ("twenty twenty" inside "twenty twenty four")
+    return len(ys), sum(any(re.search(rf" {re.escape(x.lower())} (?!(?:{_U}|hundred|thousand|million|billion|point) )", h)
+                            for x in year_readings(y)) for y in ys)
 
 
 _NUMSET = _NUMW | {"oh", "and"}
@@ -96,8 +98,11 @@ _NUMSET = _NUMW | {"oh", "and"}
 def bare_two_thousand(t):
     """'two thousand' followed by a non-number word: a year whose tail was lost ('Q four of two thousand.')."""
     w = re.sub(r"[^\w' ]", " ", t.lower()).split()
-    return sum(1 for i in range(len(w) - 1) if w[i] == "two" and w[i + 1] == "thousand"
-               and (w[i + 2] if i + 2 < len(w) else "<end>") not in _NUMSET)
+    def after(i):  # the word after "two thousand", past one "and" ("two thousand and." is a truncation too)
+        j = i + 2 + (i + 2 < len(w) and w[i + 2] == "and")
+        return w[j] if j < len(w) else "<end>"
+
+    return sum(1 for i in range(len(w) - 1) if w[i] == "two" and w[i + 1] == "thousand" and after(i) not in _NUMSET)
 
 
 CHIMERA = re.compile(rf"[a-z]{{2,}}\d|\d[a-z]{{3,}}\b|\b(?i:zero|{_U}|{_T}|{_D})[.,]\d")  # "Q1" (a code) is WF, not here
@@ -297,9 +302,11 @@ def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"
             n += 1
             h = _ynorm(hy[v["src"]])
             tail = _two(v["value"] - 2000)[0] if 2000 < v["value"] < 2100 else ""
-            want = {"two thousand": f"two thousand {tail}", "two thousand and": f"two thousand and {tail}",
-                    "twenty": f"twenty {tail}"}.get(v["heard"], "")
-            rd += bool(want) and f" {want} " in h
+            # the reading class is what is scored ("two thousand" vs "twenty"); "and" may be there or not (external
+            # review #4), and the reading must not be the head of a longer number ("twenty twenty" in "twenty twenty four")
+            pat = {"two thousand": rf"two thousand (?:and )?{tail}", "two thousand and": rf"two thousand (?:and )?{tail}",
+                   "twenty": rf"twenty {tail}"}.get(v["heard"], "")
+            rd += bool(pat and tail) and re.search(rf" {pat} (?!(?:{_U}|hundred|thousand|million|billion|point) )", h) is not None
             vl += year_value_kept(str(v["value"]), hy[v["src"]])[1]
         s["gold_reading"], s["gold_value"], s["gold_n"] = rd, vl, n
     biz = load(root, run, "biz_dev")
@@ -477,6 +484,30 @@ def select(res, runs, baseline=None):
     return {"run": alive[0], "tied": alive, "metrics": m}
 
 
+def score_sealed(root, run, stock_run, refs_dir=""):
+    """External review #4: the SEALED3 beds (decoded by eval_multi --sealed after cache_beds3 --sealed) — VoxPopuli
+    leak / digits kept per language, Earnings-21 33-call values (needs the refs dir), full-FLEURS WER per language."""
+    s = {}
+    by = defaultdict(lambda: [0, 0, 0])
+    for r in load(root, run, "sealed/vox"):
+        k = lang_of(r)
+        by[k][0] += 1
+        by[k][1] += bool(leak_re(k).search(r["hyp"]))
+        by[k][2] += digit_runs(r["hyp"]) == digit_runs(r["ref"].split("\t")[0])
+    s["sealed_vox_n"] = sum(v[0] for v in by.values())
+    s["sealed_vox_leak_total"] = sum(v[1] for v in by.values())
+    s["sealed_vox_digitok_total"] = sum(v[2] for v in by.values())
+    if refs_dir:
+        s["sealed_e21x_values"] = e21x_values(root, run, refs_dir)
+    fl = defaultdict(list)
+    for r in load(root, run, "sealed/fleurs_full"):
+        fl[lang_of(r)].append(r)
+    s["sealed_fleurs_wer"] = {k: wer(v) for k, v in sorted(fl.items())}
+    if run != stock_run and fl:
+        s["sealed_fleurs_bootstrap_vs_" + stock_run] = fleurs_bootstrap(root, run, stock_run, name="sealed/fleurs_full")
+    return s
+
+
 if __name__ == "__main__":
     root, runs = sys.argv[1], sys.argv[2].split(",")
     excl = frozenset()
@@ -496,6 +527,10 @@ if __name__ == "__main__":
         for run in runs:
             if run != base:
                 res[run]["fleurs_bootstrap_vs_" + base] = fleurs_bootstrap(root, run, base)
+    if split == "sealed":
+        refs = sys.argv[sys.argv.index("--e21x-refs") + 1] if "--e21x-refs" in sys.argv else ""
+        for run in runs:
+            res[run].update(score_sealed(root, run, stock, refs))
     print(json.dumps(res, indent=1))
     if "--json" in sys.argv:
         json.dump(res, open(sys.argv[sys.argv.index("--json") + 1], "w"), indent=1)

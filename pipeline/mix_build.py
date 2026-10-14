@@ -720,3 +720,37 @@ def build3b(vol: str, per_video: int = 12, seed: int = 31) -> dict:
     _write(f"{vol}/tts/biz/train_ok_np.jsonl", nb)
     json.dump(stats, open(f"{out}/stats.json", "w"), indent=1)
     return stats
+
+
+def _caption_deletions(caption: str, stock: str) -> int:
+    """Words stock hears that the caption leaves out (inserts + the extra length of replacements; fillers ignored)."""
+    import difflib
+
+    fill = {"uh", "um", "hmm", "mm", "uhm", "er", "ah", "oh"}
+    a, b = ([x for x in re.sub(r"[^a-z' ]", " ", t.lower()).split() if x not in fill] for t in (caption, stock))
+    n = 0
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if op == "insert":
+            n += j2 - j1
+        elif op == "replace" and j2 - j1 > i2 - i1:
+            n += (j2 - j1) - (i2 - i1)
+    return n
+
+
+def build3c(vol: str, mp: str = "mp2", mp_repeat: int = 3) -> dict:
+    """R3.31 v2 (external review #4):
+    - tts/<mp>/train_ok_x<mp_repeat>.jsonl: the minimal pairs repeated so the warm-start sees each pair ~mp_repeat x 0.43;
+    - mix3b/d1p_v.jsonl, mix3b/d10p_v.jsonl: plain rows whose caption leaves out a word stock hears are dropped (11.7%
+      of d1p: "But that's ..." captioned "That's ..."; the e22_other deletion pattern). Rows without a stock field
+      (LibriSpeech / ICSI speed copies in d10p) are kept."""
+    stats = {}
+    rows = _rows(f"{vol}/tts/{mp}/train_ok.jsonl")
+    _write(f"{vol}/tts/{mp}/train_ok_x{mp_repeat}.jsonl", rows * mp_repeat)
+    stats["mp_rows"], stats["mp_h_repeated"] = len(rows) * mp_repeat, round(_h(rows) * mp_repeat, 2)
+    for name in ("d1p", "d10p"):
+        src = _rows(f"{vol}/mix3/{name}.jsonl")
+        keep = [x for x in src if "stock" not in x or _caption_deletions(x["text"], x["stock"]) == 0]
+        _write(f"{vol}/mix3b/{name}_v.jsonl", keep)
+        stats[f"{name}_v"] = {"rows": [len(src), len(keep)], "h": [round(_h(src), 2), round(_h(keep), 2)]}
+    json.dump(stats, open(f"{vol}/mix3b/stats_v.json", "w"), indent=1)
+    return stats

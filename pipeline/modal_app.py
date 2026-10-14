@@ -169,7 +169,7 @@ def make_tts(name: str, n_rows: int, seed: int = 1, shard: int = 200, multi_frac
 
 
 @app.function(image=tts_image, volumes={VOL: vol}, timeout=3 * 3600)
-def make_tts_mp(name: str = "mp", n_pairs: int = 1500, seed: int = 31, shard: int = 200):
+def make_tts_mp(name: str = "mp", n_pairs: int = 1500, seed: int = 31, shard: int = 200, and_frac: float = 0.0):
     """R3.31 minimal pairs (gen.minimal_pairs): each filled carrier voiced as "twenty X" and "two thousand X" with the
     same voice. Writes /vol/tts/<name>/{train,dev}.jsonl; run filter_tts, then mp_balance keeps only complete pairs."""
     import json
@@ -177,7 +177,7 @@ def make_tts_mp(name: str = "mp", n_pairs: int = 1500, seed: int = 31, shard: in
 
     import gen
 
-    rows = list(gen.minimal_pairs(n_pairs, seed))
+    rows = list(gen.minimal_pairs(n_pairs, seed, and_frac=and_frac))
     shards = [rows[i:i + shard] for i in range(0, len(rows), shard)]  # even shard size keeps pairs together
     out_dir = f"{VOL}/tts/{name}"
     os.makedirs(out_dir, exist_ok=True)
@@ -1034,6 +1034,29 @@ def retrain3_mix_mp() -> list:
     return [(sub.get(p, p), h, t) for p, h, t in retrain3_mix()] + [("tts/mp/train_ok.jsonl", 0, "free")]
 
 
+def retrain3_mix_v2(mp: str = "mp2", mp_repeat: int = 3, verbatim: bool = False) -> list:
+    """R3.31 v2 treatment: mix3b with tts/<mp> repeated mp_repeat x (external review #4: the first warm-start saw each
+    pair ~0.4 x); verbatim=True also swaps d1p/d10p for their verbatim-filtered versions."""
+    sub = {"mix3/d1.jsonl": "mix3b/d1.jsonl", "mix3/d10n.jsonl": "mix3b/d10n.jsonl",
+           "tts/biz/train_ok.jsonl": "tts/biz/train_ok_np.jsonl"}
+    if verbatim:
+        sub.update({"mix3/d1p.jsonl": "mix3b/d1p_v.jsonl", "mix3/d10p.jsonl": "mix3b/d10p_v.jsonl"})
+    return [(sub.get(p, p), h, t) for p, h, t in retrain3_mix()] + [(f"tts/{mp}/train_ok_x{mp_repeat}.jsonl", 0, "free")]
+
+
+@app.function(image=mix_image, volumes={VOL: vol}, cpu=8, memory=32768, timeout=3600)
+def build_mix3c(mp: str = "mp2", mp_repeat: int = 3):
+    import json
+
+    import mix_build
+
+    vol.reload()
+    print(json.dumps(mix_build.build3c(VOL, mp=mp, mp_repeat=mp_repeat), indent=1))
+    for v in (False, True):
+        print("SHARE v2" + (" verbatim" if v else ""), json.dumps(mix_build.mix_share(VOL, retrain3_mix_v2(mp, mp_repeat, v))))
+    vol.commit()
+
+
 @app.function(image=mix_image, volumes={VOL: vol}, cpu=8, memory=32768, timeout=3600)
 def build_mix3b(per_video: int = 12):
     import json
@@ -1196,7 +1219,8 @@ R3_ARMS = {"S-A": dict(wf_weight=1.0, l2sp_c=1.0, lr=1e-4), "S-B": dict(wf_weigh
               retries=modal.Retries(max_retries=2, initial_delay=30.0))
 def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, save_every: int = 250,
              en_weight: float = 1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
-             dur_weight: float = 1.0, init_from: str = "v10pt@1500", lr: float = 0.0, mix: str = "mix3"):
+             dur_weight: float = 1.0, init_from: str = "v10pt@1500", lr: float = 0.0, mix: str = "mix3",
+             anchor_init: bool = False):
     """One retrain-3 run (R3.13): r3 losses, decoupled L2-SP to v10pt@1500, 200 s x 2 accumulated batches.
     Rehearsal (E2) = a small max_steps. Resumes from exp/<run>/last.ckpt after a preemption."""
     import json
@@ -1211,7 +1235,12 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     cfg = dict(R3_ARMS[arm])
     if lr:  # R3.31 warm start: a lower peak LR than the arm's
         cfg["lr"] = lr
-    mix = retrain3_mix_mp() if mix == "mp" else retrain3_mix()
+    mix = {"mp": retrain3_mix_mp, "v2": lambda: retrain3_mix_v2(), "v2v": lambda: retrain3_mix_v2(verbatim=True)}.get(
+        mix, retrain3_mix)()
+    # external review #4: a warm start anchors L2-SP to its own init, not v10pt (the prior being trained away)
+    i_run, _, i_step = init_from.partition("@")
+    anchor = f"{VOL}/exp/{i_run}/step{i_step}.pt" if anchor_init else f"{VOL}/exp/v10pt/step1500.pt"
+    print("L2SP ANCHOR", anchor)
     share = mix_build.mix_share(VOL, mix)
     import shutil
 
@@ -1223,7 +1252,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
                    init_from=init_from, batch_duration=200, accumulate=2, spec_augment=False, kl_weight=10.0,
                    kl_punct=30.0, kl_tok=1.0, save_every=save_every, on_save=vol.commit, stage_dir="/tmp/stage",
                    r3=True, wf_weight=cfg["wf_weight"], en_weight=en_weight, l2sp_c=cfg["l2sp_c"],
-                   l2sp_anchor=f"{VOL}/exp/v10pt/step1500.pt", dur_weight=dur_weight)
+                   l2sp_anchor=anchor, dur_weight=dur_weight)
     vol.commit()
 
 
