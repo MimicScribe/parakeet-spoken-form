@@ -76,7 +76,9 @@ def _ynorm(t):
 def ref_years(ref):
     ys, r = [int(y) for y in re.findall(r"\b(20\d\d)\b", ref)], _ynorm(ref)
     for y in range(2001, 2100):
-        if y not in ys and any(f" {x} " in r for x in year_readings(y)[1:]):
+        # not the head of a bigger number ("two thousand seven hundred fifty" = 2750, owner gold g16/g18)
+        if y not in ys and any(re.search(rf" {re.escape(x)} (?!(?:hundred|thousand|million|billion|point) )", r)
+                               for x in year_readings(y)[1:]):
             ys.append(y)
     return ys
 
