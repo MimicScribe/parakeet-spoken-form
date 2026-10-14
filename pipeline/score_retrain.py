@@ -9,6 +9,7 @@ Leak and digit counts are absolute; the gates compare them against the stock and
 """
 
 import json
+import os
 import re
 import sys
 from collections import defaultdict
@@ -39,6 +40,61 @@ YEAR_GARBLE = re.compile(r"\b(?:two|twenty)\s+(t[a-z]*(?:een|even|ete|enty|elve|
 
 def year_garbles(text):
     return [m.group(0) for m in YEAR_GARBLE.finditer(text) if m.group(1).lower() not in _NUMW]
+
+
+# R3.26 (Opus review, verified): score year VALUES, not readings. A reference year counts as kept when the hyp
+# carries any valid reading of it (digits, "two thousand [and] X", "twenty X" / "twenty oh X").
+_UW = "zero one two three four five six seven eight nine".split()
+_TW = "ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
+_DW = {20: "twenty", 30: "thirty", 40: "forty", 50: "fifty", 60: "sixty", 70: "seventy", 80: "eighty", 90: "ninety"}
+
+
+def _two(n):
+    if n < 10:
+        return [_UW[n]]
+    if n < 20:
+        return [_TW[n - 10]]
+    t = _DW[n // 10 * 10]
+    return [t] if n % 10 == 0 else [f"{t} {_UW[n % 10]}"]
+
+
+def year_readings(y):
+    n, out = y - 2000, [str(y)]
+    if n == 0:
+        out.append("two thousand")
+    elif 0 < n < 100:
+        for x in _two(n):
+            out += [f"two thousand {x}", f"two thousand and {x}"]
+            out.append(f"twenty {x}" if n >= 10 else f"twenty oh {x}")
+    return out
+
+
+def _ynorm(t):
+    return " " + re.sub(r"[^\w' ]", " ", t.lower().replace("-", " ")) + " "
+
+
+def ref_years(ref):
+    ys, r = [int(y) for y in re.findall(r"\b(20\d\d)\b", ref)], _ynorm(ref)
+    for y in range(2001, 2100):
+        if y not in ys and any(f" {x} " in r for x in year_readings(y)[1:]):
+            ys.append(y)
+    return ys
+
+
+def year_value_kept(ref, hyp):
+    h = _ynorm(hyp)
+    ys = ref_years(ref)
+    return len(ys), sum(any(f" {x.lower()} " in h for x in year_readings(y)) for y in ys)
+
+
+_NUMSET = _NUMW | {"oh", "and"}
+
+
+def bare_two_thousand(t):
+    """'two thousand' followed by a non-number word: a year whose tail was lost ('Q four of two thousand.')."""
+    w = re.sub(r"[^\w' ]", " ", t.lower()).split()
+    return sum(1 for i in range(len(w) - 1) if w[i] == "two" and w[i + 1] == "thousand"
+               and (w[i + 2] if i + 2 < len(w) else "<end>") not in _NUMSET)
 
 
 CHIMERA = re.compile(rf"[a-z]{{2,}}\d|\d[a-z]{{3,}}\b|\b(?i:zero|{_U}|{_T}|{_D})[.,]\d")  # "Q1" (a code) is WF, not here
@@ -213,9 +269,36 @@ def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"
     yf = yearflip.flips(wins, "hyp") if wins else {"flips": 0, "year_occurrences": 0}
     s["e21_dev_year_flips"], s["e21_dev_year_occ"] = yf["flips"], yf["year_occurrences"]
     s["e21_dev_onset_2k_flips"] = yf.get("onset_2k_flips", 0)  # R3.23 blend precursor: v10pt 1, rt2 7
-    g = [x for name in ("d1_dev", "e22_numbers", "d9_dev", "fast", "biz_dev", "adv", "lspc_dev", "e22_other")
-         for r in load(root, run, name) for x in year_garbles(r["hyp"])]
+    en_rows = [r for name in ("d1_dev", "e22_numbers", "d9_dev", "fast", "biz_dev", "adv", "lspc_dev", "e22_other")
+               for r in load(root, run, name) if name != "adv" or lang_of(r) in ("adv", "en") and "__en_" in r["id"]]
+    g = [x for r in en_rows for x in year_garbles(r["hyp"])]  # R3.26: English rows only
     s["year_garble"], s["year_garble_hits"] = len(g), g[:20]
+    vn = vk = tr = 0
+    for name in ("d1_dev", "e22_numbers", "fast", "d9_dev", "biz_dev"):
+        for r in load(root, run, name):
+            ref = r["ref"].split("\t")[0]
+            n, k = year_value_kept(ref, r["hyp"])
+            vn, vk = vn + n, vk + k
+            # truncation: a year (not 2000) lost while the hyp holds a bare "two thousand"
+            lost = [y for y in ref_years(ref) if y != 2000 and year_value_kept(str(y), r["hyp"])[1] == 0]
+            tr += min(len(lost), max(0, bare_two_thousand(r["hyp"]) - bare_two_thousand(ref)))
+    s["year_value_kept"], s["year_value_n"], s["year_trunc"] = vk, vn, tr
+    # owner listening gold (definitive, gold/owner_year_readings.json): d1_dev clips, reading AND value
+    gp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gold", "owner_year_readings.json")
+    if os.path.exists(gp):
+        hy = {r["id"]: r["hyp"] for r in load(root, run, "d1_dev")}
+        rd = vl = n = 0
+        for v in json.load(open(gp)).values():
+            if v["src"] not in hy or v["heard"] in ("other", "noyear"):
+                continue
+            n += 1
+            h = _ynorm(hy[v["src"]])
+            tail = _two(v["value"] - 2000)[0] if 2000 < v["value"] < 2100 else ""
+            want = {"two thousand": f"two thousand {tail}", "two thousand and": f"two thousand and {tail}",
+                    "twenty": f"twenty {tail}"}.get(v["heard"], "")
+            rd += bool(want) and f" {want} " in h
+            vl += year_value_kept(str(v["value"]), hy[v["src"]])[1]
+        s["gold_reading"], s["gold_value"], s["gold_n"] = rd, vl, n
     biz = load(root, run, "biz_dev")
     if biz:
         s["wer_biz_dev"] = wer(biz)
@@ -354,7 +437,10 @@ def e21x_values(root, run, refs_dir):
 
 # RETRAIN-3 frozen selection order (plan R3.12.5; written before any retrain-3 number was read). Lexicographic; a
 # difference within the stated noise band passes to the next key.
-SELECT_ORDER = [("blend", -1, 0), ("en_wf", -1, 2), ("chimeras", -1, 0), ("adv_en_ok", +1, 3), ("fast_d1_ok", +1, 5),
+SELECT_ORDER = [("blend", -1, 0), ("en_wf", -1, 2), ("chimeras", -1, 0),
+                # R3.26 (owner-approved): year VALUES and truncations ahead of the reading keys
+                ("year_value", +1, 2), ("year_trunc", -1, 1), ("year_garble", -1, 1),
+                ("adv_en_ok", +1, 3), ("fast_d1_ok", +1, 5),
                 ("nonen_leak", -1, 1), ("fleurs_worst", -1, 0), ("wer_dev", -1, 0.1)]
 
 
@@ -366,7 +452,9 @@ def sel_metrics(s):
             "nonen_leak": s["leak_vox_dev_total"] + s["leak_fleurs_num_total"],
             # R3.17 M2 (final fresh-eyes review): languages failing the paired bootstrap, not the raw worst delta
             "fleurs_worst": sum(x["fail"] for x in boot.values()) if boot else (max(fl) if fl else 0.0),
-            "wer_dev": (s["wer_lspc_dev"] or 0) + (s["wer_d1_dev"] or 0)}
+            "wer_dev": (s["wer_lspc_dev"] or 0) + (s["wer_d1_dev"] or 0),
+            "year_value": s.get("year_value_kept", 0), "year_trunc": s.get("year_trunc", 0),
+            "year_garble": s.get("year_garble", 0)}
 
 
 def select(res, runs, baseline=None):
