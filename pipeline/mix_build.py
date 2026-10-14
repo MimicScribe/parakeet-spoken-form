@@ -612,15 +612,15 @@ def trim_d1(vol: str, hours: float, seed: int = 7) -> dict:
 def restore_unk_nonen(vol: str, min_h: float = 0.4, tol: float = 0.1) -> dict:
     """Retrain-3 external review: dropping every stock label with "\u2047" left Greek D2 at 0.05 h (final sigma is not in
     the vocab, so stock writes \u2047). Stock emits \u2047 there itself, so a "\u2047" label on a NON-ENGLISH row
-    reproduces stock (no new behaviour). For languages under `min_h` in mix3/d2, add back their audited \u2047 rows."""
+    reproduces stock (no new behaviour). For languages under `min_h` in mix3/d2 (digit) and mix3/d2p (plain), add back
+    their audited \u2047 rows.
+
+    2026-10-14 (retrain-4 plan v3): the first version restored only `digit.jsonl` into mix3/d2. Greek PLAIN rows stayed
+    filtered (165 of 272 d2/el/plain rows carry \u2047, every sentence with a word-final sigma), so retrain-3 learned
+    Greek only from sigma-free sentences and candidate B stopped emitting the <unk> that `UnknownPieceRepair` turns into
+    \u03c2 (app FLEURS el +1.73 pp vs v10pt). Both kinds are restored now; per kind, idempotent from its `.pre_unk` file."""
     import soundfile as sf
 
-    base = f"{vol}/mix3/d2.pre_unk.jsonl"
-    d2 = _rows(base if os.path.exists(base) else f"{vol}/mix3/d2.jsonl")  # idempotent: rebuild from the pre-restore file
-    have = {}
-    for x in d2:
-        have[x["lang"]] = have.get(x["lang"], 0) + x["duration"] / 3600
-    src = [x for f in sorted(glob.glob(f"{vol}/d2/*/digit.jsonl")) for x in _rows(f) if "\u2047" in x["text"]]
     eval_ng, eval_paths = set(), set()  # the build3 eval dedupe (re-review: restored rows skipped it)
     for f in glob.glob(f"{vol}/beds/e21x/refs/*.txt"):
         for t in re.split(r"(?<=[.?!])\s+", open(f).read()):
@@ -630,29 +630,47 @@ def restore_unk_nonen(vol: str, min_h: float = 0.4, tol: float = 0.1) -> dict:
         for x in _rows(f"{vol}/{pat}"):
             eval_ng |= ngrams(x["text"].split("\t")[0])
             eval_paths.add(os.path.basename(x.get("audio_filepath", "")))
-    src = [x for x in src if not ngrams(x["text"]) & eval_ng and os.path.basename(x["audio_filepath"]) not in eval_paths]
-    random.Random(11).shuffle(src)
-    seen = {x["audio_filepath"] for x in d2}
-    added = {}
-    for x in src:
-        lang = x["lang"]
-        if have.get(lang, 0) >= min_h or x["audio_filepath"] in seen:
-            continue
-        try:
-            i = sf.info(x["audio_filepath"])
-        except Exception:
-            continue
-        if i.samplerate != 16000 or abs(i.frames / i.samplerate - x["duration"]) > tol:
-            continue
-        seen.add(x["audio_filepath"])
-        d2.append(x)
-        have[lang] = have.get(lang, 0) + x["duration"] / 3600
-        added[lang] = added.get(lang, 0) + 1
-    if added or os.path.exists(base):
-        if not os.path.exists(base):
-            os.replace(f"{vol}/mix3/d2.jsonl", base)
-        _write(f"{vol}/mix3/d2.jsonl", d2)
-    return {"added_rows": added, "h_by_lang": {k: round(v, 3) for k, v in sorted(have.items())}}
+    out = {}
+    for kind, mixname in (("digit", "d2"), ("plain", "d2p")):
+        base = f"{vol}/mix3/{mixname}.pre_unk.jsonl"
+        cur = f"{vol}/mix3/{mixname}.jsonl"
+        rows = _rows(base if os.path.exists(base) else cur)  # idempotent: rebuild from the pre-restore file
+        have = {}
+        for x in rows:
+            have[x["lang"]] = have.get(x["lang"], 0) + x["duration"] / 3600
+        allsrc = [x for f in sorted(glob.glob(f"{vol}/d2/*/{kind}.jsonl")) for x in _rows(f)]
+        # A language where the filter removed a large SHARE of rows lost a kind of sentence, not just hours (Greek: every
+        # sentence with a word-final sigma). Those languages get all their audited rows back, not just up to `min_h`.
+        tot, unk = {}, {}
+        for x in allsrc:
+            tot[x["lang"]] = tot.get(x["lang"], 0) + 1
+            unk[x["lang"]] = unk.get(x["lang"], 0) + ("\u2047" in x["text"])
+        biased = {k for k in tot if unk[k] / tot[k] > 0.2}
+        src = [x for x in allsrc if "\u2047" in x["text"]]
+        src = [x for x in src if not ngrams(x["text"]) & eval_ng and os.path.basename(x["audio_filepath"]) not in eval_paths]
+        random.Random(11).shuffle(src)
+        seen = {x["audio_filepath"] for x in rows}
+        added = {}
+        for x in src:
+            lang = x["lang"]
+            if (lang not in biased and have.get(lang, 0) >= min_h) or x["audio_filepath"] in seen:
+                continue
+            try:
+                i = sf.info(x["audio_filepath"])
+            except Exception:
+                continue
+            if i.samplerate != 16000 or abs(i.frames / i.samplerate - x["duration"]) > tol:
+                continue
+            seen.add(x["audio_filepath"])
+            rows.append(x)
+            have[lang] = have.get(lang, 0) + x["duration"] / 3600
+            added[lang] = added.get(lang, 0) + 1
+        if added or os.path.exists(base):
+            if not os.path.exists(base):
+                os.replace(cur, base)
+            _write(cur, rows)
+        out[mixname] = {"added_rows": added, "biased_langs": sorted(biased), "h_by_lang": {k: round(v, 3) for k, v in sorted(have.items())}}
+    return out
 
 
 def build3b(vol: str, per_video: int = 12, seed: int = 31) -> dict:

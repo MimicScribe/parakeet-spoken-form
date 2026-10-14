@@ -2,7 +2,7 @@
  "E21 4366893 @130s|2020": {
   "clip": "e1",
   "src": "E21 4366893 @130s",
-  "audio": "benchmark/data/earnings21/audio/4366893.wav",
+  "audio": "earnings21/audio/4366893.wav",
   "value": 2020,
   "context": "…speaks only as of today, August sixth, ____. Thus, any time sensitive…",
   "heard": "two thousand",
@@ -14,7 +14,7 @@
  "E21 4366893 @500s|2014": {
   "clip": "e2",
   "src": "E21 4366893 @500s",
-  "audio": "benchmark/data/earnings21/audio/4366893.wav",
+  "audio": "earnings21/audio/4366893.wav",
   "value": 2014,
   "context": "…the oil price environment that we have observed since late ____, including increased volatility…",
   "heard": "two thousand",

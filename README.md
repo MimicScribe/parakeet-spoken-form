@@ -4,8 +4,10 @@ A fine-tune of [Parakeet Ultra](https://huggingface.co/moondream/parakeet-ultra)
 and symbols as the words the speaker said. "I'll be there at four fifteen" stays "four fifteen", not
 `4:15` or `415`. "One two seven point zero point zero point one" stays as spoken, not `127.0.0.1`.
 
-Status: in progress. Nothing is trained yet. This repo will hold the data generator, training
-scripts, evaluation, and the released weights.
+Status (2026-10-14): trained. The current model ("model B") is published as CoreML weights at
+[MimicScribe/parakeet-ultra-spoken-coreml](https://huggingface.co/MimicScribe/parakeet-ultra-spoken-coreml)
+(revision `5edfc817`) and is queued for the next MimicScribe release. **Start at [RESTART.md](RESTART.md)**
+for the state, what worked and failed, and how to run the next training round.
 
 ## Why
 
@@ -33,7 +35,8 @@ The mixing likely comes from the training labels. In a sample of the English You
 ## Scope
 
 The model's tokenizer has 15 non-letter pieces besides punctuation: `0`–`9`, `$`, `%`, `€`, `£`,
-and `/`. The fine-tuned model should never emit them. Number punctuation (`:` in times, `.` in
+and `/`. In English the fine-tuned model should never emit them; the other 24 languages keep stock
+behaviour (digits). Number punctuation (`:` in times, `.` in
 decimals, `,` in thousands) goes with them.
 
 First release: English. The other 24 languages Parakeet supports follow, starting with Spanish,
@@ -67,6 +70,8 @@ Each step is compared against unmodified Parakeet Ultra run through the same scr
 
 ## License
 
-Code: Apache-2.0. Model weights, when released: CC BY 4.0, derived from
+Code: Apache-2.0. Model weights: CC BY 4.0, derived from
 [parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) (NVIDIA, CC BY 4.0) and
 [Parakeet Ultra](https://huggingface.co/moondream/parakeet-ultra) (Moondream, CC BY 4.0).
+
+Observations, known weaknesses and ideas for the next run: [OBSERVATIONS.md](OBSERVATIONS.md).

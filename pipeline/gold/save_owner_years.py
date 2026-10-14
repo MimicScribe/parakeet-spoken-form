@@ -20,7 +20,7 @@ for k, a in ans.items():
         continue
     it = items[k]
     gold[it["src"] + "|" + str(it["value"])] = {
-        "clip": k, "src": it["src"], "audio": it.get("vol", "benchmark/data/earnings21/audio/4366893.wav"),
+        "clip": k, "src": it["src"], "audio": it.get("vol", "earnings21/audio/4366893.wav"),
         "value": it["value"], "context": it["text"], "heard": a,
         "heard_value": ans.get(k + "_v"),
         "label_reading": it.get("label_reading") or it.get("ref_reading"), "v10_reading": it.get("v10_reading"),

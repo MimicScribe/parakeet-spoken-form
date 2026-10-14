@@ -1,9 +1,8 @@
 """Tier-1 multilingual spoken-form candidates (R3.11 P1): es, fr, de, pt, it, nl.
 
 Given caption text with digits and a language, find the number spans and list the spoken readings a speaker may
-have used. The CANONICAL reading of every value comes from the app's own Swift NumberGrammars (byte-identical): the
-grammars compile standalone into a dumper (`swiftdump/`), which answers a request list and fills
-`ml_grammar_table.json`. Variants (gender/apocope on 1, 2 and hundreds; "tausend" without "ein"; the hundreds reading of
+have used. The CANONICAL reading of every value comes from per-language number grammars, pre-dumped into
+`ml_grammar_table.json` by a grammar dumper that is not part of this repo. Variants (gender/apocope on 1, 2 and hundreds; "tausend" without "ein"; the hundreds reading of
 1100-1999; ordinal case/gender endings; a decimal fraction read as one number; digit-by-digit codes) are derived from
 the canonical words in the grammar's own spelling style. A value missing from the table yields NO candidates: the span
 is then undecidable and never becomes a label.
@@ -314,7 +313,7 @@ def _cands(d: dict, lang: str) -> list[str]:
         return _uniq(out)
     if k == "ord":
         if n >= 1_000_000:
-            return []  # app grammar: SpanishNumberGrammar.ordinal(1_000_000) traps (see plan R3.11)
+            return []  # the Spanish grammar has no reading for the ordinal of 1,000,000
         o = g(lang, "ord", n)
         out = [o] + _ord_variants(o, lang, d.get("fem", False))
         if d.get("fem"):
@@ -377,7 +376,7 @@ def needed(texts, lang: str) -> set[str]:
 
 
 def build_table(texts_by_lang: dict, dumper: str, workdir: str) -> int:
-    """Ask the Swift dumper for every needed key and merge the answers into ml_grammar_table.json."""
+    """Ask a grammar dumper (not in this repo) for every needed key and merge the answers into ml_grammar_table.json."""
     import subprocess
 
     keys = sorted({k for lang, ts in texts_by_lang.items() for k in needed(ts, lang)})
