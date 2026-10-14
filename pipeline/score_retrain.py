@@ -25,7 +25,7 @@ FILL = re.compile(r"\b(uh|um|uhm|er|erm|mm|hmm|mhm)\b", re.I)
 LEAK_EXTRA = ["zero", "six", "ten", "point", "million", "first", "second", "third"]
 LEAK_HOMOGRAPH = {"fr": {"six", "million", "point", "second"}, "nl": {"ten", "zero"}, "it": {"zero"}, "pt": {"zero"},
                   "es": {"million"}, "de": {"million"}, "sv": {"million"}, "da": {"million"}, "ro": {"zero"},
-                  "mt": {"ten"}, "pl": {"ten"}, "cs": {"ten"}, "sk": {"ten"}}
+                  "mt": {"ten"}, "lt": {"ten"}, "pl": {"ten"}, "cs": {"ten"}, "sk": {"ten"}}
 WF = re.compile(r"[0-9$€£¥¢₹₩₽%#/+°\u2047²³¹½¼¾]")
 _U = "one|two|three|four|five|six|seven|eight|nine"
 _T = "ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
@@ -70,14 +70,15 @@ def year_readings(y):
 
 
 def _ynorm(t):
-    return " " + re.sub(r"[^\w' ]", " ", t.lower().replace("-", " ")) + " "
+    # whitespace collapsed: "twenty, twenty six" must still read 2026 (external review 2026-10-13)
+    return " " + " ".join(re.sub(r"[^\w' ]", " ", t.lower().replace("-", " ")).split()) + " "
 
 
 def ref_years(ref):
     ys, r = [int(y) for y in re.findall(r"\b(20\d\d)\b", ref)], _ynorm(ref)
     for y in range(2001, 2100):
         # not the head of a bigger number ("two thousand seven hundred fifty" = 2750, owner gold g16/g18)
-        if y not in ys and any(re.search(rf" {re.escape(x)} (?!(?:hundred|thousand|million|billion|point) )", r)
+        if y not in ys and any(re.search(rf" {re.escape(x)} (?!(?:hundred|thousand|million|billion|point|{_U}) )", r)
                                for x in year_readings(y)[1:]):
             ys.append(y)
     return ys
@@ -489,7 +490,9 @@ if __name__ == "__main__":
         "ultra_rt_c" if all(r.endswith("_c") for r in runs) else "ultra_rt")
     res = {run: score(root, run, split, excl, stock_run=stock) for run in runs}
     if "--base" in sys.argv:
-        base = sys.argv[sys.argv.index("--base") + 1]
+        # FLEURS is judged against STOCK (R3.0 ship bar: non-EN WER <= ultra_rt + 0.15 pp), not the fine-tune base
+        # (v10pt is unusually good on lv; external review 2026-10-13). --fleurs-base overrides.
+        base = sys.argv[sys.argv.index("--fleurs-base") + 1] if "--fleurs-base" in sys.argv else stock
         for run in runs:
             if run != base:
                 res[run]["fleurs_bootstrap_vs_" + base] = fleurs_bootstrap(root, run, base)
