@@ -31,6 +31,16 @@ _T = "ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nin
 _D = "twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety"
 BLEND = re.compile(rf"\btwenty thousand (?:(?:{_D})(?:[ -](?:{_U}))?|{_T}|{_U})\b(?![ -](?:hundred|thousand|million|"
                    rf"billion|trillion|point|and|{_U}|{_T}|{_D})\b)", re.I)
+# R3.23 (external review, verified): a year read as "two"/"twenty" + a non-word that starts a number ("two televen",
+# "Two tinete", "two tenty") — the model began "thousand" and ran out of frames. v10pt 1, r3 arms 14-23 on the EN beds.
+_NUMW = set(f"zero {_U} {_T} {_D} hundred thousand million billion".replace("|", " ").split())
+YEAR_GARBLE = re.compile(r"\b(?:two|twenty)\s+(t[a-z]*(?:een|even|ete|enty|elve|en|ty))\b", re.I)
+
+
+def year_garbles(text):
+    return [m.group(0) for m in YEAR_GARBLE.finditer(text) if m.group(1).lower() not in _NUMW]
+
+
 CHIMERA = re.compile(rf"[a-z]{{2,}}\d|\d[a-z]{{3,}}\b|\b(?i:zero|{_U}|{_T}|{_D})[.,]\d")  # "Q1" (a code) is WF, not here
 
 
@@ -202,6 +212,10 @@ def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"
              "id": r["id"], "hyp": r["hyp"]} for r in e21]
     yf = yearflip.flips(wins, "hyp") if wins else {"flips": 0, "year_occurrences": 0}
     s["e21_dev_year_flips"], s["e21_dev_year_occ"] = yf["flips"], yf["year_occurrences"]
+    s["e21_dev_onset_2k_flips"] = yf.get("onset_2k_flips", 0)  # R3.23 blend precursor: v10pt 1, rt2 7
+    g = [x for name in ("d1_dev", "e22_numbers", "d9_dev", "fast", "biz_dev", "adv", "lspc_dev", "e22_other")
+         for r in load(root, run, name) for x in year_garbles(r["hyp"])]
+    s["year_garble"], s["year_garble_hits"] = len(g), g[:20]
     biz = load(root, run, "biz_dev")
     if biz:
         s["wer_biz_dev"] = wer(biz)

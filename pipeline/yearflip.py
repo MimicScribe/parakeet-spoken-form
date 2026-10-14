@@ -2,7 +2,8 @@
 N" blends. The seam merge splices one window's "twenty" onto another's "thousand twenty" when two windows that hear the
 same year read it differently (rt2 4366893: "two thousand twenty" vs "twenty twenty" for one "2020").
 
-Key = call + the two words before the year + its value; a flip = one key read both as "two thousand X" and "twenty X".
+Key = call + the year's position in call time + its value (window-onset years count too: R3.23, the external review
+found the old 2-word prefix hid every flip at a window start, the blend geometry); a flip = one key read both as "two thousand X" and "twenty X".
 """
 import collections
 import re
@@ -12,7 +13,7 @@ _T = "ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nin
 TENS = {"twenty": 20, "thirty": 30}
 SMALL = {w: i for i, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve thirteen "
                                     "fourteen fifteen sixteen seventeen eighteen nineteen".split())}
-YEAR = re.compile(rf"(?P<pre>(?:\S+\s+){{2}})(?P<y>two thousand (?:and )?(?P<a>{_T}|{_U}|twenty(?: (?:{_U}))?)|twenty (?P<b>{_T}|twenty(?: (?:{_U}))?))\b",
+YEAR = re.compile(rf"(?P<pre>(?:\S+\s+){{0,2}})(?P<y>two thousand (?:and )?(?P<a>{_T}|{_U}|twenty(?: (?:{_U}))?)|twenty (?P<b>{_T}|twenty(?: (?:{_U}))?))\b",
                   re.I)
 
 
@@ -30,8 +31,9 @@ def flips(rows, field: str, tol: float = 2.0) -> dict:
         for m in YEAR.finditer(t):
             v = 2000 + _val(m.group("a") or m.group("b"))
             at = r["start"] + r["duration"] * m.start("y") / max(len(t), 1)
-            occ[(r["call"], v)].append((at, "2k" if m.group("a") else "20", r["id"]))
-    n_fl, ex, n_occ = 0, [], 0
+            onset = len(m.group("pre").split()) <= 1  # the year opens the window: the seam-blend geometry
+            occ[(r["call"], v)].append((at, "2k" if m.group("a") else "20", r["id"], onset))
+    n_fl, ex, n_occ, n_on = 0, [], 0, 0
     for (call, v), xs in occ.items():
         xs.sort()
         used = [False] * len(xs)
@@ -44,9 +46,11 @@ def flips(rows, field: str, tol: float = 2.0) -> dict:
             n_occ += 1
             if len({xs[j][1] for j in grp}) > 1:
                 n_fl += 1
+                # blend precursor: an onset window reads "two thousand X" while another window reads "twenty X"
+                n_on += any(xs[j][1] == "2k" and xs[j][3] for j in grp)
                 if len(ex) < 12:
                     ex.append((call, v, round(xs[i][0], 1), sorted({xs[j][1] for j in grp})))
-    return {"year_occurrences": n_occ, "flips": n_fl, "examples": ex}
+    return {"year_occurrences": n_occ, "flips": n_fl, "onset_2k_flips": n_on, "examples": ex}
 
 
 if __name__ == "__main__":
