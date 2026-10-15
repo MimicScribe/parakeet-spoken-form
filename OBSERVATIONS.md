@@ -149,6 +149,10 @@ From an external adversarial review of the app's digit-to-words reader. Every cl
   - Classes: phone numbers 46, prices 22, large figures 21, clock times 18.
 - **Training implication:** this is direct evidence for spoken-form output in every language. The model writing the words itself removed the seam problem entirely in English on the same test.
 - **Gate for any run:** this test (part of the private app-side evaluation harness) is the per-language seam gate NEXT_RUN.md asks for. Per language: share of sentences that read differently from decoded-alone, and merge-made wrong values, both no worse than B.
+- **Update, same day: the app side has reached its limit.**
+  - An app-side merge update cut merge-made wrong values from 120 to 92, with English unchanged. **92 is the new seam-gate baseline** for B.
+  - App-side arbitration was tried for the remaining cases: a third decode of a window centred on the disputed figure, keeping whichever reading it confirms. It did not help. 163 disputes, 0 corrected. The third decode usually groups the figure a third way, e.g. one window "1282", the other "282", the centred decode "1900".
+  - **So the remaining errors need the model:** it must write the same spoken form for a figure wherever the window edge falls.
 - **Label caution for non-English spoken-form data:** number grammars can turn digit transcripts into word labels, but they write nominative cardinals. Slavic/Baltic speakers say inflected forms (years as inflected ordinals, case after prepositions). Labels must match what was said, e.g. choose among grammar variants by forced-alignment score, or the model learns a reading nobody uses.
 
 ### 2.9 To check (not yet a finding)
