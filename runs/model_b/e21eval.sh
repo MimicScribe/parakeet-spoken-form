@@ -1,6 +1,6 @@
 #!/bin/bash
 S=${LOGS:-./logs}
-cd $HOME/proj/parakeet-spoken-form/pipeline
+cd $REPO/pipeline
 modal run modal_app.py::eval_multi --runs "r3_SA@1000,r3_SB@1250" --tag _c --skip "e22_numbers,e22_other,lspc_dev,d1_dev,vox_dev,fleurs_wer,fleurs_num,noise,adv,fast,d9_dev,biz_dev" || { echo EVAL FAILED; exit 1; }
 for r in r3_SA@1000_c r3_SB@1250_c; do mkdir -p $S/r3d/hyps/$r; modal volume get --force parakeet-spoken-form "hyps/$r/e21_dev.jsonl" $S/r3d/hyps/$r/e21_dev.jsonl; done
 python3 - <<'PY'

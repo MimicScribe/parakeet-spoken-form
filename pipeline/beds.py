@@ -291,7 +291,7 @@ def fleurs3(vol: str, screen_per_lang: int = 100) -> dict:
 
 
 def e21_dev_cut(vol: str, win_s: float = 14.96, stride_s: float = 9.44, phases=(0.0, 3.15, 6.3)) -> list:
-    """The 11 E21_LOCAL calls as app-geometry windows (StreamingAsrConstants: 187-frame window, 118-frame stride) at
+    """The 11 E21_LOCAL calls as streaming-style windows (187-frame window, 118-frame stride) at
     three phase offsets, so every number sits at several left-edge positions (M1). Returns every window row."""
     import soundfile as sf
 

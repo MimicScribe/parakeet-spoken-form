@@ -1,6 +1,6 @@
 #!/bin/bash
 S=${LOGS:-./logs}
-cd $HOME/proj/parakeet-spoken-form/pipeline
+cd $REPO/pipeline
 RUNS="rt_main_s1 rt_main_s2 rt_stock_s1 rt_stock_s2 rt_ablen_s1 rt_ablnonen_s1"
 while true; do
   left=0

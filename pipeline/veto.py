@@ -1,4 +1,4 @@
-"""Second, non-Parakeet acoustic veto on the labeller's decided readings (Opus review H1).
+"""Second, non-Parakeet acoustic veto on the labeller's decided readings.
 
 wav2vec2-large-960h CTC decides the reading and is also the absolute-fit check, so a systematic wav2vec2 bias would go
 unseen. HuBERT-large (a different self-supervised objective and pretraining run, CTC fine-tuned on LibriSpeech 960 h)
@@ -36,13 +36,14 @@ class Veto:
                                                   torch.tensor([lp.shape[0]]), torch.tensor([len(ids)]),
                                                   blank=self.proc.tokenizer.pad_token_id, reduction="sum"))
 
-    def rows(self, vol: str, tag: str, rows_dir: str = "d1/rows", out_dir: str = "d1/veto") -> dict:
+    def rows(self, vol: str, tag: str, rows_dir: str = "d1/rows", out_dir: str = "d1/veto",
+             man_dir: str = "yodas/en/manifests") -> dict:
         import soundfile as sf
 
         man = {}
         recs = [json.loads(x) for x in open(f"{vol}/{rows_dir}/{tag}.jsonl")]
         shard = tag.removesuffix("_pct")
-        for x in open(f"{vol}/yodas/en/manifests/{shard}.jsonl"):
+        for x in open(f"{vol}/{man_dir}/{shard}.jsonl"):
             r = json.loads(x)
             man[r["utt_id"]] = r["audio_filepath"]
         out, hub, n_span, n_veto = {}, {}, 0, 0

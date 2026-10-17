@@ -1,7 +1,7 @@
 #!/bin/bash
-# After ws3: score every model, select the best W3 candidate (frozen SELECT_ORDER), then sealed + 44-call app bar on it.
+# After ws3: score every model, select the best W3 candidate (frozen SELECT_ORDER), then sealed + the 44-call number bar on it.
 S=${LOGS:-./logs}
-cd ~/proj/parakeet-spoken-form/pipeline
+cd $REPO/pipeline
 until grep -q "WS3_EVALED\|WS3 FAILED" $S/ws3.log; do sleep 30; done
 grep -q WS3_EVALED $S/ws3.log || { echo "POST3 FAILED (ws3)"; exit 1; }
 W="r3_W3@500_c,r3_W3@1000_c,w3soup_a1.0@0_c,w3soup_a0.5@0_c"
@@ -22,6 +22,6 @@ modal run modal_app.py::eval_multi --runs "$B" --sealed --tag _sealed > $S/post3
   modal volume get --force parakeet-spoken-form "hyps/${B}_sealed" $S/sealed/hyps/ >/dev/null && echo "POST3 SEALED_OK"
 modal run modal_app.py::export_weights --run $RUN --step $STEP || { echo "POST3 FAILED (export)"; exit 1; }
 modal volume get --force parakeet-spoken-form "export/$B/decoder_joint.safetensors" $S/sent/best3.safetensors >/dev/null
-python3 swap_weights.py $HOME/models/parakeet-ultra-stock-95eaa59a $S/sent/best3.safetensors $HOME/models/parakeet-ultra-best3 || { echo "POST3 FAILED (bundle)"; exit 1; }
-# (app-side evaluation of the bundle ran here; that harness is private)
+python3 swap_weights.py $MODELS/parakeet-ultra-stock-95eaa59a $S/sent/best3.safetensors $MODELS/parakeet-ultra-best3 || { echo "POST3 FAILED (bundle)"; exit 1; }
+# (a private evaluation of the bundle ran here)
 echo POST3_DONE

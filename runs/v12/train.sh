@@ -1,6 +1,6 @@
 #!/bin/bash
 S=${LOGS:-./logs}
-cd $HOME/proj/parakeet-spoken-form/pipeline
+cd $REPO/pipeline
 L=$S/v12/train.log
 modal run modal_app.py::merge_tts --name v12 --parts v10pt,v12year > $L 2>&1 || { echo "MERGE FAIL" >> $L; exit 1; }
 echo "MERGE OK $(date +%T)" >> $L

@@ -1,9 +1,9 @@
-"""Year-reading flips across overlapping app windows (e21_dev, 3 phases): the precursor of the app's "twenty thousand
+"""Year-reading flips across overlapping streaming windows (e21_dev, 3 phases): the precursor of the merged "twenty thousand
 N" blends. The seam merge splices one window's "twenty" onto another's "thousand twenty" when two windows that hear the
 same year read it differently (rt2 4366893: "two thousand twenty" vs "twenty twenty" for one "2020").
 
-Key = call + the year's position in call time + its value (window-onset years count too: R3.23, the external review
-found the old 2-word prefix hid every flip at a window start, the blend geometry); a flip = one key read both as "two thousand X" and "twenty X".
+Key = call + the year's position in call time + its value (window-onset years count too: the old 2-word prefix
+hid every flip at a window start, the blend geometry); a flip = one key read both as "two thousand X" and "twenty X".
 """
 import collections
 import re

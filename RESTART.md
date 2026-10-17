@@ -1,6 +1,6 @@
 # Restart here
 
-**Asked for "another run"?** The default scope (owner, 2026-10-14) is in [`docs/NEXT_RUN.md`](docs/NEXT_RUN.md): spoken-form numbers in every language, in waves (multilingual first), plus the remaining English issues in [`OBSERVATIONS.md`](OBSERVATIONS.md) (2.1 short-phrase drops, 2.8 year readings across window edges, 2.6 glued blends). Start from model B. Evaluation runs in a private harness outside this repo.
+**Asked for "another run"?** The default scope (maintainer, 2026-10-14) is in [`docs/NEXT_RUN.md`](docs/NEXT_RUN.md): spoken-form numbers in every language, in waves (multilingual first), plus the remaining English issues in [`OBSERVATIONS.md`](OBSERVATIONS.md) (2.1 short-phrase drops, 2.8 year readings across window edges, 2.6 glued blends). Start from model B. Streaming evaluation runs in a harness outside this repo; its scorers are in eval/quality/.
 
 Cliff notes for picking up spoken-form Parakeet training. They cover where things stand, what worked, what failed, and the exact path to the next run. Details:
 
@@ -12,9 +12,9 @@ Cliff notes for picking up spoken-form Parakeet training. They cover where thing
 
 ## 1. Where things stand (2026-10-14)
 
-- **Released to users:** stock Parakeet Ultra (`FluidInference/parakeet-ultra-coreml@95eaa59a`), in MimicScribe 1.0.0-rc.40. No fine-tune has been released yet.
+- **Released to users:** stock Parakeet Ultra (`FluidInference/parakeet-ultra-coreml@95eaa59a`), in the current public release. No fine-tune has been released yet.
 - **Next release:** **model B** = `w3soup_a0.5@0`, published at `MimicScribe/parakeet-ultra-spoken-coreml@5edfc817ce69dcdf4ca7839bff5ad738e9d390b8` and queued for the next app release.
-  - Checkpoint: `/vol/exp/w3soup_a0.5/step0.pt`. A local backup with SHA-256s is in `~/models/backups/retrain3-B-w3soup_a0.5-2026-10-14/`.
+  - Checkpoint: `/vol/exp/w3soup_a0.5/step0.pt`. A local backup with SHA-256s exists outside this repo.
 - **Earlier fine-tunes, pinned on main but never released:** v9pr30 (HF `06d73144`), then v10pt (HF `ccdb31c9`).
 - **No new run is justified right now.** See section 5 for what would justify one.
 
@@ -72,7 +72,7 @@ Measurement traps that produced false results:
 
 ## 5. When to run again, and what to fold in
 
-**A run is justified by:** a measured, model-side problem (English or multi-language) that a few-hundred-step corrective run can plausibly move. Greek alone does not qualify (owner decision).
+**A run is justified by:** a measured, model-side problem (English or multi-language) that a few-hundred-step corrective run can plausibly move. Greek alone does not qualify (maintainer decision).
 
 **Fold in if a run happens** (details in [`OBSERVATIONS.md`](OBSERVATIONS.md) §2:
 1. **Greek final ς rows restored:** `mix_build.restore_unk_nonen`, run by `patch_mix3`. Committed, not yet trained.
@@ -85,11 +85,11 @@ Measurement traps that produced false results:
 4. **Mixed word+digit labels:** normalize them ("десет 000").
 5. **Full v3 mix, never downsampled.**
 
-**Gates for any new arm** (B as baseline, same app binary):
-- the 44-call Earnings-21 number bar (`e44_bar.py`);
+**Gates for any new arm** (B as baseline, same evaluation build):
+- the 44-call Earnings-21 number bar (`e44_bar.py` compares two runs);
 - years: the blind listening set + held-out minimal pairs;
 - Levenshtein content drops AND insertions on E21-44 + AMI-16, plus the live dual-channel drop census;
-- app-rendered FLEURS for all 25 languages;
+- FLEURS for all 25 languages, scored in a streaming evaluation harness that is not part of this repo;
 - synthetic number banks;
 - live invariants;
 - one look at the sealed holdout.
@@ -135,10 +135,10 @@ These flags come from [`runs/v12/train.sh`](runs/v12/train.sh) (v12 = the v10pt 
 1. `export_weights --run <run> --step 0`.
 2. `swap_weights.py <stock bundle> decoder_joint.safetensors <out bundle>`. Use `--check` on stock tensors first: it must round-trip byte-identical.
 3. Upload the three weight files to `MimicScribe/parakeet-ultra-spoken-coreml`.
-4. Re-pin the new revision and file hashes in the app.
-5. The owner approves every upload and push.
+4. Re-pin the new revision and file hashes in the consuming app.
+5. The maintainer approves every upload and push.
 
-**D. Evaluation through the app** happens in the private app repo's harness (number bar, seam test, live checks); it is not part of this repo. Rule that matters here: compare candidates on one frozen app build, and confirm which weights each run loaded.
+**D. Evaluation in a consuming application** is not part of this repo. Rule that matters here: compare candidates on one frozen build, and confirm which weights each run loaded.
 
 ## 7. Not in git (needed for a restart)
 
@@ -148,4 +148,3 @@ These flags come from [`runs/v12/train.sh`](runs/v12/train.sh) (v12 = the v10pt 
 - Earnings-21 audio (for `e21local`).
 - The builders for the adversarial/fast beds and `tts/gold62`.
 - The grammar dumper that regenerates `pipeline/ml_grammar_table.json` (private, not in this repo).
-- The app's evaluation harness (private).

@@ -32,7 +32,7 @@ def norm_ctc(text: str) -> str:
     t = re.sub(r"[^A-Z' ]+", " ", t)
     t = re.sub(r"\bOH\b", "O", t)
     t = re.sub(r"\b([AP])M\b", r"\1 M", t)
-    t = re.sub(r"\bPERCENT\b", "PER CENT", t)  # LibriSpeech spelling (Opus review B2: 238/240 percent spans failed fit)
+    t = re.sub(r"\bPERCENT\b", "PER CENT", t)  # LibriSpeech spelling (238/240 percent spans failed fit)
     return re.sub(r"\s+", " ", t).strip()
 
 
@@ -228,6 +228,8 @@ def anchored_fit(sc, lp, s, cand: str, span_times, pad: float = 0.35) -> bool:
     words = norm_ctc(cand).split()
     if s.kind == "code":
         words = [w for w in words if CODE_NUM.match(w)] or words
+    elif s.kind == "amp":  # "AT and T": wav2vec2 spells the letters its own way; the joining word is what is checked
+        words = [w for w in words if w in ("and", "n")] or words
     ts = [t for t in span_times if t[0] is not None]
     if not ts:
         return False
@@ -322,7 +324,7 @@ def label_shard(vol: str, sc: Scorer, man: str, out_tag: str, keep_audio=True, o
     import soundfile as sf
 
     rows = [json.loads(l) for l in open(man)]
-    if only_pct:  # relabel pass for rows with a percent sign (Opus review B2)
+    if only_pct:  # relabel pass for rows with a percent sign
         rows = [r for r in rows if r["kind"] != "plain" and ("%" in r["text"] or "percent" in r["text"].lower())]
     num = [r for r in rows if r["kind"] != "plain"]
     plain = [r for r in rows if r["kind"] == "plain"]

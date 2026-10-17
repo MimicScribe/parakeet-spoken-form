@@ -123,13 +123,13 @@ def onset_crops(cuts, bad, tok_span, out, rnd, p=0.3, max_s=8.0, min_s=2.0):
 
 
 def recrop_shard(vol: str, sc, tag: str, keep_audio: bool = True, rows_dir: str = "d1/rows3",
-                 out_dir: str = "d1/crops3", wav_root: str = "d1/wav3") -> dict:
+                 out_dir: str = "d1/crops3", wav_root: str = "d1/wav3", man_dir: str = "yodas/en/manifests") -> dict:
     """Quiet-gap crops from the retrain-3 relabel (rows3): labels, spans and decisions come from the rows; nothing is
     re-decided here."""
     import soundfile as sf
 
     man = {}
-    for line in open(f"{vol}/yodas/en/manifests/{tag}.jsonl"):
+    for line in open(f"{vol}/{man_dir}/{tag}.jsonl"):
         r = json.loads(line)
         man[r["utt_id"]] = r
     recs = [json.loads(line) for line in open(f"{vol}/{rows_dir}/{tag}.jsonl")]

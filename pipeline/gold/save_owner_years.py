@@ -1,4 +1,4 @@
-"""Owner listening test = ground truth for spoken year readings (owner 2026-10-13: "my listening test is definitive").
+"""Maintainer listening test = ground truth for spoken year readings (2026-10-13).
 Merges the listening page's items + answers into gold/owner_year_readings.json (append/update by clip id; keeps
 earlier answers). Audio stays local; this file holds only ids, source paths, the blanked text and the reading.
 

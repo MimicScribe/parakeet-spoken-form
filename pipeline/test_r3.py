@@ -69,3 +69,21 @@ def test_scaled_decimal_units():
 def test_restore_no_link_word_repeats():
     t, _ = R.merge("so we made a hundred and five sales", "so we made a a hundred and and five sales")
     assert t == "so we made a hundred and five sales"
+
+
+def test_uk_tts_set_listed_and_targeted():
+    # red-on-base: fails before tts6uk was added (build4 would never read the Ukrainian synthetic set)
+    assert ("tts6uk", "tts6uk_judge") in M.TTS_SETS
+    assert "tts6uk" in M.TTS_TARGETED
+    assert len({tag for tag, _ in M.TTS_SETS}) == len(M.TTS_SETS)  # one judge marker per set
+
+
+def test_select_veto():  # run 2: a seam-gate veto removes a run before the walk; all vetoed -> nothing selected
+    base = {"blend_twenty_thousand": 0, "digits_e22_numbers": 0, "digits_d1_dev": 0, "chimeras": 0, "adv_en_ok": 10,
+            "fast_d1_ok": 10, "leak_vox_dev_total": 0, "leak_fleurs_num_total": 0, "wer_lspc_dev": 5, "wer_d1_dev": 5,
+            "wer_fleurs": {}}
+    res = {"a": dict(base, adv_en_ok=20), "b": dict(base)}
+    assert S.select(res, ["a", "b"])["run"] == "a"
+    sel = S.select(res, ["a", "b"], veto={"a": ["wave-1 merge-made wrong 9 > 0.5 x B 4"]})
+    assert sel["run"] == "b" and "a" in sel["vetoed"]
+    assert S.select(res, ["a", "b"], veto={"a": ["x"], "b": ["y"]})["run"] is None

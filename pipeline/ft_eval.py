@@ -117,7 +117,7 @@ RETRAIN_SETS = [
 SEALED_SETS = [("beds/vox/sealed.jsonl", "sealed/vox"), ("beds/e21x/sealed.jsonl", "sealed/e21x")]
 
 # Retrain-3 beds (R3.12.5/R3.15/R3.17): vox LID+dedupe, FLEURS one-wav-per-row (screen = 100/lang), mix3 d1_dev,
-# e21_dev (app-geometry windows; STOP checks only, never selection), tts/biz dev. FLEURS full split = final gate only.
+# e21_dev (streaming-geometry windows; STOP checks only, never selection), tts/biz dev. FLEURS full split = final gate only.
 RETRAIN3_SETS = [
     ("e22/numbers.jsonl", "e22_numbers", 0), ("e22/other.jsonl", "e22_other", 0),
     ("replay/lspc_dev.jsonl", "lspc_dev", 600), ("mix3/d1_dev.jsonl", "d1_dev", 0),

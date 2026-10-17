@@ -230,7 +230,7 @@ def minimal_pairs(n_pairs: int, seed: int, dev_frac: float = 0.2, and_frac: floa
         tts = lead_in(tts, r)
         y = r.randint(2010, 2029) if r.random() < 0.85 else r.randint(2030, 2039)
         split = "dev" if is_dev_template(carrier, dev_frac) else "train"
-        # external review #4: owner gold heard "two thousand AND X" in 7/62 clips, so and_frac of the pairs say it
+        # maintainer gold heard "two thousand AND X" in 7/62 clips, so and_frac of the pairs say it
         two_k = readings.cardinal(y, use_and=r.random() < and_frac)
         for reading, words in (("twenty", readings.pair(y)), ("two_thousand", two_k)):
             def put(s, w=words):
@@ -240,3 +240,62 @@ def minimal_pairs(n_pairs: int, seed: int, dev_frac: float = 0.2, and_frac: floa
                    "reading": reading, "year": y, "split": split, "template": carrier, "kinds": kinds + ["mp_year"],
                    "text": put(target), "tts_text": put(tts)}
         i += 1
+
+
+# --- targeted value top-up (2026-10-17) ------------------------------------------------------------------------------
+# Rows aimed at census gaps: given year values / count values, each row is a one-slot carrier voiced with exactly that
+# value (normal readings, the usual lead-ins). Years: "twenty forty three" most of the time, "two thousand (and) forty
+# three" otherwise; counts: the cardinal ("and" in the hundreds some of the time).
+
+TARGET_SLOTS = {"year": ("year", "year_any", "yr", "year_far"), "count": ("int_tens", "int_hundreds", "int_small", "any")}
+TARGET_FILES = {"year": ("carriers.txt", "carriers_year.txt", "carriers_mp.txt", "carriers_d9.txt"),
+                "count": ("carriers.txt",)}
+
+
+def target_carriers(kind: str) -> list[str]:
+    out = []
+    for f in TARGET_FILES[kind]:
+        for c in load_carriers(os.path.join(HERE, f)):
+            s = SLOT.findall(c)
+            if len(s) == 1 and s[0] in TARGET_SLOTS[kind]:
+                out.append(c)
+    return sorted(set(out))
+
+
+def target_reading(kind: str, v: int, r: random.Random) -> str:
+    if kind == "year":
+        if v >= 2010 and r.random() < 0.3:
+            return readings.cardinal(v, use_and=r.random() < 0.5)
+        return readings.year(v)
+    return readings.cardinal(v, use_and=v >= 100 and r.random() < 0.3)
+
+
+def targeted_rows(quota: dict, seed: int, dev_frac: float = 0.2):
+    """quota {"year": {value: rows}, "count": {value: rows}} -> rows like rows() (template keeps the one slot, kinds =
+    [that slot kind]; an {any} carrier is stored with the kind it was filled as)."""
+    r = random.Random(f"target|{seed}")
+    i = 0
+    for kind in sorted(quota):
+        carriers = target_carriers(kind)
+        assert len(carriers) >= 2, kind
+        for v in sorted(quota[kind], key=int):
+            for _ in range(int(quota[kind][v])):
+                v = int(v)
+                carrier = r.choice(carriers)
+                sk = SLOT.findall(carrier)[0]
+                if sk == "any":
+                    sk = "int_small" if v <= 20 else "int_tens" if v < 100 else "int_hundreds"
+                    carrier = carrier.replace("{any}", "{" + sk + "}")
+                words = target_reading(kind, int(v), r)
+                target = carrier.replace("{" + sk + "}", words)
+                tts = carrier.replace("{" + sk + "}", readings.tts_form(words))
+                if carrier.startswith("{"):
+                    target, tts = target[0].upper() + target[1:], tts[0].upper() + tts[1:]
+                state = r.getstate()
+                target = lead_in(target, r)
+                r.setstate(state)
+                tts = lead_in(tts, r)
+                yield {"id": f"t{seed}_{i}", "split": "dev" if is_dev_template(carrier, dev_frac) else "train",
+                       "template": carrier, "kinds": [sk], "text": target, "tts_text": tts, "value": int(v),
+                       "target": kind}
+                i += 1

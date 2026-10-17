@@ -2,7 +2,7 @@
 # R3.31 warm-start experiment: treatment (fixed mix + minimal pairs) vs control (old mix), both 500 steps from the
 # SBd0 winner sbd0soup_a1.0@0, S-B config, dur 0, lr 3e-5, warmup 20.
 S=${LOGS:-./logs}
-cd ~/proj/parakeet-spoken-form/pipeline
+cd $REPO/pipeline
 until grep -q "MP_DONE\|MP FAILED" $S/mp_tts.log; do sleep 30; done
 grep -q MP_DONE $S/mp_tts.log || { echo "WS FAILED (tts)"; exit 1; }
 modal run modal_app.py::build_mix3b || { echo "WS FAILED (mix)"; exit 1; }

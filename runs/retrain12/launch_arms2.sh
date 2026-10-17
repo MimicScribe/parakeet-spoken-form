@@ -1,6 +1,6 @@
 #!/bin/bash
 S=${LOGS:-./logs}
-cd $HOME/proj/parakeet-spoken-form/pipeline
+cd $REPO/pipeline
 while read run arm seed; do
   nohup modal run --detach modal_app.py::retrain --run "$run" --arm "$arm" --seed "$seed" > "$S/rt/arms2/$run.log" 2>&1 &
   sleep 20

@@ -137,7 +137,7 @@ Only {int_small} of them replied.
 She's been here {int_tens} years.
 There were {int_hundreds} applicants.
 We printed {int_4digit} copies.
-# v3: names, abbreviations, acronyms, dictation words (owner rule: everything as said)
+# v3: names, abbreviations, acronyms, dictation words (label rule: everything as said)
 Revenue in {quarter} came in above plan.
 We'll revisit pricing in {quarter}.
 Guidance for {quarter} assumes flat demand.
@@ -217,7 +217,7 @@ So the number to remember is {any}.
 They asked about {any} twice.
 The email said {any}.
 Right, {any}, and then we move on.
-# Titles and "X and Y" names failed the owner's spoken check on v3 (~2% of rows): more carriers.
+# Titles and "X and Y" names failed the maintainer's spoken check on v3 (~2% of rows): more carriers.
 Thanks, {title_name}, that's helpful.
 {title_name} asked about the timeline.
 Can you loop in {title_name} on this?
@@ -232,7 +232,7 @@ After the {and_acronym}, let's wrap up.
 That's a question for the {and_acronym} folks.
 Our {and_acronym} budget is flat this year.
 They moved the {and_acronym} to Friday.
-# v10 (2026-10-09): carrier DIVERSITY for kinds that had one train + one dev carrier (Opus mining: 201 of 532
+# v10 (2026-10-09): carrier DIVERSITY for kinds that had one train + one dev carrier (201 of 532
 # held-out slot failures were written-form leaks, mostly on thin kinds), and real-call shapes.
 The landing page is {url} if you want to look.
 They moved everything over to {url} last month.

@@ -6,3 +6,15 @@ __pycache__/
 .venv/
 *.pyc
 
+
+# local run logs and tool state (may hold local paths)
+/p3_*.log
+/run_p3_pt.sh
+.serena/
+
+# stray root logs and scripts
+/*.log
+/*.sh
+
+.pytest_cache/
+/pipeline/listen/

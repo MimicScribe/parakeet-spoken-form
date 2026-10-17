@@ -1,8 +1,8 @@
 #!/bin/bash
-# R3.31d candidate run (owner OK required): v3 mix (pairs x2 + verbatim filter, share 39.2%), 1000 steps from
+# R3.31d candidate run (candidate): v3 mix (pairs x2 + verbatim filter, share 39.2%), 1000 steps from
 # sbd0soup_a1.0@0, L2-SP anchored to the init, lr 3e-5, dur 0; soup 500/750/1000 x alpha {1, 0.5} toward the winner.
 S=${LOGS:-./logs}
-cd ~/proj/parakeet-spoken-form/pipeline
+cd $REPO/pipeline
 modal run modal_app.py::retrain3 --run r3_W3 --mix v3 --arm S-B --dur-weight 0 --lr 3e-5 --warmup 20 --max-steps 1000 \
   --save-every 250 --init-from sbd0soup_a1.0@0 --anchor-init > $S/r3_W3.log 2>&1
 modal volume ls parakeet-spoken-form exp/r3_W3 | grep -q "step1000.pt$" || { echo "WS3 FAILED (train)"; exit 1; }

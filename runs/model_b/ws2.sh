@@ -1,8 +1,8 @@
 #!/bin/bash
-# R3.31 v2 (external review #4 fixes): 3 warm-starts from sbd0soup_a1.0@0, L2-SP anchored to the init, 500 steps,
+# R3.31 v2: 3 warm-starts from sbd0soup_a1.0@0, L2-SP anchored to the init, 500 steps,
 # lr 3e-5, dur 0: ctl2 = old mix; mp2 = mix3b + minimal pairs x3 (15% "and"); mpv = mp2 + verbatim-filtered d1p/d10p.
 S=${LOGS:-./logs}
-cd ~/proj/parakeet-spoken-form/pipeline
+cd $REPO/pipeline
 until grep -q "MP2_DONE\|MP2 FAILED" $S/mp2_tts.log; do sleep 30; done
 grep -q MP2_DONE $S/mp2_tts.log || { echo "WS2 FAILED (tts)"; exit 1; }
 modal run modal_app.py::build_mix3c || { echo "WS2 FAILED (mix)"; exit 1; }

@@ -1,6 +1,6 @@
 #!/bin/bash
 S=${LOGS:-./logs}
-cd $HOME/proj/parakeet-spoken-form/pipeline
+cd $REPO/pipeline
 modal run modal_app.py::eval_multi --runs "r3_SB@2000" --tag _c || { echo EVAL FAILED; exit 1; }
 modal volume get --force parakeet-spoken-form "hyps/r3_SB@2000_c" $S/r3d/hyps/
 python3 score_retrain.py $S/r3d/hyps "r3_SB@1000_c,r3_SB@2000_c,v10pt@1500_c" --base v10pt@1500_c --json $S/r3d/scores_SB2000.json > /dev/null || { echo SCORE FAILED; exit 1; }

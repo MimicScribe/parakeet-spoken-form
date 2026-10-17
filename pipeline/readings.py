@@ -192,7 +192,7 @@ def _decimal(r, max_int=999):
         frac = "0" * r.choice([1, 1, 2]) + frac[:2]
     tail = f"point {digits(frac, oh=r.random() < 0.4)}"
     if i == 0:
-        # As said (owner 2026-10-09): a bare "point nine" is as common as "zero point nine".
+        # As said (2026-10-09): a bare "point nine" is as common as "zero point nine".
         return _pick(r, [(0.4, f"zero {tail}"), (0.45, tail), (0.15, f"oh {tail}")])
     return f"{cardinal(i)} {tail}"
 
@@ -205,7 +205,7 @@ CUR = [("dollar", "dollars", "cent", "cents"), ("euro", "euros", "cent", "cents"
        ("pound", "pounds", "penny", "pence"),
        # v10 (2026-10-09): real calls leak "EUR"/"EU" before euro amounts and synthetic euro rows leaked 14 of 20;
        # money was 80% dollars. More currencies, and dollars down to 55%.
-       # Sub-units only where people still say them (Gemini data review: nobody says "thirty sen").
+       # Sub-units only where people still say them (nobody says "thirty sen").
        ("yen", "yen", None, None), ("yuan", "yuan", None, None), ("rupee", "rupees", None, None),
        ("franc", "francs", None, None), ("krona", "kronor", None, None),
        ("zloty", "zlotys", None, None), ("peso", "pesos", "centavo", "centavos")]
@@ -434,8 +434,8 @@ SURNAMES = ["Smith", "Patel", "Nguyen", "Garcia", "Okafor", "Kowalski", "Chen", 
             "Murphy", "Tanaka", "Silva", "Novak", "Brown", "Cohen", "Ali", "Fischer", "Moreau", "Lindqvist",
             "Walsh", "Bennett", "Foster", "Reyes", "Larsen", "Osei", "Ramirez", "Kaur", "Dubois", "Yilmaz",
             "Sato", "Hughes", "Mbeki", "Andersson", "O'Brien", "Kim", "Romano", "Petrov", "Lambert", "Ito"]
-# v10: real speech puts a first name between title and surname ("Mister <first> <surname>"); names from held-out sets removed (Gemini data review); the synthetic rows only
-# had surnames and titles transferred 61% synthetic vs 4% real (Opus mining 2026-10-09).
+# v10: real speech puts a first name between title and surname ("Mister <first> <surname>"); names from held-out sets removed; the synthetic rows only
+# had surnames and titles transferred 61% synthetic vs 4% real.
 FIRST_NAMES = ["Daniel", "Laura", "Maureen", "Ryan", "Aisha", "Wei", "Priya", "Carlos", "Fatima", "Jonas", "Elena",
                "Kwame", "Sofia", "Hiroshi", "Grace", "Omar", "Ingrid", "Marcus", "Leila", "Patrick"]
 
@@ -447,7 +447,7 @@ def k_title_name(r):
     name = r.choice(SURNAMES)
     if r.random() < 0.45:
         name = f"{r.choice(FIRST_NAMES)} {name}"
-    # Junior / Senior only after Mister (Gemini data review: "Missus ... Junior").
+    # Junior / Senior only after Mister ("Missus ... Junior").
     suffix = _pick(r, [(0.85, ""), (0.1, " Junior"), (0.05, " Senior")]) if t == "Mister" else ""
     return f"{t} {name}{suffix}"
 

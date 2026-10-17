@@ -1,7 +1,7 @@
 """R3.31 diagnostic: reading accuracy on the held-out minimal pairs (tts/<mp> dev: held-out carriers and voices).
 Per run and per side ("twenty X" said / "two thousand [and] X" said): right reading, the other reading, neither.
 A model that follows the audio scores high on BOTH sides; a context prior shows as one side high, the other low.
-Year and side come from the dev manifest (external review #4: no inference from the text); a reading must not be the
+Year and side come from the dev manifest (no inference from the text); a reading must not be the
 head of a longer number ("twenty twenty" inside "twenty twenty four"); "and" is optional on the "two thousand" side.
 
     python3 score_mp.py <hyps_root> run1,run2,... <dev_ok.jsonl>

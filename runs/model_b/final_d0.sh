@@ -1,7 +1,7 @@
 #!/bin/bash
-# R3.27 owner: finish SBd0 to 4000 -> soup3 (3500/3750/4000) x alpha {1,0.85,0.7,0.5} -> eval all -> frozen select (scorer v2)
+# R3.27: finish SBd0 to 4000 -> soup3 (3500/3750/4000) x alpha {1,0.85,0.7,0.5} -> eval all -> frozen select (scorer v2)
 S=${LOGS:-./logs}
-cd $HOME/proj/parakeet-spoken-form/pipeline
+cd $REPO/pipeline
 until modal volume ls parakeet-spoken-form exp/r3_SBd0 2>/dev/null | grep -q "step4000.pt$"; do sleep 120; done
 echo "$(date +%H:%M) step4000 ready"
 modal run modal_app.py::soup3 --run r3_SBd0 --name sbd0soup || { echo SOUP FAILED; exit 1; }

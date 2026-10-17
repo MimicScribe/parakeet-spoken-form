@@ -66,7 +66,7 @@ def number_span(words: list[str]) -> list[bool]:
     m = [bool(NUMBER_WORDS.search(cw)) if cw else False for cw in clean_w]
 
     for j, cw in enumerate(clean_w):
-        # "about a hundred", "a thousand": the article belongs to the number (Opus review)
+        # "about a hundred", "a thousand": the article belongs to the number
         if cw == "a" and j + 1 < len(clean_w) and clean_w[j + 1] in ("hundred", "thousand", "million", "billion"):
             m[j] = True
         # "twenty first", "thirty second": ordinal tails NUMBER_WORDS leaves out on purpose

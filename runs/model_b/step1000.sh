@@ -1,7 +1,7 @@
 #!/bin/bash
 # R3.20 step-1000 screening: wait for 4 checkpoints -> one cached eval (skip e21_dev) -> score vs v10pt -> frozen select
 S=${LOGS:-./logs}
-P=$HOME/proj/parakeet-spoken-form/pipeline
+P=$REPO/pipeline
 ST=${1:-1000}; RUNS="r3_SA r3_SB r3_SC r3_SE"
 for r in $RUNS; do
   until modal volume ls parakeet-spoken-form exp/$r 2>/dev/null | grep -q "step$ST.pt"; do sleep 120; done

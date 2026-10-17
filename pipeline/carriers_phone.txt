@@ -1,0 +1,20 @@
+# English phone-number carriers (2026-10-17 top-up: real English speech has almost no phone numbers). Slot {phone}.
+# Kept disjoint from eval/probe_items.tsv.
+The support line is {phone}, and they're open until six.
+Can you text me at {phone} when you land?
+His office number changed, it's {phone} now.
+Put {phone} on the form as the emergency contact.
+I tried {phone} three times and nobody answered.
+The number on the invoice is {phone}.
+If the alarm goes off, ring {phone} straight away.
+She left her number, {phone}, with the receptionist.
+For bookings call {phone} and ask for Sam.
+The hotline, {phone}, is free from any landline.
+Our fax is still {phone}, believe it or not.
+Just dial {phone} and press two for billing.
+The new main line is {phone}.
+I wrote {phone} on the back of the card.
+They gave us {phone} as the after-hours number.
+Could you double check {phone} for me?
+The recruiter's number was {phone}, I think.
+Ring the depot on {phone} if the van is late.

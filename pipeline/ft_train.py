@@ -51,7 +51,7 @@ class HoldRows(pl.Callback):
     """Hold the joint's output rows `rows` at their original values: gradients are zeroed and the
     rows are copied back after every step (AdamW's decoupled weight decay would still move them).
     Rows 8192-8197 are blank + the five TDT durations: keeping them anchors when the decoder emits
-    nothing and how far it skips, which the app's blank-gap and duration heuristics are tuned on.
+    nothing and how far it skips, which downstream blank and duration handling relies on.
     The shared hidden layers still train, so this limits the drift rather than removing it."""
 
     def __init__(self, m, rows: range):
@@ -105,7 +105,7 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
     at every (frame, label) point of the lattice, teacher = a frozen copy of the stock prediction
     network + joint on the same frozen encoder output. Both terms ignore WHICH token is emitted, so
     the student can still learn spoken forms (stock would emit a digit, the student a word: both
-    "not blank"). Fine-tuning without it lowered blank confidence and the app's windowed path then
+    "not blank"). Fine-tuning without it lowered blank confidence and windowed streaming decode then
     dropped more words.
 
     `only_texts`: apply the term only to utterances whose label is in this set (the real-speech
@@ -113,7 +113,7 @@ def add_blank_duration_kl(m, weight: float, sub_batch: int = 2, only_texts=None,
     are matched by their token ids.
 
     `terms`: "dur" anchors only the duration distribution. Measured 2026-10-08: duration-only does
-    NOT hold the app's streaming deletions (worse than no anchor) although it keeps emission timing
+    NOT hold the streaming-decode deletions (worse than no anchor) although it keeps emission timing
     identical to stock; the blank term is what holds them."""
     import copy
 
@@ -452,6 +452,8 @@ def span_mask(spm, pairs, batch, width, device):
 #   span     yes      prefix only (u < first number word - 1 word: the teacher, forced on the student's spoken
 #                     number tokens, is off-distribution after them)   prefix only  -  yes  -
 #   nonen    no       full                full             yes       -       yes
+#   nonen_span no     prefix only (span_prefix: before the first number reading - 1 word; wave-1 spoken-form rows and
+#                     their window-edge crops)  prefix only  prefix only  yes  yes
 #   free     yes      -                   -                -         yes     -
 # wf_pen / en_pen: -log(1 - P(set | non-blank)) at the student's emitting cells (P(non-blank) > 0.1, detached),
 # averaged per row over that row's emitting cells, then over rows: conditioned on non-blank so it never moves the blank
@@ -494,9 +496,275 @@ def prefix_len(spm, ids) -> int:
     return len(ids) + 1
 
 
+def nspan_prefix(row: dict) -> str:
+    """The label text before the row's first spoken number: P3 rows carry `num_chars` (reading offsets), window-edge
+    crops `num_tokens` (a flag per whitespace token). A row with no number keeps its whole label."""
+    if "num_chars" in row:
+        return row["text"][:row["num_chars"][0][0]] if row["num_chars"] else row["text"]
+    if "num_tokens" in row:
+        toks = row["text"].split()
+        k = row["num_tokens"].index(True) if True in row["num_tokens"] else len(toks)
+        return " ".join(toks[:k])
+    # review H5: a row without offsets would be fully anchored to the digit-writing teacher
+    raise ValueError(f"nonen_span row without num_chars / num_tokens: {row.get('id') or row['text'][:60]}")
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# R4 rehearsal arm (b) "drop fix": anchor every NON-number label position (prefix AND suffix) instead of the prefix only.
+# Label position j = the decoder state after tokens[:j], predicting tokens[j]; position len(ids) predicts the end.
+# Unanchored positions: (1) the number words themselves (the stock teacher writes digits there); (2) `before` words before
+# each number run (the prefix rule's margin: number_span misses "Q one", "COVID"); (3) `after` words after each number
+# run, and the trailing position when it falls inside that guard: the teacher is teacher-forced on the student's SPOKEN
+# number tokens, a prediction-network state stock never produced, so its next-word distribution right after a number is
+# off-distribution. Default after = 1: one word lets the LSTM state settle on ordinary text again; the blank-KL gate
+# (teacher P(non-blank) > threshold) filters further positions where the teacher is unsure.
+ROMAN_WORD = re.compile(r"(?:II|III|IV|VI|VII|VIII|IX|XI|XII)[.,;:!?]*")
+
+
+def en_number_words(words: list[str]) -> list[bool]:
+    """English number flags per word: number_span OR numberish OR a Roman numeral (write_mix's says_number set). Wider
+    than any single rule: an over-flagged word only loses anchoring, an under-flagged one is anchored to digits."""
+    span = number_span(words)
+    return [bool(s) or numberish(w) or bool(ROMAN_WORD.fullmatch(w))
+            or (w.rstrip(".,;:!?") == "I" and k > 0 and words[k - 1].lower() == "war")
+            for k, (w, s) in enumerate(zip(words, span))]
+
+
+def word_flags(row: dict) -> list[bool]:
+    """Per whitespace token of a nonen_span row's label: True inside a number reading. `num_tokens` (windows, crops) is
+    used as is; `num_chars` (P3 / synthetic rows: reading character offsets) by overlap, as ml_p3_core.number_tokens."""
+    toks = row["text"].split()
+    if "num_tokens" in row:
+        flags = [bool(x) for x in row["num_tokens"]]
+        if len(flags) != len(toks):
+            raise ValueError(f"num_tokens length {len(flags)} != {len(toks)} tokens: {row.get('id') or row['text'][:60]}")
+        return flags
+    if "num_chars" in row:
+        flags, pos = [], 0
+        for tok in toks:
+            a = row["text"].index(tok, pos)
+            pos = a + len(tok)
+            flags.append(any(x < pos and a < y for x, y in row["num_chars"]))
+        return flags
+    raise ValueError(f"nonen_span row without num_chars / num_tokens: {row.get('id') or row['text'][:60]}")
+
+
+def anchor_positions(words: list[tuple[str, int, int]], flags: list[bool], n_ids: int, before: int = 1,
+                     after: int = 1) -> list[bool]:
+    """(n_ids + 1) flags, True where the anchor KL applies. `words` = row_words(...) (text, first, last label position),
+    `flags` = per-word number flags (same length). See the block comment above for what stays unanchored."""
+    assert len(words) == len(flags), (len(words), len(flags))
+    nw = len(words)
+    blocked = [False] * (nw + 1)  # index nw = the trailing (end) position
+    for k, f in enumerate(flags):
+        if f:
+            for q in range(max(0, k - before), min(nw, k + after) + 1):
+                blocked[q] = True
+    keep = [True] * (n_ids + 1)
+    for (_, a, b), bl in zip(words, blocked):
+        if bl:
+            keep[a:b + 1] = [False] * (b + 1 - a)
+    keep[n_ids] = not blocked[nw]
+    return keep
+
+
+def klu_row(spm, tag: str, ids, suffix_anchor: bool = False, anchor_after: int = 1, nspan_pos: dict | None = None,
+            span_prefix: dict | None = None, cache: dict | None = None) -> list[bool]:
+    """(len(ids) + 1) flags: the label positions where the anchor KL applies for one row (add_r3_losses' table; padding
+    beyond len(ids) is masked there anyway). R4 arm b (suffix_anchor): span and anchor_num rows anchor every non-number
+    position (anchor_positions over en_number_words); nonen_span rows use nspan_pos (built in train() from the row's
+    number tokens) and fall back to the prefix rule when it has no entry."""
+    n, key = len(ids), tuple(ids)
+    if tag in ("anchor", "nonen"):
+        return [True] * (n + 1)
+    if suffix_anchor and tag in ("span", "anchor_num"):
+        if cache is None or key not in cache:
+            words = row_words(spm, ids)
+            pos = anchor_positions(words, en_number_words([w for w, _, _ in words]), n, after=anchor_after)
+            if cache is None:
+                return pos
+            cache[key] = pos
+        return cache[key]
+    if tag == "span":
+        k = prefix_len(spm, ids)
+        return [j < k for j in range(n + 1)]
+    if tag == "nonen_span":  # non-English spoken-form numbers: the stock teacher writes digits there
+        pos = (nspan_pos or {}).get(key) if suffix_anchor else None
+        if pos is not None:
+            return list(pos)
+        k = (span_prefix or {}).get(key, 0)  # arm a, or a row whose word split did not line up (counted in train())
+        return [j < k for j in range(n + 1)]
+    return [False] * (n + 1)  # free, and anchor_num without suffix anchoring (v10pt's numwords exemption)
+
+
+def blank_gate(kmask, t_lnb, thr):
+    """Cells where the blank KL applies: kmask and teacher P(non-blank) > the row's threshold. kmask / t_lnb (B, T, U),
+    thr (B,)."""
+    return kmask & (t_lnb.exp() > thr[:, None, None])
+
+
+def row_gate(tags: list[str], keys: list, gate: float, gate_human: float, synthetic: set) -> list[float]:
+    """Per-row blank-KL teacher gate (teacher P(non-blank) must exceed it). gate_human (when > 0) replaces `gate` on the
+    human-verified rows: anchor, anchor_num, and nonen_span rows whose label is not synthetic (TTS rows, TTS windows)."""
+    if not gate_human:
+        return [gate] * len(tags)
+    return [gate_human if tg in ("anchor", "anchor_num") or (tg == "nonen_span" and k not in synthetic) else gate
+            for tg, k in zip(tags, keys)]
+
+
+def per_tag_summary(tags: list[str], acc: list) -> dict:
+    """{tag: {term: value, term_n: count}} from the per-row (numerator, denominator) vectors of add_r3_losses' chunk:
+    acc[0/1] blank KL, [2/3] punct KL, [4/5] token KL, [6/7] wf_pen, [8/9] en_pen (numerator / count per row)."""
+    out = {}
+    for tg in sorted(set(tags)):
+        ix = torch.tensor([i for i, t in enumerate(tags) if t == tg], device=acc[0].device)
+        d = {"rows": len(ix)}
+        for name, k in (("kl_b", 0), ("kl_p", 2), ("kl_t", 4), ("wf", 6), ("en", 8)):
+            num, den = acc[k][ix].sum(), acc[k + 1][ix].sum()
+            d[name], d[name + "_n"] = float(num / den.clamp(min=1)), int(den)
+        out[tg] = d
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# R4 rehearsal arm (c) "cross-window consistency". The same number reading heard in two examples (two streaming windows
+# of one stream at different phases, or a window and its parent row) should get the same token distribution at its
+# emission point. Pair list (one JSON object per line, built by the mix builder):
+#   {"a": {"audio_filepath", "duration", "text"}, "b": {...}, "a_span": [i0, i1], "b_span": [j0, j1],
+#    "reading": "zweiundzwanzig", "parent": "<row id>", "lang": "de"}
+# a_span / b_span: whitespace-token index range [start, end) of the shared reading in a.text / b.text; both must equal
+# reading.split(). Per label position u of the reading (piece level), the emission point is a proxy for the RNNT
+# alignment without forward-backward: w_t = softmax over valid frames t of log P(y_u | t, u) (detached), and the
+# compared distribution is the w-weighted mixture of the student's non-blank token distribution P(. | t, u, non-blank).
+# Loss = symmetric KL 0.5 (KL(A||B) + KL(B||A)) averaged over the reading's positions and pairs; gradient flows into
+# both sides (neither is a teacher: the point is agreement, the RNNT term decides which reading).
+def load_pairs(lines, known_texts: set | None = None) -> tuple[list[dict], collections.Counter]:
+    """Parse + validate pair lines. A pair whose span does not match its reading is a builder bug (raise); a pair whose
+    members are not training rows of this mix (known_texts) is skipped and counted."""
+    pairs, st = [], collections.Counter()
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        p = json.loads(line)
+        for side in ("a", "b"):
+            x = p[side]
+            for k in ("audio_filepath", "text"):
+                if k not in x:
+                    raise ValueError(f"pair {p.get('parent')}: {side} without {k}")
+            i0, i1 = p[side + "_span"]
+            if not (0 <= i0 < i1 <= len(x["text"].split())) or x["text"].split()[i0:i1] != p["reading"].split():
+                raise ValueError(f"pair {p.get('parent')}: {side}_span {p[side + '_span']} is not {p['reading']!r} in "
+                                 f"{x['text'][:80]!r}")
+        if known_texts is not None and not (p["a"]["text"] in known_texts and p["b"]["text"] in known_texts):
+            st["not_in_mix"] += 1
+            continue
+        pairs.append(p)
+        st["kept"] += 1
+    return pairs, st
+
+
+def span_label_positions(spm, ids, text: str, span) -> list[int] | None:
+    """Label positions (piece indices) of the whitespace-token range `span` of `text`; None when the tokenizer's word
+    split (row_words) does not line up with the whitespace tokens."""
+    words = row_words(spm, ids)
+    if len(words) != len(text.split()):
+        return None
+    i0, i1 = span
+    return list(range(words[i0][1], words[i1 - 1][2] + 1))
+
+
+def emission_logdist(logits, labels, t_len: int, nb: int = 8193):
+    """logits (T, P, V') of the joint at the reading's P label positions, labels (P,) the reading's token ids, t_len valid
+    frames. Returns (P, nb - 1) log of the emission-weighted non-blank token distribution (block comment above)."""
+    T = logits.shape[0]
+    lp = logits[..., :nb].float().log_softmax(-1)
+    ly = lp.gather(-1, labels.view(1, -1, 1).expand(T, -1, 1)).squeeze(-1)  # (T, P) log P(y_u | t, u)
+    valid = (torch.arange(T, device=logits.device) < t_len)[:, None]
+    lw = ly.detach().masked_fill(~valid, float("-inf")).log_softmax(0)
+    ltok = logits[..., :nb - 1].float().log_softmax(-1)
+    return torch.logsumexp(ltok + lw[..., None], dim=0)
+
+
+def sym_kl(la, lb):
+    """Mean over positions of 0.5 (KL(a||b) + KL(b||a)); la, lb (P, V) log-probabilities."""
+    pa, pb = la.exp(), lb.exp()
+    return (0.5 * ((pa * (la - lb)).sum(-1) + (pb * (lb - la)).sum(-1))).mean()
+
+
+class PairBank:
+    """Draws `per_batch` pairs per training batch (seeded; with replacement across batches)."""
+
+    def __init__(self, pairs: list[dict], per_batch: int = 1, seed: int = 1, stage_dir: str = ""):
+        self.pairs, self.per_batch, self.rng, self.stage_dir = pairs, per_batch, random.Random(seed), stage_dir
+
+    def path(self, p: str) -> str:
+        """The staged copy when write_mix staged this file (pair members are mix rows)."""
+        s = self.stage_dir + p if self.stage_dir else ""
+        return s if s and os.path.exists(s) else p
+
+    def sample(self) -> list[dict]:
+        return [self.rng.choice(self.pairs) for _ in range(self.per_batch)] if self.pairs else []
+
+
+def consistency_term(m, bank: PairBank, dev, nb: int = 8193):
+    """(loss, number of pairs used) for one batch: one frozen-encoder pass over the 2 x per_batch clips, a teacher-forced
+    student decoder pass, and the joint only at each reading's label positions."""
+    import soundfile as sf
+
+    spm = m.tokenizer.tokenizer
+    items, sides = [], []
+    for p in bank.sample():
+        side = []
+        for s in ("a", "b"):
+            ids = list(m.tokenizer.text_to_ids(p[s]["text"]))
+            pos = span_label_positions(spm, ids, p[s]["text"], p[s + "_span"])
+            side.append((ids, pos))
+        if side[0][1] is None or side[1][1] is None or [side[0][0][j] for j in side[0][1]] != [side[1][0][j] for j in side[1][1]]:
+            continue
+        for s, (ids, pos) in zip(("a", "b"), side):
+            x, sr = sf.read(bank.path(p[s]["audio_filepath"]), dtype="float32")
+            assert sr == 16000, (p[s]["audio_filepath"], sr)
+            items.append((torch.from_numpy(x.mean(1) if x.ndim > 1 else x), ids, pos))
+        sides.append(len(items) - 2)
+    if not sides:
+        return torch.zeros((), device=dev), 0
+    n = len(items)
+    sig = torch.zeros(n, max(len(x) for x, _, _ in items))
+    for i, (x, _, _) in enumerate(items):
+        sig[i, :len(x)] = x
+    sig_len = torch.tensor([len(x) for x, _, _ in items])
+    toks = torch.zeros(n, max(len(ids) for _, ids, _ in items), dtype=torch.long)
+    for i, (_, ids, _) in enumerate(items):
+        toks[i, :len(ids)] = torch.tensor(ids)
+    tok_len = torch.tensor([len(ids) for _, ids, _ in items])
+    sig, sig_len, toks, tok_len = sig.to(dev), sig_len.to(dev), toks.to(dev), tok_len.to(dev)
+    with torch.no_grad():
+        feats, feats_len = m.preprocessor(input_signal=sig, length=sig_len)
+        enc, enc_len = m.encoder(audio_signal=feats, length=feats_len)
+    with NoDropout(m.decoder):
+        g, _, _ = m.decoder(targets=toks, target_length=tok_len)
+    f = enc.transpose(1, 2)
+    dists = []
+    for i, (_, ids, pos) in enumerate(items):
+        t = int(enc_len[i])
+        pos_t = torch.tensor(pos, device=dev)
+        with NoDropout(m.joint):
+            lg = m.joint.joint(f[i:i + 1, :t], g[i:i + 1, :, pos_t].transpose(1, 2))[0]
+        dists.append(emission_logdist(lg, toks[i, pos_t], t, nb))
+    loss = sum(sym_kl(dists[k], dists[k + 1]) for k in sides) / len(sides)
+    return loss, len(sides)
+
+
 def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: float = 30.0, tok_weight: float = 1.0,
                   wf_weight: float = 1.0, en_weight: float = 1.0, sub_batch: int = 2, emit_p: float = 0.1,
-                  dur_weight: float = 0.0):
+                  dur_weight: float = 0.0, span_prefix: dict | None = None, suffix_anchor: bool = False,
+                  anchor_after: int = 1, nspan_pos: dict | None = None, gate: float = 0.9, gate_human: float = 0.0,
+                  synthetic: set | None = None, cons_weight: float = 0.0, pair_bank: "PairBank | None" = None):
+    """R3 losses (table above). R4 options, all off by default: suffix_anchor (arm b: anchor every non-number position of
+    span / anchor_num rows, and of nonen_span rows via nspan_pos {label ids: anchor_positions}), gate_human (arm b: the
+    blank-KL teacher gate on human-verified rows, `gate` elsewhere), cons_weight + pair_bank (arm c: cross-window
+    consistency, consistency_term)."""
     import copy
 
     teacher_dec, teacher_joint = copy.deepcopy(m.decoder).eval(), copy.deepcopy(m.joint).eval()
@@ -512,8 +780,12 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
     print(f"R3 losses: wf pieces {len(wf_t)} e.g. {[spm.id_to_piece(int(i)) for i in wf_t[:12]]}; "
           f"en_num pieces {[spm.id_to_piece(int(i)) for i in en_t]}; thousand first piece {spm.id_to_piece(th_first)!r}; tags {dict(collections.Counter(row_tags.values()))}",
           flush=True)
+    print(f"R4 options: suffix_anchor {suffix_anchor} (after {anchor_after} word, nonen_span rows with positions "
+          f"{len(nspan_pos or {})}) gate {gate} gate_human {gate_human or '-'} (synthetic labels {len(synthetic or ())}) "
+          f"consistency {cons_weight} (pairs {len(pair_bank.pairs) if pair_bank else 0})", flush=True)
     orig_step = m.training_step
     nb = 8193
+    en_cache: dict = {}
 
     def training_step(batch, batch_idx):
         out = orig_step(batch, batch_idx)
@@ -534,15 +806,15 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
         W = int(tokens_len.max()) + 1
         klu = torch.zeros(B, W, dtype=torch.bool)  # label positions where KL applies
         for i, tg in enumerate(tags):
-            if tg in ("anchor", "nonen"):
-                klu[i] = True
-            elif tg == "span":
-                klu[i, :min(prefix_len(spm, row_toks[i]), W)] = True
+            klu[i, :len(row_toks[i]) + 1] = torch.tensor(klu_row(spm, tg, row_toks[i], suffix_anchor, anchor_after,
+                                                                 nspan_pos, span_prefix, en_cache))
         klu = klu.to(dev)
+        thr = torch.tensor(row_gate(tags, [tuple(t) for t in row_toks], gate, gate_human, synthetic or set()), device=dev)
         is_nonen = torch.tensor([tg == "nonen" for tg in tags], device=dev)
+        is_nspan = torch.tensor([tg == "nonen_span" for tg in tags], device=dev)
         # anti-blend (review #6): English rows saying "twenty <10-99>" with no "thousand" anywhere in the label
         texts = [spm.decode(t).lower() for t in row_toks]
-        is_yr = torch.tensor([tg != "nonen" and bool(TWENTY_PAIR.search(tx)) and "thousand" not in tx
+        is_yr = torch.tensor([tg not in ("nonen", "nonen_span") and bool(TWENTY_PAIR.search(tx)) and "thousand" not in tx
                               for tg, tx in zip(tags, texts)], device=dev)
         yrcol = torch.zeros(B, W, dtype=torch.bool)  # label columns right after a "twenty" of a year pair
         for i in range(B):
@@ -557,7 +829,7 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
         yrcol = yrcol.to(dev)
         tid, wf, en, th = term_t.to(dev), wf_t.to(dev), en_t.to(dev), th_t.to(dev)
 
-        def chunk(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, klu_sl, nonen_sl, yr_sl, yrcol_sl):
+        def chunk(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, klu_sl, nonen_sl, nspan_sl, yr_sl, yrcol_sl, thr_sl):
             with NoDropout(m.joint):
                 s_logits = m.joint.joint(f_sl, s_sl).float()
             with torch.no_grad():
@@ -571,7 +843,7 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             s_lb, t_lb = s_logits[..., nb - 1] - s_all, t_logits[..., nb - 1] - t_all
             s_lnb, t_lnb = s_nbz - s_all, t_nbz - t_all
             kl_blank = t_lb.exp() * (t_lb - s_lb) + t_lnb.exp() * (t_lnb - s_lnb)
-            bmask = kmask & (t_lnb.exp() > 0.9)  # gnorm
+            bmask = blank_gate(kmask, t_lnb, thr_sl)  # gnorm (0.9; R4 arm b: 0.5 on human-verified rows)
             s_lt, t_lt = s_logits[..., tid].logsumexp(-1) - s_nbz, t_logits[..., tid].logsumexp(-1) - t_nbz
             s_lo = torch.log((1 - s_lt.exp()).clamp(min=1e-7))
             t_lo = torch.log((1 - t_lt.exp()).clamp(min=1e-7))
@@ -582,8 +854,19 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             dmask = kmask & (t_lnb.exp() > emit_p)
             # token KL (non-English rows): over the non-blank distribution at the teacher's emitting cells; averaged over
             # all T x U cells it was ~95% blank and inert (retrain-2 diagnosis; both retrain-3 reviews)
-            tmask = mask & nonen_sl[:, None, None] & (t_lnb.exp() > emit_p)
-            if bool(nonen_sl.any()):
+            # nonen_span rows: token KL on the prefix only (klu), never on or after the spoken number
+            tok_rows = nonen_sl[:, None, None] | (nspan_sl[:, None, None] & klu_sl[:, None, :U])
+            tmask = mask & tok_rows & (t_lnb.exp() > emit_p)
+            # review H4: on nonen_span rows the prefix columns still span every frame, including the number's audio,
+            # where stock writes digits; drop cells where the teacher's written-form mass (given non-blank) is > 0.1
+            if bool(nspan_sl.any()):
+                t_wf = (t_logits[..., wf].logsumexp(-1) - t_nbz).exp()
+                wf_cell = nspan_sl[:, None, None] & (t_wf > 0.1)
+                tmask = tmask & ~wf_cell
+                bmask = bmask & ~wf_cell
+                kmask = kmask & ~wf_cell
+                dmask = dmask & ~wf_cell
+            if bool((nonen_sl | nspan_sl).any()):
                 s_lp = s_logits[..., :nb - 1] - s_nbz[..., None]
                 t_lp = t_logits[..., :nb - 1] - t_nbz[..., None]
                 kl_t = (t_lp.exp() * (t_lp - s_lp)).sum(-1)
@@ -598,36 +881,43 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                 if cols is not None:
                     e = e & cols[:, None, :e.shape[2]]
                 per_row = (-torch.log1p(-p) * e).sum((1, 2)) / e.sum((1, 2)).clamp(min=1)
-                return per_row.sum(), rows_sl.sum()
+                return per_row, rows_sl.float()  # per row: 0 off rows_sl (no emitting cell counted there)
 
             wf_s, wf_n = pen(wf, ~nonen_sl)
-            en_s, en_n = pen(en, nonen_sl) if len(en) else (torch.zeros((), device=dev),) * 2
+            en_s, en_n = pen(en, nonen_sl | nspan_sl) if len(en) else (torch.zeros_like(nonen_sl, dtype=torch.float),) * 2
             th_s, th_n = pen(th, yr_sl, yrcol_sl)
-            return ((kl_blank * bmask).sum(), bmask.sum(), (kl_p * kmask).sum(), kmask.sum(),
-                    (kl_t * tmask).sum(), tmask.sum(), wf_s, wf_n.float(), en_s, en_n.float(), th_s, th_n.float(),
-                    (kl_d * dmask).sum(), dmask.sum())
+            # per-row sums (summed over the batch below; per tag for the r3tag log line)
+            return ((kl_blank * bmask).sum((1, 2)), bmask.sum((1, 2)).float(), (kl_p * kmask).sum((1, 2)),
+                    kmask.sum((1, 2)).float(), (kl_t * tmask).sum((1, 2)), tmask.sum((1, 2)).float(), wf_s, wf_n, en_s,
+                    en_n, th_s, th_n, (kl_d * dmask).sum((1, 2)), dmask.sum((1, 2)).float())
 
-        acc = [torch.zeros((), device=dev) for _ in range(14)]
+        parts = []
         for j in range(0, B, sub_batch):
             sl = torch.arange(j, min(B, j + sub_batch), device=dev)
             u = int(tokens_len[sl].max()) + 1
             t = int(enc_len[sl].max())
-            r_ = torch.utils.checkpoint.checkpoint(
+            parts.append(torch.utils.checkpoint.checkpoint(
                 chunk, f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
-                enc_len[sl], tokens_len[sl], klu[sl], is_nonen[sl], is_yr[sl], yrcol[sl], use_reentrant=False)
-            acc = [a + b for a, b in zip(acc, r_)]
-        kl_b = acc[0] / acc[1].clamp(min=1)
-        kl_p = acc[2] / acc[3].clamp(min=1)
-        kl_t = acc[4] / acc[5].clamp(min=1)
-        wf_pen = acc[6] / acc[7].clamp(min=1)
-        en_pen = acc[8] / acc[9].clamp(min=1)
-        th_pen = acc[10] / acc[11].clamp(min=1)
-        kl_d = acc[12] / acc[13].clamp(min=1)
+                enc_len[sl], tokens_len[sl], klu[sl], is_nonen[sl], is_nspan[sl], is_yr[sl], yrcol[sl], thr[sl],
+                use_reentrant=False))
+        acc = [torch.cat(v) for v in zip(*parts)]  # 14 per-row vectors (B,)
+        tot = [a.sum() for a in acc]
+        kl_b = tot[0] / tot[1].clamp(min=1)
+        kl_p = tot[2] / tot[3].clamp(min=1)
+        kl_t = tot[4] / tot[5].clamp(min=1)
+        wf_pen = tot[6] / tot[7].clamp(min=1)
+        en_pen = tot[8] / tot[9].clamp(min=1)
+        th_pen = tot[10] / tot[11].clamp(min=1)
+        kl_d = tot[12] / tot[13].clamp(min=1)
         aux = (kl_weight * kl_b + punct_weight * kl_p + tok_weight * kl_t + wf_weight * wf_pen + en_weight * en_pen
                + wf_weight * th_pen + dur_weight * kl_d)
+        cons, n_pairs = torch.zeros((), device=dev), 0
+        if cons_weight and pair_bank is not None:
+            cons, n_pairs = consistency_term(m, pair_bank, dev, nb)
+            aux = aux + cons_weight * cons
         m._r3_parts = {"rnnt": out["loss"].detach(), "kl_b": kl_b.detach(), "kl_p": kl_p.detach(),
                        "kl_t": kl_t.detach(), "wf": wf_pen.detach(), "en": en_pen.detach(),
-                       "th": th_pen.detach(), "kl_d": kl_d.detach()}
+                       "th": th_pen.detach(), "kl_d": kl_d.detach(), "cons": cons.detach()}
         if os.environ.get("R3_GRADSHARE") and batch_idx % 50 == 0:
             # E2 acceptance (R3.12.3): each term's gradient on the joint's last layer, overall and on the written-form
             # output rows (wf_pen must reach >= 10% of the RNNT gradient there)
@@ -637,7 +927,7 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             # rnnt LAST: NeMo's TDT loss writes its gradient in place, so it cannot be backpropagated twice; on these
             # measurement batches (E2 only, R3_GRADSHARE) the RNNT term is detached after being measured
             for k, term in (("wf", wf_weight * wf_pen), ("th", wf_weight * th_pen), ("kl_t", tok_weight * kl_t),
-                            ("kl_b", kl_weight * kl_b), ("rnnt", out["loss"])):
+                            ("kl_b", kl_weight * kl_b), ("cons", cons_weight * cons), ("rnnt", out["loss"])):
                 torch.cuda.empty_cache()
                 if not term.requires_grad:
                     gs[k] = (0.0, 0.0)
@@ -650,7 +940,11 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
         out["loss"] = out["loss"] + aux
         if batch_idx % 10 == 0:
             print("r3 " + " ".join(f"{k} {v.item():.5f}" for k, v in m._r3_parts.items())
-                  + f" tags {dict(collections.Counter(tags))}", flush=True)
+                  + f" pairs {n_pairs} tags {dict(collections.Counter(tags))}", flush=True)
+            # per tag (rehearsal log): value (cells or rows it averages over)
+            for tg, d in per_tag_summary(tags, acc).items():
+                print(f"r3tag {tg} rows {d['rows']} " + " ".join(f"{k} {d[k]:.5f} ({d[k + '_n']})"
+                                                               for k in ("kl_b", "kl_p", "kl_t", "wf", "en")), flush=True)
         return out
 
     m.training_step = training_step
@@ -733,12 +1027,25 @@ def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_text
             src = keep
         print(f"mix {path}: {len(src)} rows, {sum(x['duration'] for x in src) / 3600:.2f} h")
         if tag is not None and tagged is not None:
-            # explicit KL treatment: "anchor" | "anchor_num" | "span" | "nonen" | "free"
+            # explicit KL treatment: "anchor" | "anchor_num" | "span" | "nonen" | "nonen_span" | "free"
             if tag != "free":
                 tagged.setdefault(tag, set()).update(x["text"] for x in src)
+            if tag == "nonen_span":
+                pre = tagged.setdefault("_nspan_prefix", {})
+                nw = tagged.setdefault("_nspan_words", {})  # R4 arm b: per-word number flags (suffix anchoring)
+                syn = tagged.setdefault("_synthetic", set())  # R4 arm b: TTS rows / TTS windows keep the 0.9 gate
+                for x in src:
+                    pre[x["text"]] = nspan_prefix(x)
+                    try:
+                        nw[x["text"]] = word_flags(x)
+                    except ValueError as e:  # num_tokens / label length mismatch: this row keeps the prefix rule
+                        print(f"R4 word flags skipped: {e}")
+                    if (x.get("synthetic") or str(x.get("origin", "")).startswith("tts")
+                            or path.startswith("mix4/tts_")):
+                        syn.add(x["text"])
             if tag in ("anchor", "anchor_num"):
                 # rows that say a number (numberish words, Roman numerals) are KL-exempt (v10pt's numwords rule): the
-                # stock teacher forced on spoken numbers derails (external review: 2,666 such rows were full-anchored)
+                # stock teacher forced on spoken numbers derails (2,666 such rows were full-anchored)
                 from common import NUMBER_WORDS
 
                 def says_number(t):  # NUMBER_WORDS (not numberish: "one"/"second" are mostly ordinary words) + Roman
@@ -801,10 +1108,14 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           seed: int = 1, kl_exempt: str = "", kl_blank_scale: float = 1.0, kl_punct: float = 0.0,
           kl_punct_rows: str = "all", kl_tok: float = 0.0, resume: bool = True, stage_dir: str = "",
           r3: bool = False, wf_weight: float = 1.0, en_weight: float = 1.0, l2sp_c: float = 0.0,
-          l2sp_anchor: str = "", accumulate: int = 1, dur_weight: float = 0.0):
+          l2sp_anchor: str = "", accumulate: int = 1, dur_weight: float = 0.0, suffix_anchor: bool = False,
+          anchor_after: int = 1, gate: float = 0.9, gate_human: float = 0.0, cons_weight: float = 0.0,
+          cons_pairs: str = "", cons_per_batch: int = 1):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
-    entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists."""
+    entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists.
+    R4 (r3 only, all off by default): suffix_anchor / anchor_after / gate / gate_human (arm b), cons_weight + cons_pairs
+    (comma-separated volume-relative pair lists; missing files are skipped) + cons_per_batch (arm c)."""
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
@@ -814,7 +1125,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     sampler_seed = seed
     if resuming:
         # lhotse restarts its sampler on resume: a NEW sampler seed so the resumed run does not replay the batches it
-        # already saw (NeMo lhotse docs; Opus review B5). R3: the MIX (which rows) stays the same — only the order
+        # already saw (NeMo lhotse docs). R3: the MIX (which rows) stays the same — only the order
         # changes (retrain-3 review: reseeding write_mix changed the data mid-run).
         step0 = int(open(last + ".step").read().strip() or 0)
         sampler_seed = seed + 1000 * step0
@@ -868,11 +1179,45 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     if r3:
         ids = lambda t: tuple(m.tokenizer.text_to_ids(t))  # noqa: E731
         row_tags = {}
-        for tag in ("free", "span", "anchor_num", "nonen", "anchor"):  # later = stricter wins
+        ns = tagged.get("nonen_span", set())
+        for other in ("free", "span", "anchor_num", "nonen", "anchor"):  # review M1: a stricter tag would win silently
+            both = ns & tagged.get(other, set())
+            assert not both, f"{len(both)} nonen_span labels also tagged {other}, e.g. {next(iter(both))[:80]!r}"
+        for tag in ("free", "span", "nonen_span", "anchor_num", "nonen", "anchor"):  # later = stricter wins
             for t in tagged.get(tag, ()):
                 row_tags[ids(t)] = tag
+        span_prefix = {}
+        for t, pre in tagged.get("_nspan_prefix", {}).items():  # anchored label positions: prefix minus its last word
+            pw = pre.split() if pre == t else pre.split()[:-1]  # a row with no number keeps every word (review M2)
+            span_prefix[ids(t)] = len(ids(" ".join(pw))) if pw else 0
+        nspan_pos, mis = {}, 0
+        if suffix_anchor:
+            spm = m.tokenizer.tokenizer
+            for t, flags in tagged.get("_nspan_words", {}).items():
+                k = ids(t)
+                words = row_words(spm, k)
+                if len(words) != len(flags):  # the tokenizer's word split differs: this row keeps the prefix rule
+                    mis += 1
+                    continue
+                nspan_pos[k] = anchor_positions(words, flags, len(k), after=anchor_after)
+            print(f"R4 suffix anchoring: {len(nspan_pos)} nonen_span labels, {mis} with a word-split mismatch (prefix only)")
+        synthetic = {ids(t) for t in tagged.get("_synthetic", ())}
+        bank = None
+        if cons_weight:
+            lines = []
+            for pth in [x for x in cons_pairs.split(",") if x]:
+                if os.path.exists(f"{vol}/{pth}"):
+                    lines += open(f"{vol}/{pth}").read().splitlines()
+                else:
+                    print(f"R4 consistency: {pth} missing, skipped")
+            pairs, st = load_pairs(lines, known_texts=set(tagged.get("nonen_span", ())) | set(tagged.get("span", ())))
+            print(f"R4 consistency pairs: {dict(st)}")
+            assert pairs, "cons_weight > 0 but no usable pair (cons_pairs)"
+            bank = PairBank(pairs, per_batch=cons_per_batch, seed=sampler_seed, stage_dir=stage_dir)
         add_r3_losses(m, row_tags, kl_weight=kl_weight, punct_weight=kl_punct, tok_weight=kl_tok,
-                      wf_weight=wf_weight, en_weight=en_weight, dur_weight=dur_weight)
+                      wf_weight=wf_weight, en_weight=en_weight, dur_weight=dur_weight, span_prefix=span_prefix,
+                      suffix_anchor=suffix_anchor, anchor_after=anchor_after, nspan_pos=nspan_pos, gate=gate,
+                      gate_human=gate_human, synthetic=synthetic, cons_weight=cons_weight, pair_bank=bank)
         if l2sp_c:
             last_layer = m.joint.joint_net[-1].weight.shape[0]
             exempt = [i for i in wf_piece_ids(m.tokenizer.tokenizer) if i < last_layer]

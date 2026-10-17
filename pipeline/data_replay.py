@@ -45,7 +45,7 @@ def us_spelling(text: str) -> str:
     return re.sub(r"[A-Za-z]+", fix, text)
 
 
-# A title before a name is written as the TTS rows write it (owner rule 2026-10-09: verbalized, capitalized:
+# A title before a name is written as the TTS rows write it (label rule 2026-10-09: verbalized, capitalized:
 # "Mister Smith"); LibriSpeech-PC writes "mister smith"-style lowercase titles 1,026 times, a label conflict.
 # Only before a capitalized word, so "the doctor said" stays. "misses" is left alone: "she misses Anne" is a verb.
 TITLE = re.compile(r"\b(mister|missus|doctor)(\s+)(?=[A-Z])")

@@ -27,7 +27,7 @@ True
 >>> render("2019 was big", spans("2019 was big"), [0])
 'Twenty nineteen was big'
 >>> unsupported("Call http://x.com/2 now") , unsupported("World War II") , unsupported("in 2019 we")
-(True, True, False)
+(True, False, False)
 >>> spans("COVID-19 hit")[0].cands
 ['COVID nineteen', 'COVID one nine']
 >>> [(s.gold, s.cands[:2]) for s in spans("about nineteen ninety eight and twenty five percent")]
@@ -75,7 +75,72 @@ RATIO = re.compile(r"\b(?P<a>\d+):(?P<b>\d+)\b(?!\s?[ap]\.?m)")
 DECADE_APOS = re.compile(r"(?<!\w)['’](?P<d>\d0)s\b")
 ALNUM = re.compile(r"\b(?P<pre>[A-Za-z]+)-?(?P<num>\d+)(?P<post>[A-Za-z]*)\b(?![.,]\d)")
 PHONE = re.compile(r"(?:\+?1[-.\s])?\(?\b\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b")
-BAD = re.compile(r"https?://|www\.|@\w|\.com\b|\b(?:II|III|IV|VI|VII|VIII|IX|XI|XII|XIV|XV|XX)\b|[#^*_=<>\[\]{}|\\~]")
+BAD = re.compile(r"https?://|www\.|@\w|\.com\b|[#^*_=<>\[\]{}|\\~]")
+# 2026-10-17: Roman numerals, "&", multi-dot versions and fraction symbols get spans (they made rows unsupported or
+# left written symbols before). Roman: two or more letters after a capitalised word ("World War II", "Henry VIII",
+# "Super Bowl LVII"); a lone I / V / X / L is a word or a letter and never a span.
+ROMAN = re.compile(r"\b[A-Z][a-z]+ (?P<r>[IVXL]{2,7})(?![\w'’&-])")
+ROMAN_VAL = {"I": 1, "V": 5, "X": 10, "L": 50}
+ROMAN_NOT = {"XL", "LV", "LI", "XXL", "XXXL"}
+ROMAN_STOP = {"The", "A", "An", "In", "On", "At", "My", "His", "Her", "Our", "Their", "This", "That", "Your", "Its",
+              "And", "Or", "But", "So", "If", "Of", "To", "For", "With", "By", "From", "Is", "Was"}
+# a monarch / pope / ship-style name takes "the <ordinal>"; titles, wars and sequels take the cardinal
+REGNAL = re.compile(r"\b(?:Henry|Edward|George|Elizabeth|Charles|James|William|Richard|Louis|Philip|John|Paul|Pius|Leo|"
+                    r"Benedict|Gregory|Innocent|Clement|Alexander|Frederick|Ferdinand|Napoleon|Mary|Victoria|Anne|Peter|"
+                    r"Ivan|Nicholas|Catherine|Constantine|Ramesses|Ptolemy|Alfonso|Juan|Carlos|Felipe|Gustav|Haakon|"
+                    r"Olav|Christian|Frederik|Wilhelm|Otto|Rudolf|Henri|Francis|Selim|Mehmed|Murad|Sobhuza|Rama|"
+                    r"Jr|Sr) $")
+AMP_ACR = re.compile(r"\b(?P<l>[A-Z]{1,4})&(?P<r>[A-Z]{1,4})\b")
+AMP_WORD = re.compile(r"(?<=\w) & (?=\w)")
+VERSION = re.compile(r"(?<![\w.])(?P<v>[vV])?(?P<a>\d{1,3})\.(?P<b>\d{1,3})\.(?P<c>\d{1,3})(?:\.(?P<d>\d{1,3}))?(?![\w.]|\.\d)")
+FRAC_SYM = {"½": (1, 2), "¼": (1, 4), "¾": (3, 4), "⅓": (1, 3), "⅔": (2, 3), "⅛": (1, 8)}
+FRAC_SYMS = re.compile(r"(?:(?P<w>\d+)\s?)?(?P<f>[½¼¾⅓⅔⅛])")
+FRAC_NAMES = {2: ("half", "halves"), 3: ("third", "thirds"), 4: ("quarter", "quarters"), 5: ("fifth", "fifths"),
+              8: ("eighth", "eighths"), 10: ("tenth", "tenths")}
+
+
+def _to_roman(n: int) -> str:
+    out = ""
+    for v, sym in ((50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")):
+        while n >= v:
+            out, n = out + sym, n - v
+    return out
+
+
+def roman_value(r: str):
+    """Value of a well-formed (canonical) Roman numeral II..LXXXIX, else None ("IIII", "VX", "LL" are not numerals)."""
+    if not r or any(ch not in ROMAN_VAL for ch in r):
+        return None
+    v = 0
+    for i, ch in enumerate(r):
+        x = ROMAN_VAL[ch]
+        v += -x if i + 1 < len(r) and ROMAN_VAL[r[i + 1]] > x else x
+    return v if v > 1 and _to_roman(v) == r else None
+
+
+def roman_readings(before: str, r: str) -> list[str]:
+    n = roman_value(r)
+    if n is None:
+        return []
+    if REGNAL.search(before):
+        return _uniq([f"the {ordinal(n)}", ordinal(n), cardinal(n)])
+    return _uniq([cardinal(n), f"the {ordinal(n)}", ordinal(n)])
+
+
+def fraction_readings(a: int, b: int, whole: int | None = None) -> list[str]:
+    """Spoken readings of a / b (proper fractions with a named denominator), optionally after a whole number."""
+    if not (0 < a < b and b in FRAC_NAMES):
+        return []
+    one, many = FRAC_NAMES[b]
+    if a == 1:
+        base = [f"a {one}", f"one {one}"] + (["half"] if b == 2 else [])
+    else:
+        base = [f"{cardinal(a)} {many}"] + ([f"{cardinal(a)} fourths"] if b == 4 else [])
+    if b == 4 and a == 1:
+        base.append("one fourth")
+    if whole is None:
+        return _uniq(base)
+    return _uniq([f"{cardinal(whole)} and {x}" for x in base if x != "half"])
 
 
 @dataclass
@@ -382,6 +447,36 @@ def spans(text: str) -> list[Span]:
             taken[i] = True
         out.append(Span(a, b, text[a:b], cands, kind, gold))
 
+    for mt in ROMAN.finditer(text):
+        r = mt.group("r")  # two letters or more: a lone "I", "V", "X", "L" is a word or a letter
+        if r in ROMAN_NOT or mt.group(0).split()[0] in ROMAN_STOP:
+            continue  # "XL" (a size), "LV", "The IV bag": not numerals
+        c = roman_readings(text[:mt.start("r")], r)
+        if c:
+            add(mt.start("r"), mt.end("r"), c, "roman")
+    for mt in AMP_ACR.finditer(text):
+        # "AT and T", "Texas A and M": the pilot picked "A n M" for a fast "and" (2026-10-17 spot check); one reading
+        add(mt.start(), mt.end(), [f"{mt['l']} and {mt['r']}"], "amp")
+    for mt in AMP_WORD.finditer(text):
+        add(mt.start() + 1, mt.end() - 1, ["and"], "amp")  # "Johnson & Johnson", "rock & roll"
+    for mt in VERSION.finditer(text):
+        parts = [mt[k] for k in "abcd" if mt[k] is not None]
+        if mt["v"] is None and len(parts) == 3 and all(len(x) <= 2 for x in parts) and int(parts[0]) <= 31 and \
+                int(parts[1]) <= 12 and len(parts[2]) == 2:
+            continue  # "12.05.19": a date, no version reading
+        comp = [[cardinal(int(x))] + ([digits(x, oh=True)] if len(x) > 1 else []) for x in parts]
+        heads = ["version "] if mt["v"] else [""]
+        c = []
+        for sep in (" point ", " dot "):
+            c.append(heads[0] + sep.join(x[0] for x in comp))
+            c.append(heads[0] + sep.join(x[-1] for x in comp))
+        if mt["v"]:
+            c += [f"V {' point '.join(x[0] for x in comp)}", f"V {' dot '.join(x[0] for x in comp)}"]
+        add(mt.start(), mt.end(), _uniq(c), "version")
+    for mt in FRAC_SYMS.finditer(text):
+        a, b = FRAC_SYM[mt["f"]]
+        c = fraction_readings(a, b, int(mt["w"]) if mt["w"] else None)
+        add(mt.start(), mt.end(), c, "frac")
     for mt in PHONE.finditer(text):
         ds = re.sub(r"\D", "", mt.group(0))
         groups = [ds[:-10], ds[-10:-7], ds[-7:-4], ds[-4:]] if len(ds) > 10 else [ds[:3], ds[3:6], ds[6:]]
@@ -407,11 +502,13 @@ def spans(text: str) -> list[Span]:
     for mt in SLASH.finditer(text):
         a, b = int(mt.group("a")), int(mt.group("b"))
         c = [f"{cardinal(a)} {cardinal(b)}", f"{cardinal(a)} over {cardinal(b)}", f"{cardinal(a)} slash {cardinal(b)}"]
-        if a < b <= 10 and b in (2, 3, 4, 5, 8, 10):
-            nm = {2: ("half", "halves"), 3: ("third", "thirds"), 4: ("quarter", "quarters"), 5: ("fifth", "fifths"),
-                  8: ("eighth", "eighths"), 10: ("tenth", "tenths")}[b]
-            c = ([f"one {nm[0]}", f"a {nm[0]}"] if a == 1 else [f"{cardinal(a)} {nm[1]}"]) + c
-        add(mt.start(), mt.end(), _uniq(c), "slash")
+        fr = fraction_readings(a, b)
+        st = mt.start()
+        wm = re.search(r"(\d+) $", text[:st])  # "2 1/2": a whole number in front
+        if fr and wm:
+            add(wm.start(1), mt.end(), fraction_readings(a, b, int(wm.group(1))), "frac")
+            continue
+        add(mt.start(), mt.end(), _uniq(fr + c), "frac" if fr else "slash")
     for mt in DECADE_APOS.finditer(text):
         add(mt.start(), mt.end(), [re.sub(r"y$", "ies", cardinal(int(mt.group("d"))))], "decade")
     for mt in ALNUM.finditer(text):
@@ -505,7 +602,7 @@ def render_ranges(text: str, sp: list[Span], choice: list[int]) -> tuple[str, li
         w = s.cands[c]
         prev = "".join(parts).rstrip().split(" ")[-1].lower() if "".join(parts).strip() else ""
         if prev in ("a", "an") and w.startswith("a "):
-            w = w[2:]  # the caption already has the "a" of "a hundred" (Opus review: "a a hundred")
+            w = w[2:]  # the caption already has the "a" of "a hundred" ("a a hundred")
         before = "".join(parts).rstrip()
         if not before or before[-1] in ".?!":
             w = w[0].upper() + w[1:]

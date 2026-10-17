@@ -1,6 +1,6 @@
-"""R3.31 owner-gold harm check: every owner-labelled clip on the volume (c/g clips are TRAINING rows, d clips dev),
+"""R3.31 gold harm check: every maintainer-labelled clip on the volume (c/g clips are TRAINING rows, d clips dev),
 decoded by eval_mp_dev --name gold62. Per checkpoint: reading class right (two thousand [and] X vs twenty X) and value
-kept, split by what the owner heard. A treatment that flips owner-verified "twenty" clips is harmful whatever else wins.
+kept, split by what the listener heard. A treatment that flips listener-verified "twenty" clips is harmful whatever else wins.
 
     python3 score_gold.py <hyps_root> run1,run2,... <gold62 manifest>
 """

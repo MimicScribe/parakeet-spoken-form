@@ -1,6 +1,6 @@
 """Conversational replay: window-shaped crops of ICSI meetings (CC BY 4.0), human word labels.
 
-The app decodes 15 s windows plus short 2–8 s previews of live meeting audio, so the crops have the
+Streaming decoders read ~15 s windows plus short 2–8 s previews of live meeting audio, so the crops have the
 same shapes: they start and end wherever a window would, including on silence or the tail of the
 previous speaker. Edges are snapped into gaps between words so no label word is cut in half.
 
@@ -63,7 +63,7 @@ def render(toks) -> str | None:
             return None
         if c in DROP or not text:
             continue
-        if c == "HYPH":  # owner rule: no hyphens ("mm-hmm" -> "mm hmm", "M-one" -> "M one")
+        if c == "HYPH":  # label rule: no hyphens ("mm-hmm" -> "mm hmm", "M-one" -> "M one")
             continue
         if text == "OK":
             text = "okay"
@@ -101,12 +101,12 @@ def n_words(p):
 def by_turns(toks):
     """Cross-talk label, both speakers: phrases (pause > 1.5 s splits a phrase) in start order; a short
     backchannel (≤ 2 words) that starts inside another speaker's phrase goes right after that phrase
-    instead of splicing it mid-clause (Gemini review 2026-10-08)."""
+    instead of splicing it mid-clause."""
     out = []  # (phrase tokens incl. attached backchannels, the phrase's own start, its own end, its own words)
     for p in phrases_of(toks, 1.5):
         host = next((q for q in reversed(out) if q[0][0][2] != p[0][2] and q[1] <= p[0][0] <= q[2]), None)
         if host is not None and n_words(p) <= 2 < host[3]:
-            host[0].extend(p)  # the host keeps its own span: an attached backchannel does not shrink it (Gemini)
+            host[0].extend(p)  # the host keeps its own span: an attached backchannel does not shrink it 
         else:
             out.append((list(p), p[0][0], p[-1][1], n_words(p)))
     return [t for q in out for t in q[0]]

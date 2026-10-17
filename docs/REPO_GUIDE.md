@@ -1,12 +1,12 @@
 > **Read first (2026-10-14).** Extracted from the project's private plan documents; numbers and file:line cites are as those plans wrote them. Corrections that apply throughout:
-> - **"Shipped" means uploaded to Hugging Face and pinned on the app's main branch.** No fine-tune has reached users yet: the last released app (1.0.0-rc.40) runs stock Parakeet Ultra. v9pr30, v10pt and model B were each pinned on main, never released. Model B is the one queued for the next release.
-> - `$S/...` paths are session scratch that no longer exists. The launch scripts that mattered are preserved in [`runs/`](../runs/).
+> - **"Shipped" means released to users.** No fine-tune has reached users yet: the last release uses stock Parakeet Ultra. v9pr30, v10pt and model B were uploaded but never released. Model B is the one queued for the next release.
+> - `$S/...` paths are scratch that no longer exists. The launch scripts that mattered are preserved in [`runs/`](../runs/).
 > - Start at [`RESTART.md`](../RESTART.md).
 
 # Restarting spoken-form Parakeet training from the repo alone
 
 Repo audited (read-only): `./` (PUBLIC, 86 commits, branch `main`, local-only backup branch `backup/pre-strip-2026-10-13`).
-Reconstructed commands are marked **[RECONSTRUCTED]**: the repo has the function signatures but not the shell history that launched them (that lived in session scratch `$S/*.sh`, now gone).
+Reconstructed commands are marked **[RECONSTRUCTED]**: the repo has the function signatures but not the shell history that launched them (that lived in scratch `$S/*.sh`, now gone).
 
 ---------------------------------------------------------------------------------------------------
 
@@ -17,14 +17,14 @@ stock Ultra (ncannings/parakeet-ultra-nemo ultra.nemo @68d18c58f3d5...)   <- NeM
   -> v9pr30 -> v10a/v10as2 -> v10pt@1500   (2026-10-07..10; exp/v10pt/step1500.pt; run() entry point; TTS-only number data + replay;
                                               `--kl-terms blank,gnorm`, 1500 steps, seed 1, ~$3-4/seed; EXACT flags not in repo)
   -> r3_SBd0   retrain3(arm=S-B, dur_weight=0, init v10pt@1500, mix3, 4000 steps)      ~$10 for the whole 4-arm screen + SBd0
-  -> soup3 (3500,3750,4000 x alpha 1.0 ...)  => exp/sbd0soup_a1.0/step0.pt   ("A" in the docs; bundle ~/models/parakeet-ultra-sbd0soup)
+  -> soup3 (3500,3750,4000 x alpha 1.0 ...)  => exp/sbd0soup_a1.0/step0.pt   ("A" in the docs; bundle $MODELS/parakeet-ultra-sbd0soup)
   -> r3_W3     retrain3(arm=S-B, init sbd0soup_a1.0@0, anchor_init, lr 3e-5, warmup 20, 1000 steps, dur_weight 0, mix v3)   ~$4
   -> soup3 (500,750,1000 x alpha {1.0,0.5}, base sbd0soup_a1.0@0, name w3soup) => exp/w3soup_a0.5/step0.pt  = MODEL B
   -> export_weights --step 0 -> swap_weights.py -> CoreML bundle -> HF MimicScribe/parakeet-ultra-spoken-coreml@5edfc817
 ```
 Model B SHA-256s (bundle): Decoder weight.bin `21af365597f00e2f24e4f7249c3cf7ac4448a60257d044cbfc3a75a7ae9fe5c8` (23,604,992 B); JointDecision(v3) weight.bin `0400f7bacd38b46af51e6117c2750ba48a464a5c0cdf9519855b12087bcfbcab` (12,642,764 B). Encoder SHA-256 `315ba01f...` unchanged.
 
-Critical consequence: **both retrain-3 warm-starts depend on `exp/v10pt/step1500.pt` on the Modal volume**, which cannot be rebuilt from this repo with certainty (see Gaps). Preserve the volume or the local backup `~/models/backups/retrain3-B-w3soup_a0.5-2026-10-14/`.
+Critical consequence: **both retrain-3 warm-starts depend on `exp/v10pt/step1500.pt` on the Modal volume**, which cannot be rebuilt from this repo with certainty (see Gaps). Preserve the volume or a local backup of that checkpoint.
 
 ---------------------------------------------------------------------------------------------------
 
@@ -90,11 +90,11 @@ Stage legend: A=env/infra, B=English TTS data, C=real-speech scan/fetch/label, D
 | `beds.py` | Builds eval beds under `/vol/beds/`: `vox`/`vox3` (VoxPopuli TEST, dev + SEALED 2/3 by id hash, LID+dedupe), `fleurs`/`fleurs3` (FLEURS TEST; wer=100/lang, num=digit utterances, wer_full=sealed), `noise` (OpenSLR 28 isotropic noises), `slr28` (downloads `rirs_noises.zip`), `e21_ref`/`e21x` (Earnings-21 refs from `revdotcom/speech-datasets` via GitHub API; 33 sealed calls cut in 20 s chunks), `e21_dev_cut` (11 local E21 calls as app-geometry windows; needs `/vol/e21local/audio/<fid>.wav` uploaded by hand). |
 | `ft_eval.py` | `load_model`, `decode`, `transcribe`, `transcribe_loaded` (-> `/vol/hyps/<run>/<name>.jsonl`), `eval_sets`, `eval_retrain`, sets lists `RETRAIN_SETS`, `RETRAIN3_SETS`, `SEALED3_SETS`, encoder cache `encode_rows/cache_beds/eval_cached` (-> `/vol/enc/`), `filter_tts`, `e22_other`. |
 | `score_retrain.py` (27 KB) | THE scorer, local CPU: `python score_retrain.py <hyps_root> <run,run,...> [--json out] [--exclude-from stock,v10] [--split dev|sealed] [--stock <name>] [--base] [--fleurs-base X] [--e21x-refs <dir>]`. Per run: WER e22_other / lspc_dev / d1_dev / fleurs_wer, English number-word leak (vox_dev, fleurs_num), digit emission, noise-bed numbers, adversarial value accuracy, year readings/values/truncation/garbles, blends/chimeras, filler rate, FLEURS paired bootstrap (`fleurs_bootstrap`), `score_sealed`. `SELECT_ORDER` + `select()` = the frozen model-selection ladder (blend, en_wf, chimeras, year_value, year_trunc, year_garble, adv_en_ok, fast_d1_ok, nonen_leak, fleurs_worst, wer_dev). |
-| `e44_bar.py` | `python e44_bar.py <base_arm_dir> <cand_arm_dir>`: paired 44-call Earnings-21 APP bar (exact/corrupted/dropped/invented/high-severity/blends/splices) over two outputs of the private app-side evaluation. |
+| `e44_bar.py` | `python e44_bar.py <base_arm_dir> <cand_arm_dir>`: paired 44-call Earnings-21 number bar (exact/corrupted/dropped/invented/high-severity/blends/splices) over two runs' score files and transcript rows (input format in the script's docstring). |
 | `score_mp.py` | Reading accuracy on held-out minimal pairs: `python3 score_mp.py <hyps_root> run1,run2 <tts/mp2/dev_ok.jsonl>`. |
-| `score_gold.py` | Owner-gold harm check: `python3 score_gold.py <hyps_root> run1,run2 <gold62 manifest>`. |
+| `score_gold.py` | Gold-set harm check: `python3 score_gold.py <hyps_root> run1,run2 <gold62 manifest>`. |
 | `score_side.py` | Per-side year-reading accuracy over existing hyps: `python score_side.py <root> <runs> <beds>`. |
-| `gold/owner_year_readings.json` | 62 owner-listened year clips (ground truth reading + heard value), keys "E21 <call> @<s>s|<year>". `gold/save_owner_years.py <listen_dir>` merges listening-page answers into it. Audio is NOT in repo. |
+| `gold/owner_year_readings.json` | 62 listener-verified year clips (ground truth reading + heard value), keys "E21 <call> @<s>s|<year>". `gold/save_owner_years.py <listen_dir>` merges listening-page answers into it. Audio is NOT in repo. |
 | `eval/probe_items.tsv` | 66 spoken-form probe items (59 formats + 7 controls; id, cat, spoken, expect). **Referenced by README but not read by any script in the repo.** |
 
 ### Tests
@@ -104,7 +104,7 @@ Stage legend: A=env/infra, B=English TTS data, C=real-speech scan/fetch/label, D
 | File | What |
 |---|---|
 | `ml_cands.py` | Number-grammar spoken-reading candidates for es/fr/de/pt/it/nl (`spans`, `render`, `needed`, `build_table`). Reads `ml_grammar_table.json`. |
-| `ml_grammar_table.json` (200 KB) | Pre-dumped canonical readings from per-language number grammars (pt is Brazilian since b7426af); the dumper is not in this repo. Regenerated via `build_table(texts_by_lang, dumper, workdir)`. |
+| `ml_grammar_table.json` (200 KB) | Pre-dumped canonical readings from per-language number grammars (pt is Brazilian); the dumper is not in this repo. Regenerated via `build_table(texts_by_lang, dumper, workdir)`. |
 | `ml_decide.py` | Per-language xlsr-53 CTC (`jonatasgrosman/wav2vec2-large-xlsr-53-{german,spanish,french,italian,portuguese,dutch}`) reading decision: `LangCTC`, `decide`. |
 | `ml_p3_core.py` | Row building/CER/edge-quiet helpers (`make_row`, `Acc`). |
 
@@ -117,7 +117,7 @@ Assumptions: macOS dev machine (the CoreML step needs a Mac), Modal for all GPU 
 ### 2.1 Environment
 1. **Python (local)**: Python 3.12 venv (`.venv` is gitignored). Minimum for the local scripts: `pip install modal safetensors numpy soundfile jiwer pytest` (score_retrain/filter3/mix tests are stdlib + numpy; `swap_weights` needs numpy+safetensors; `data_icsi` needs numpy+soundfile+ElementTree). There is no pinned local requirements file.
 2. **Modal**: `pip install modal && modal setup` (workspace in the logs: `r-marshall-adams`, environment `main`). Volume is created on first use: `modal.Volume.from_name("parakeet-spoken-form", create_if_missing=True, version=2)` (volume format v2). Verify: `modal volume ls parakeet-spoken-form`.
-3. **Secrets** (names only): Modal secret **`hf`** (a HuggingFace token with read access; used by `s0_scan_shard`, `s3_fetch_shard`, `d1p_fetch_shard`, `Labeller`, `d2_harvest_lang`, `build_beds`, `build_beds3`, `ml_p3.scan_lang`). Create: `modal secret create hf HF_TOKEN=...` (do it interactively; never commit the value). `hf auth login` locally for the final upload. No other API keys are used by this repo (no Gemini/Anthropic keys in code).
+3. **Secrets** (names only): Modal secret **`hf`** (a HuggingFace token with read access; used by `s0_scan_shard`, `s3_fetch_shard`, `d1p_fetch_shard`, `Labeller`, `d2_harvest_lang`, `build_beds`, `build_beds3`, `ml_p3.scan_lang`). Create: `modal secret create hf HF_TOKEN=...` (do it interactively; never commit the value). `hf auth login` locally for the final upload. No other API keys are used by this repo.
 4. **Base model**: downloaded lazily by `ultra_path()` from HF `ncannings/parakeet-ultra-nemo` file `ultra.nemo` pinned to revision `68d18c58f3d5012f885f4e01039684cd398aff19`, symlinked to `/vol/ultra.nemo`; stock decoder+joint extracted once to `/vol/export/ultra/state.pt` by `ultra_state()`. Smoke test: `modal run pipeline/modal_app.py::env_check` (L4; prints trainable params by group, decoding strategy).
 6. Images: `nemo_toolkit[asr,cu12]==2.7.3`, `torch==2.8.0` cu128, CUDA 12.8.1 devel Ubuntu 24.04, Python 3.12 (modal_app.py). TTS image: `kokoro==0.9.4`, `misaki[en]>=0.9.4`, spaCy `en_core_web_sm`, espeak-ng. ml images: torch 2.4.1 + transformers 4.44.2 (Python 3.11).
 7. Unit tests before anything expensive: `cd pipeline && python -m pytest test_r3.py -q && python test_ml_cands.py && python test_ml_p3.py`.
@@ -189,7 +189,7 @@ The mix spec for model B's last stage is `retrain3_mix_v3()` = `retrain3_mix_v2(
 All training uses A100-40GB, `retrain3` timeout 24 h, `retries=2` with resume from `exp/<run>/last.ckpt`.
 
 * Step 1 - warm start dependency: `exp/v10pt/step1500.pt` (and `exp/v10pt/train_manifest.jsonl`) must exist on the volume. If rebuilding from stock, use the older `run` entry point:
-  `modal run pipeline/modal_app.py::run --run v10a --tts v10all [--kl-terms blank,gnorm --kl-weight <v9pr30 value> --kl-replay-only --kl-punct 30 --kl-punct-rows replay --max-steps 1500 --seed 1 ...]` **[RECONSTRUCTED - the v9pr30 flag set is only described in prose in the app-repo plan]**; v10pt = v10a recipe + 289 targeted TTS rows ("sub-one" amounts) = `tts/v10pt`, seed 1, step 1500. ~$3-4 per seed.
+  `modal run pipeline/modal_app.py::run --run v10a --tts v10all [--kl-terms blank,gnorm --kl-weight <v9pr30 value> --kl-replay-only --kl-punct 30 --kl-punct-rows replay --max-steps 1500 --seed 1 ...]` **[RECONSTRUCTED - the v9pr30 flag set is only described in prose in private plan documents]**; v10pt = v10a recipe + 289 targeted TTS rows ("sub-one" amounts) = `tts/v10pt`, seed 1, step 1500. ~$3-4 per seed.
 * Step 2 - screening/main run (candidate A lineage), **[RECONSTRUCTED from plan R3.31 / SBd0]**:
   `modal run --detach pipeline/modal_app.py::retrain3 --run r3_SBd0 --arm S-B --max-steps 4000 --save-every 250 --dur-weight 0 --init-from v10pt@1500 --mix mix3`
   Arms: `R3_ARMS = {S-A: wf1/l2sp1/lr1e-4, S-B: wf3/l2sp1/lr1e-4, S-C: wf1/l2sp0, S-E: wf1/l2sp1/lr5e-5}`. Defaults baked into `retrain3`: `batch_duration=200`, `accumulate=2`, `spec_augment=False`, `kl_weight=10.0`, `kl_punct=30.0`, `kl_tok=1.0`, `warmup=50`, `seed=1`, number-share assert 0.35-0.40 (`--no-check-share` to skip), L2-SP anchor = `exp/v10pt/step1500.pt` unless `--anchor-init`. Rehearsal: tiny `--max-steps` with `--gradshare` (R3_GRADSHARE=1 logs per-term gradient share on the joint last layer).
@@ -204,33 +204,33 @@ All training uses A100-40GB, `retrain3` timeout 24 h, `retries=2` with resume fr
 modal run pipeline/modal_app.py::eval_multi --runs "ultra,v10pt@1500,sbd0soup_a1.0@0,w3soup_a0.5@0" [--sealed] [--tag _c] [--skip e21_dev]
    # decodes every cached bed per run; hyps -> /vol/hyps/<run>@<step><tag>/<bed>.jsonl ; a "<path>.pt" entry also works
 modal run pipeline/modal_app.py::eval_mp_dev --runs "ultra,w3soup_a0.5@0" --name mp2      # minimal-pair dev -> hyps/<run>/mp_dev.jsonl
-modal run pipeline/modal_app.py::eval_mp_dev --runs ... --name gold62                        # owner-gold clips (needs tts/gold62/dev_ok.jsonl; no builder in repo)
+modal run pipeline/modal_app.py::eval_mp_dev --runs ... --name gold62                        # listener-verified gold clips (needs tts/gold62/dev_ok.jsonl; no builder in repo)
 modal volume get parakeet-spoken-form /hyps <local_hyps>
 python pipeline/score_retrain.py <local_hyps> ultra_rt,v10pt@1500,w3soup_a0.5@0 --stock ultra_rt --base --json scores.json
 python pipeline/score_retrain.py <local_hyps> w3soup_a0.5@0 --split sealed --stock ultra_rt --e21x-refs <refs>   # SEALED: once only
 python3 pipeline/score_mp.py <local_hyps> w3soup_a0.5@0 <mp2 dev_ok.jsonl> ; python3 pipeline/score_gold.py ...
 ```
-Older single-model paths: `eval_ckpts(run, steps, tts)`, `eval_retrain(run, step, sealed, r3)`, `baseline`. Selection among candidates: `score_retrain.select(res, runs, baseline)` walks `SELECT_ORDER` (frozen); sealed beds scored once for the winner only. Ship bar highlights: non-English WER <= stock + 0.15 pp (paired bootstrap per FLEURS language), number share 35-40%, zero `twenty thousand` blends, owner year clips not flipped.
+Older single-model paths: `eval_ckpts(run, steps, tts)`, `eval_retrain(run, step, sealed, r3)`, `baseline`. Selection among candidates: `score_retrain.select(res, runs, baseline)` walks `SELECT_ORDER` (frozen); sealed beds scored once for the winner only. Ship bar highlights: non-English WER <= stock + 0.15 pp (paired bootstrap per FLEURS language), number share 35-40%, zero `twenty thousand` blends, maintainer year clips not flipped.
 
 ### 2.9 Export to CoreML bundle (local Mac)
 ```
 modal run pipeline/modal_app.py::export_weights --run w3soup_a0.5 --step 0      # -> /vol/export/w3soup_a0.5@0/decoder_joint.safetensors (fp32, NeMo names, decoder.* + joint.*)
 modal volume get parakeet-spoken-form "export/w3soup_a0.5@0/decoder_joint.safetensors" ./decoder_joint.safetensors
-python pipeline/swap_weights.py ~/models/parakeet-ultra-stock-95eaa59a ./decoder_joint.safetensors ~/models/parakeet-ultra-bestN
+python pipeline/swap_weights.py $MODELS/parakeet-ultra-stock-95eaa59a ./decoder_joint.safetensors $MODELS/parakeet-ultra-bestN
 python pipeline/swap_weights.py <stock bundle> <stock decoder_joint.safetensors> /tmp/chk --check   # sanity: must be byte-identical
 ```
-(Stock-tensors file for `--check`: `export_weights --run ultra`.) Bundle layout is the unchanged FluidInference layout: only `Decoder.mlmodelc/weights/weight.bin`, `JointDecision.mlmodelc/weights/weight.bin` and `JointDecisionv3.mlmodelc/weights/weight.bin` differ (the last two are byte-identical copies); encoder/preprocessor/tokenizer reused. The NeMo-vs-CoreML token-for-token check (README eval item 5) is **not scripted in this repo**; it is done in the private app-side evaluation.
+(Stock-tensors file for `--check`: `export_weights --run ultra`.) Bundle layout is the unchanged FluidInference layout: only `Decoder.mlmodelc/weights/weight.bin`, `JointDecision.mlmodelc/weights/weight.bin` and `JointDecisionv3.mlmodelc/weights/weight.bin` differ (the last two are byte-identical copies); encoder/preprocessor/tokenizer reused. The NeMo-vs-CoreML token-for-token check (README eval item 5) is **not scripted in this repo**.
 Hash the three weight files (`shasum -a 256`) and record them.
 
-### 2.10 Upload to HF (owner action)
+### 2.10 Upload to HF (maintainer action)
 * Stage a folder with the 3 weight files at their bundle-relative paths + README (model card front matter `license: cc-by-4.0`, `base_model: FluidInference/parakeet-ultra-coreml`, `library_name: coreml`, tags `parakeet tdt coreml spoken-form`).
-* `hf auth login` (owner) then `hf upload MimicScribe/parakeet-ultra-spoken-coreml <staging> . --commit-message "..."` (B = commit `5edfc817ce69dcdf4ca7839bff5ad738e9d390b8`; earlier v10pt = `ccdb31c9`).
+* `hf auth login` (maintainer) then `hf upload MimicScribe/parakeet-ultra-spoken-coreml <staging> . --commit-message "..."` (B = commit `5edfc817ce69dcdf4ca7839bff5ad738e9d390b8`; earlier v10pt = `ccdb31c9`).
 
 ---------------------------------------------------------------------------------------------------
 
 ## 3. Modal specifics
 
-**Apps**: `parakeet-spoken-form` (modal_app.py, the main one), `parakeet-ml` (ml_modal.py, image debian_slim py3.11), `parakeet-ml-p3` (ml_p3.py). Workspace seen in logs: `r-marshall-adams`, env `main`.
+**Apps**: `parakeet-spoken-form` (modal_app.py, the main one), `parakeet-ml` (ml_modal.py, image debian_slim py3.11), `parakeet-ml-p3` (ml_p3.py).
 **Volume**: `parakeet-spoken-form` (v2 format), mounted at `/vol`. `HF_HOME=/vol/hf` in nemo_image (several functions override to `/tmp/hf` because HF/xet logs on the volume block `commit/reload`). **Secret**: `hf`.
 **GPU choices**: A100-40GB (cpu=8, mem 32 GB) for `killtest`, `run`, `retrain`, `retrain3`; L4 for everything else GPU (eval, decode, labeller, recrop, veto, harvest, TTS, beds); `eval_multi`/`cache_beds3` L4 with 64 GB RAM; CPU-only for scans, mix build, soups, export.
 
@@ -263,10 +263,10 @@ Functions (`modal run pipeline/modal_app.py::<fn> --arg value`):
 | Artifact | Location | In git? |
 |---|---|---|
 | Stock Ultra | HF `ncannings/parakeet-ultra-nemo@68d18c58...` -> `/vol/ultra.nemo` | no (pinned by hash in modal_app.py) |
-| v10pt@1500 (the warm-start root) | `/vol/exp/v10pt/step1500.pt`; HF bundle `MimicScribe/parakeet-ultra-spoken-coreml@ccdb31c9`; local `~/models/parakeet-ultra-spoken-v10pt-1500` | NO; irreplaceable unless re-trained |
-| Candidate A `sbd0soup_a1.0@0` | `/vol/exp/sbd0soup_a1.0/step0.pt`, `/vol/exp/r3_SBd0/step*.pt`; bundle `~/models/parakeet-ultra-sbd0soup` | no |
-| **Model B `w3soup_a0.5@0`** | `/vol/exp/w3soup_a0.5/step0.pt`; `/vol/export/w3soup_a0.5@0/`; bundle `~/models/parakeet-ultra-best3`; backup `~/models/backups/retrain3-B-w3soup_a0.5-2026-10-14/` (decoder_joint.safetensors, SHA256.txt, report files); HF `MimicScribe/parakeet-ultra-spoken-coreml@5edfc817ce69dcdf4ca7839bff5ad738e9d390b8` | no |
-| Other bundles | `~/models/parakeet-ultra-{w3k,w2mpv,stock-95eaa59a}`, `...-spoken-{v9pr30,v10pts2,rt2_main_s2-3000}-1500/3000` | no |
+| v10pt@1500 (the warm-start root) | `/vol/exp/v10pt/step1500.pt`; HF bundle `MimicScribe/parakeet-ultra-spoken-coreml@ccdb31c9`; local `$MODELS/parakeet-ultra-spoken-v10pt-1500` | NO; irreplaceable unless re-trained |
+| Candidate A `sbd0soup_a1.0@0` | `/vol/exp/sbd0soup_a1.0/step0.pt`, `/vol/exp/r3_SBd0/step*.pt`; bundle `$MODELS/parakeet-ultra-sbd0soup` | no |
+| **Model B `w3soup_a0.5@0`** | `/vol/exp/w3soup_a0.5/step0.pt`; `/vol/export/w3soup_a0.5@0/`; bundle `$MODELS/parakeet-ultra-best3`; a local backup copy (decoder_joint.safetensors, SHA256.txt, report files); HF `MimicScribe/parakeet-ultra-spoken-coreml@5edfc817ce69dcdf4ca7839bff5ad738e9d390b8` | no |
+| Other bundles | `$MODELS/parakeet-ultra-{w3k,w2mpv,stock-95eaa59a}`, `...-spoken-{v9pr30,v10pts2,rt2_main_s2-3000}-1500/3000` | no |
 | Mixes | `/vol/mix3/*` (d1, d1p, d10n, d10p, d2, d2p, fleurs_train_multi, d1_dev + `.pre_patch`/`.pre_audit`/`.pre_unk` originals), `/vol/mix3b/*` (d1, d10n, d1p_v, d10p_v), `/vol/mix/*` (retrain-2) | no (rebuildable from stages 2.4-2.6 if the volume's intermediates survive) |
 | TTS sets | `/vol/tts/{v10all,v10pt,d9sup,biz,mp,mp2,...}` | no (rebuildable from carriers/readings/gen/voice; exact build args partly undocumented) |
 | Manifests of record | `/vol/exp/<run>/train_manifest.jsonl` (v10pt: 21,115 rows) | no |
@@ -280,25 +280,25 @@ Functions (`modal run pipeline/modal_app.py::<fn> --arg value`):
 | `.gitignore` | `__pycache__/ *.wav *.nemo *.ckpt .env .venv/ *.pyc ` | |
 | Scratch `$S` (`$S`) | the launch scripts (now preserved in `runs/`), `scores_all.json`, `sealed/`, report generator | scratch gone; scripts in `runs/` |
 
-Things a restart needs that are NOT in git: the Modal volume contents above (esp. `exp/v10pt/step1500.pt`, `exp/sbd0soup_a1.0/step0.pt`), the `hf` Modal secret, ICSI corpus + `meetings.json`, Earnings-21 audio for `e21local`, `beds/adv` + `beds/fast` + `tts/gold62`, the private grammar dumper, the private app-side evaluation harness, HF write access to `MimicScribe/parakeet-ultra-spoken-coreml`.
+Things a restart needs that are NOT in git: the Modal volume contents above (esp. `exp/v10pt/step1500.pt`, `exp/sbd0soup_a1.0/step0.pt`), the `hf` Modal secret, ICSI corpus + `meetings.json`, Earnings-21 audio for `e21local`, `beds/adv` + `beds/fast` + `tts/gold62`, the grammar dumper (not in this repo), HF write access to `MimicScribe/parakeet-ultra-spoken-coreml`.
 
 ---------------------------------------------------------------------------------------------------
 
 ## 5. Gaps and stale statements
 
 Stale / wrong:
-1. `README.md` says "Status: in progress. Nothing is trained yet. This repo will hold the data generator, training scripts, evaluation, and the released weights." False: model B is trained, shipped to HF (5edfc817) and pinned in the app. README also says "decoder and joint weights are written into the existing CoreML bundle" (true) but gives no commands, no HF repo name, no weights; the "Compute: a few GPU-hours" and "Evaluation 1-5" list is aspirational, not what scripts do (the repo has no LibriSpeech/AMI/five-FLEURS-language eval script; its scorers are `score_retrain.py` over beds listed in `ft_eval.RETRAIN3_SETS`). Item 5 "CoreML matches NeMo token for token" has no script here.
+1. `README.md` says "Status: in progress. Nothing is trained yet. This repo will hold the data generator, training scripts, evaluation, and the released weights." False: model B is trained, shipped to HF (5edfc817) and pinned in the consuming app. README also says "decoder and joint weights are written into the existing CoreML bundle" (true) but gives no commands, no HF repo name, no weights; the "Compute: a few GPU-hours" and "Evaluation 1-5" list is aspirational, not what scripts do (the repo has no LibriSpeech/AMI/five-FLEURS-language eval script; its scorers are `score_retrain.py` over beds listed in `ft_eval.RETRAIN3_SETS`). Item 5 "CoreML matches NeMo token for token" has no script here.
 2. README "Scope" says the model "should never emit" `0-9 $ % € £ /` - true only for English; OBSERVATIONS shows non-English deliberately keeps digits (about 75% exact digits). README "First release: English. The other 24 languages follow" conflicts with B already being multilingual-neutral by KL-anchoring (non-English held at digits).
 3. README License: "Model weights, when released" - already released (CC BY 4.0).
 4. `modal_app.py` docstring says run `modal run pipeline/modal_app.py::env_check` from repo root; `ml_p3.py`/`.sh` assume `cd pipeline`. Inconsistent cwd conventions; `add_local_python_source` needs the pipeline dir importable, so run from `pipeline/` to be safe.
-5. `retrain3()` default `dur_weight=1.0` and default `mix="mix3"`/`init_from="v10pt@1500"` do not match the B recipe (needs `--dur-weight 0`; W3 needs `--mix v3 --init-from sbd0soup_a1.0@0 --anchor-init --lr 3e-05 --warmup 20 --max-steps 1000`). Also `soup3` default `base=v10pt@1500` is wrong for the W3 soup (needs `sbd0soup_a1.0@0`). The comments above `R3_ARMS` mention "c=1 owner decision" but the actual shipped run dropped the duration KL, which the comment does not say.
+5. `retrain3()` default `dur_weight=1.0` and default `mix="mix3"`/`init_from="v10pt@1500"` do not match the B recipe (needs `--dur-weight 0`; W3 needs `--mix v3 --init-from sbd0soup_a1.0@0 --anchor-init --lr 3e-05 --warmup 20 --max-steps 1000`). Also `soup3` default `base=v10pt@1500` is wrong for the W3 soup (needs `sbd0soup_a1.0@0`). The comments above `R3_ARMS` mention "c=1 maintainer decision" but the actual shipped run dropped the duration KL, which the comment does not say.
 6. `build_beds()` docstring-less; the `retrain_mix`/`RETRAIN_K` (retrain-2) path is superseded and its tag tables disagree with retrain3's.
 7. `OBSERVATIONS.md` refers to `data_icsi.py --overlap` and `restore_unk_nonen` as "committed, not yet trained" - accurate, but nothing in the repo trains with the Greek fix yet.
 
 Missing / not reproducible from repo alone:
 1. **v10pt@1500 recipe**: the exact `run` flags (kl_weight, kl_terms, kl_exempt, kl_punct, tts_h, lspc_h, icsi_h, batch_duration) for v9pr30/v10a/v10pt are recovered in `runs/v12/train.sh` (v12 = the v10pt recipe + fast-year TTS); the TTS supplement args are only partly recorded. Without the checkpoint a from-scratch restart cannot reproduce the warm-start root.
 2. **make_tts invocations** for `v10all`, `v10pt` (289 sub-one rows), `d9sup`, `biz`, `mp`, `mp2`, `v12year*` (rows, seeds, slots, speeds): only partially quoted in plans.
-3. **Builders for** `beds/adv/all.jsonl` (adversarial bed), `beds/fast/all.jsonl` (fast-speech bed), `tts/gold62` (owner-gold manifest), `e22/other.jsonl` is built but `e21local/audio` upload step is manual, `d1/rows` initial relabel invocation.
+3. **Builders for** `beds/adv/all.jsonl` (adversarial bed), `beds/fast/all.jsonl` (fast-speech bed), `tts/gold62` (listener-verified gold manifest), `e22/other.jsonl` is built but `e21local/audio` upload step is manual, `d1/rows` initial relabel invocation.
 4. **ICSI**: corpus is licensed/manual; `meetings.json` list not in repo; the 25 held-out meetings used as gates are not recorded here.
 5. **No dependency lock for local scripts**, no Makefile/driver script chaining the stages, no CI. `pytest` is not documented as a dependency.
 6. `restore_fillers.py` is hard-wired to `<S>/rt/mix/<part>.jsonl` (scratch layout) and the `filter3.py` expects four pulled-down directories whose provenance is only in docstrings.
@@ -314,7 +314,7 @@ From `number-fidelity-plan-2026-10-11.md` (the plan that triggered retrain-3):
 * **Training-label audit of v10pt** (manifest of 21,115 rows: TTS 9,752, LibriSpeech-PC 7,045, ICSI 3,327, FLEURS 991): real-speech rows hold ZERO 2001-2039 years; TTS years about 330 rows (1.5%); 2010-2039 labelled "twenty X" x215 vs "two thousand X" x24 (10%). So the problem is missing real-speech year exposure, not mislabelling. Relabelling is NOT the fix; ADD year data. E21/E22 are eval-only (never train); SPGISpeech is non-commercial.
 * **Year failures are a near-tie fork**: at the first year piece " two" vs " twe" sits at about 0.50 confidence; greedy commits and the rest of the year goes blank (dropped years: stock 6, v10pt 10-11 of 310) or two windows' readings are spliced ("twenty thousand twenty"). Refuted fixes: duration cap, beam search, blank-penalty oracle (0.5/1/2 recovered nothing), same-model rescoring (fixed 0-1/67, broke 24-63), decode-time top-2 probe (1/3 sites; STOP). Year FORM ("two thousand X") is mostly not an error (blind judge heard it at 16/18 sites).
 * Teen/ty acoustic misses (7 of 18 model-both bucket) are encoder-limited; teen/ty TTS data was judged overfit-risk and skipped.
-* Rules the plan sets for any training run: cost estimate and owner OK first (about $9-15 GPU + full re-eval), mined E21/AMI sites are EVALUATION data only, report year-form counts from the training manifest, package the plan's beds as the model's eval, score with the app branch ON and OFF, never Gemini Pro.
+* Rules the plan sets for any training run: cost estimate and maintainer OK first (about $9-15 GPU + full re-eval), mined E21/AMI sites are EVALUATION data only, report year-form counts from the training manifest, package the plan's beds as the model's eval.
 What the retrain actually found/did (see OBSERVATIONS.md), for a restarter:
 * Duration KL (`dur_weight` > 0) destroys year values: keep 0. KL teacher is STOCK (not the init model): `add_r3_losses` copies the model before `init_from` loads.
 * Minimal-pair year TTS (same voice, both readings, `gen.minimal_pairs`, pairs x2, 15% "and") fixes the left-context prior; α=0.5 blend toward the prior winner keeps the readings gain without the full recipe's ~3 year-value loss in dates (W2mpv app bar failed by a hair: exact 9606->9602).

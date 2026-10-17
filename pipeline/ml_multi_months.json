@@ -1,0 +1,1064 @@
+{
+"bg": {
+"1": [
+"генуари",
+"януари"
+],
+"10": [
+"окт",
+"октомври"
+],
+"11": [
+"ное",
+"ноември"
+],
+"12": [
+"дек",
+"декември"
+],
+"2": [
+"люти",
+"февруари"
+],
+"3": [
+"март"
+],
+"4": [
+"април"
+],
+"5": [
+"май"
+],
+"6": [
+"юни"
+],
+"7": [
+"юли"
+],
+"8": [
+"август"
+],
+"9": [
+"септ",
+"септември"
+]
+},
+"cs": {
+"1": [
+"leden",
+"ledna"
+],
+"10": [
+"říjen",
+"října"
+],
+"11": [
+"listopad",
+"listopadu"
+],
+"12": [
+"prosince",
+"prosinec"
+],
+"2": [
+"únor",
+"února"
+],
+"3": [
+"březen",
+"března"
+],
+"4": [
+"duben",
+"dubna"
+],
+"5": [
+"květen",
+"května"
+],
+"6": [
+"červen",
+"června"
+],
+"7": [
+"července",
+"červenec"
+],
+"8": [
+"srpen",
+"srpna"
+],
+"9": [
+"září"
+]
+},
+"da": {
+"1": [
+"januar"
+],
+"10": [
+"oktober"
+],
+"11": [
+"november"
+],
+"12": [
+"december"
+],
+"2": [
+"februar"
+],
+"3": [
+"marts"
+],
+"4": [
+"april"
+],
+"5": [
+"maj"
+],
+"6": [
+"juni"
+],
+"7": [
+"juli"
+],
+"8": [
+"august"
+],
+"9": [
+"september"
+]
+},
+"el": {
+"1": [
+"ιανουάριε",
+"ιανουάριο",
+"ιανουάριος",
+"ιανουαρίου"
+],
+"10": [
+"οκτωβρίου",
+"οκτώβριε",
+"οκτώβριο",
+"οκτώβριος"
+],
+"11": [
+"νοεμβρίου",
+"νόεμβριε",
+"νόεμβριο",
+"νόεμβριος"
+],
+"12": [
+"δεκέμβριε",
+"δεκέμβριο",
+"δεκέμβριος",
+"δεκεμβρίου"
+],
+"2": [
+"φεβρουάριε",
+"φεβρουάριο",
+"φεβρουάριος",
+"φεβρουαρίου"
+],
+"3": [
+"μάρτιε",
+"μάρτιο",
+"μάρτιος",
+"μαρτίου"
+],
+"4": [
+"απρίλιε",
+"απρίλιο",
+"απρίλιος",
+"απριλίου"
+],
+"5": [
+"μάιε",
+"μάιο",
+"μάιος",
+"μαΐου"
+],
+"6": [
+"ιουνίου",
+"ιούνιε",
+"ιούνιο",
+"ιούνιος"
+],
+"7": [
+"ιουλίου",
+"ιούλιε",
+"ιούλιο",
+"ιούλιος"
+],
+"8": [
+"αυγούστου",
+"αύγουστε",
+"αύγουστο",
+"αύγουστος"
+],
+"9": [
+"σεπτέμβριε",
+"σεπτέμβριο",
+"σεπτέμβριος",
+"σεπτεμβρίου"
+]
+},
+"et": {
+"1": [
+"jaanuar"
+],
+"10": [
+"okt",
+"oktoober"
+],
+"11": [
+"nov",
+"november"
+],
+"12": [
+"dets",
+"detsember"
+],
+"2": [
+"veebr",
+"veebruar"
+],
+"3": [
+"märts"
+],
+"4": [
+"apr",
+"aprill"
+],
+"5": [
+"mai"
+],
+"6": [
+"juun",
+"juuni"
+],
+"7": [
+"juul",
+"juuli"
+],
+"8": [
+"aug",
+"august"
+],
+"9": [
+"sept",
+"september"
+]
+},
+"fi": {
+"1": [
+"tammi",
+"tammikuu",
+"tammikuudeksi",
+"tammikuudelle",
+"tammikuudelta",
+"tammikuudesta",
+"tammikuudetta",
+"tammikuuhun",
+"tammikuun",
+"tammikuunes",
+"tammikuuni",
+"tammikuussa",
+"tammikuusta",
+"tammikuuta"
+],
+"10": [
+"loka",
+"lokakuu",
+"lokakuudeksi",
+"lokakuudelle",
+"lokakuudelta",
+"lokakuudesta",
+"lokakuudetta",
+"lokakuuhun",
+"lokakuun",
+"lokakuunes",
+"lokakuuni",
+"lokakuussa",
+"lokakuusta",
+"lokakuuta"
+],
+"11": [
+"marras",
+"marraskuu",
+"marraskuudeksi",
+"marraskuudelle",
+"marraskuudelta",
+"marraskuudesta",
+"marraskuudetta",
+"marraskuuhun",
+"marraskuun",
+"marraskuunes",
+"marraskuuni",
+"marraskuussa",
+"marraskuusta",
+"marraskuuta"
+],
+"12": [
+"joulu",
+"joulukuu",
+"joulukuudeksi",
+"joulukuudelle",
+"joulukuudelta",
+"joulukuudesta",
+"joulukuudetta",
+"joulukuuhun",
+"joulukuun",
+"joulukuunes",
+"joulukuuni",
+"joulukuussa",
+"joulukuusta",
+"joulukuuta"
+],
+"2": [
+"helmi",
+"helmikuu",
+"helmikuudeksi",
+"helmikuudelle",
+"helmikuudelta",
+"helmikuudesta",
+"helmikuudetta",
+"helmikuuhun",
+"helmikuun",
+"helmikuunes",
+"helmikuuni",
+"helmikuussa",
+"helmikuusta",
+"helmikuuta"
+],
+"3": [
+"maalis",
+"maaliskuu",
+"maaliskuudeksi",
+"maaliskuudelle",
+"maaliskuudelta",
+"maaliskuudesta",
+"maaliskuudetta",
+"maaliskuuhun",
+"maaliskuun",
+"maaliskuunes",
+"maaliskuuni",
+"maaliskuussa",
+"maaliskuusta",
+"maaliskuuta"
+],
+"4": [
+"huhti",
+"huhtikuu",
+"huhtikuudeksi",
+"huhtikuudelle",
+"huhtikuudelta",
+"huhtikuudesta",
+"huhtikuudetta",
+"huhtikuuhun",
+"huhtikuun",
+"huhtikuunes",
+"huhtikuuni",
+"huhtikuussa",
+"huhtikuusta",
+"huhtikuuta"
+],
+"5": [
+"touko",
+"toukokuu",
+"toukokuudeksi",
+"toukokuudelle",
+"toukokuudelta",
+"toukokuudesta",
+"toukokuudetta",
+"toukokuuhun",
+"toukokuun",
+"toukokuunes",
+"toukokuuni",
+"toukokuussa",
+"toukokuusta",
+"toukokuuta"
+],
+"6": [
+"kesä",
+"kesäkuu",
+"kesäkuudeksi",
+"kesäkuudelle",
+"kesäkuudelta",
+"kesäkuudesta",
+"kesäkuudetta",
+"kesäkuuhun",
+"kesäkuun",
+"kesäkuunes",
+"kesäkuuni",
+"kesäkuussa",
+"kesäkuusta",
+"kesäkuuta"
+],
+"7": [
+"heinä",
+"heinäkuu",
+"heinäkuudeksi",
+"heinäkuudelle",
+"heinäkuudelta",
+"heinäkuudesta",
+"heinäkuudetta",
+"heinäkuuhun",
+"heinäkuun",
+"heinäkuunes",
+"heinäkuuni",
+"heinäkuussa",
+"heinäkuusta",
+"heinäkuuta"
+],
+"8": [
+"elokuu",
+"elokuudeksi",
+"elokuudelle",
+"elokuudelta",
+"elokuudesta",
+"elokuudetta",
+"elokuuhun",
+"elokuun",
+"elokuunes",
+"elokuuni",
+"elokuussa",
+"elokuusta",
+"elokuuta"
+],
+"9": [
+"syys",
+"syyskuu",
+"syyskuudeksi",
+"syyskuudelle",
+"syyskuudelta",
+"syyskuudesta",
+"syyskuudetta",
+"syyskuuhun",
+"syyskuun",
+"syyskuunes",
+"syyskuuni",
+"syyskuussa",
+"syyskuusta",
+"syyskuuta"
+]
+},
+"hr": {
+"1": [
+"siječanj",
+"siječnja"
+],
+"10": [
+"listopad",
+"listopada"
+],
+"11": [
+"studeni",
+"studenog"
+],
+"12": [
+"prosinac",
+"prosinca"
+],
+"2": [
+"veljača",
+"veljače"
+],
+"3": [
+"ožujak",
+"ožujka"
+],
+"4": [
+"travanj",
+"travnja"
+],
+"5": [
+"svibanj",
+"svibnja"
+],
+"6": [
+"lipanj",
+"lipnja"
+],
+"7": [
+"srpanj",
+"srpnja"
+],
+"8": [
+"kolovoz",
+"kolovoza"
+],
+"9": [
+"rujan",
+"rujna"
+]
+},
+"hu": {
+"1": [
+"január",
+"januárban",
+"januárból",
+"januárhoz",
+"januárig",
+"januárként",
+"januárnak",
+"januárral",
+"januárt",
+"januárért",
+"januáról"
+],
+"10": [
+"október",
+"októberben",
+"októberből",
+"októberhez",
+"októberig",
+"októberként",
+"októbernek",
+"októberrel",
+"októberről",
+"októbert",
+"októberért"
+],
+"11": [
+"november",
+"novemberben",
+"novemberből",
+"novemberhez",
+"novemberig",
+"novemberként",
+"novembernek",
+"novemberrel",
+"novemberről",
+"novembert",
+"novemberért"
+],
+"12": [
+"december",
+"decemberben",
+"decemberből",
+"decemberhez",
+"decemberig",
+"decemberként",
+"decembernek",
+"decemberrel",
+"decemberről",
+"decembert",
+"decemberért"
+],
+"2": [
+"február",
+"februárban",
+"februárból",
+"februárhoz",
+"februárig",
+"februárként",
+"februárnak",
+"februárral",
+"februárt",
+"februáról",
+"februáért"
+],
+"3": [
+"március",
+"márciusban",
+"márciusból",
+"márciushoz",
+"márciusig",
+"márciusnak",
+"márciusért",
+"márciusól"
+],
+"4": [
+"április",
+"áprilisban",
+"áprilisból",
+"áprilishoz",
+"áprilisig",
+"áprilisként",
+"áprilisnak",
+"áprilissal",
+"áprilist",
+"áprilisért",
+"áprilisól"
+],
+"5": [
+"május",
+"májusban",
+"májusból",
+"májushoz",
+"májusig",
+"májusként",
+"májusnak",
+"májussal",
+"májusért",
+"májusól"
+],
+"6": [
+"június",
+"júniusban",
+"júniusból",
+"júniushoz",
+"júniusig",
+"júniusnak",
+"júniusért",
+"júniusól"
+],
+"7": [
+"július",
+"júliusban",
+"júliusból",
+"júliushoz",
+"júliusig",
+"júliusnak",
+"júliusért",
+"júliusól"
+],
+"8": [
+"augusztus",
+"augusztusban",
+"augusztusból",
+"augusztushoz",
+"augusztusig",
+"augusztusként",
+"augusztusnak",
+"augusztussal",
+"augusztust",
+"augusztusért",
+"augusztusól"
+],
+"9": [
+"szeptember",
+"szeptemberben",
+"szeptemberből",
+"szeptemberhez",
+"szeptemberig",
+"szeptemberként",
+"szeptembernek",
+"szeptemberrel",
+"szeptemberről",
+"szeptembert",
+"szeptemberért"
+]
+},
+"lt": {
+"1": [
+"sausio",
+"sausis"
+],
+"10": [
+"spalio",
+"spalis"
+],
+"11": [
+"lapkritis",
+"lapkričio"
+],
+"12": [
+"gruodis",
+"gruodžio"
+],
+"2": [
+"vasario",
+"vasaris"
+],
+"3": [
+"kovas",
+"kovo"
+],
+"4": [
+"balandis",
+"balandžio"
+],
+"5": [
+"gegužė",
+"gegužės"
+],
+"6": [
+"birželio",
+"birželis"
+],
+"7": [
+"liepa",
+"liepos"
+],
+"8": [
+"rugpjūtis",
+"rugpjūčio"
+],
+"9": [
+"rugsėjis",
+"rugsėjo"
+]
+},
+"lv": {
+"1": [
+"janv",
+"janvāris"
+],
+"10": [
+"okt",
+"oktobris"
+],
+"11": [
+"nov",
+"novembris"
+],
+"12": [
+"dec",
+"decembris"
+],
+"2": [
+"febr",
+"februāris"
+],
+"3": [
+"marts"
+],
+"4": [
+"apr",
+"aprīlis"
+],
+"5": [
+"maijs"
+],
+"6": [
+"jūn",
+"jūnijs"
+],
+"7": [
+"jūl",
+"jūlijs"
+],
+"8": [
+"augusts"
+],
+"9": [
+"sept",
+"septembris"
+]
+},
+"mt": {
+"1": [
+"jannar"
+],
+"10": [
+"ottubru"
+],
+"11": [
+"novembru"
+],
+"12": [
+"dicembru",
+"diċembru"
+],
+"2": [
+"frar"
+],
+"3": [
+"marzu"
+],
+"4": [
+"april"
+],
+"5": [
+"mejju"
+],
+"6": [
+"ġunju"
+],
+"7": [
+"lulju"
+],
+"8": [
+"awwissu"
+],
+"9": [
+"settembru"
+]
+},
+"pl": {
+"1": [
+"sty",
+"styczeń",
+"stycznia"
+],
+"10": [
+"paź",
+"październik",
+"października"
+],
+"11": [
+"listopad",
+"listopada"
+],
+"12": [
+"gru",
+"grudnia",
+"grudzień"
+],
+"2": [
+"lutego",
+"luty"
+],
+"3": [
+"marca",
+"marzec"
+],
+"4": [
+"kwi",
+"kwiecień",
+"kwietnia"
+],
+"5": [
+"maj",
+"maja"
+],
+"6": [
+"cze",
+"czerwca",
+"czerwiec"
+],
+"7": [
+"lipca",
+"lipiec"
+],
+"8": [
+"sierpień",
+"sierpnia"
+],
+"9": [
+"wrz",
+"wrzesień",
+"września"
+]
+},
+"ro": {
+"1": [
+"ianuarie"
+],
+"10": [
+"octombrie"
+],
+"11": [
+"noiembrie"
+],
+"12": [
+"decembrie"
+],
+"2": [
+"februarie"
+],
+"3": [
+"martie"
+],
+"4": [
+"aprilie"
+],
+"5": [
+"mai"
+],
+"6": [
+"iunie"
+],
+"7": [
+"iulie"
+],
+"8": [
+"august"
+],
+"9": [
+"septembrie"
+]
+},
+"sk": {
+"1": [
+"január",
+"januára",
+"januári",
+"januárom",
+"januáru",
+"ledna"
+],
+"10": [
+"október",
+"októbra",
+"októbri",
+"októbrom",
+"októbru",
+"října"
+],
+"11": [
+"listopadu",
+"november",
+"novembra",
+"novembri",
+"novembrom",
+"novembru"
+],
+"12": [
+"december",
+"decembra",
+"decembri",
+"decembrom",
+"decembru",
+"prosinca"
+],
+"2": [
+"február",
+"februára",
+"februári",
+"februárom",
+"februáru",
+"února"
+],
+"3": [
+"března",
+"marca",
+"marci",
+"marcom",
+"marcu",
+"marec"
+],
+"4": [
+"apríl",
+"apríla",
+"dubna"
+],
+"5": [
+"května"
+],
+"6": [
+"jún",
+"júna",
+"júni",
+"júnom",
+"júnu",
+"června"
+],
+"7": [
+"júl",
+"júla",
+"júli",
+"júlom",
+"júlu",
+"července"
+],
+"8": [
+"august",
+"augusta",
+"auguste",
+"augustom",
+"augustu",
+"srpna"
+],
+"9": [
+"september",
+"septembra",
+"septembri",
+"septembrom",
+"septembru",
+"zářia"
+]
+},
+"sl": {
+"1": [
+"januar",
+"januarja"
+],
+"10": [
+"oktober",
+"oktobra"
+],
+"11": [
+"november",
+"novembra"
+],
+"12": [
+"december",
+"decembra"
+],
+"2": [
+"februar",
+"februarja"
+],
+"3": [
+"marca",
+"marec"
+],
+"4": [
+"april",
+"aprila"
+],
+"5": [
+"maj",
+"maja"
+],
+"6": [
+"junij",
+"junija"
+],
+"7": [
+"julij",
+"julija"
+],
+"8": [
+"avgust",
+"avgusta"
+],
+"9": [
+"september",
+"septembra"
+]
+},
+"sv": {
+"1": [
+"jan",
+"januari"
+],
+"10": [
+"okt",
+"oktober"
+],
+"11": [
+"nov",
+"november"
+],
+"12": [
+"dec",
+"december"
+],
+"2": [
+"feb",
+"februari"
+],
+"3": [
+"mar",
+"mars"
+],
+"4": [
+"apr",
+"april"
+],
+"5": [
+"maj"
+],
+"6": [
+"jun",
+"juni"
+],
+"7": [
+"juli"
+],
+"8": [
+"aug",
+"augusti"
+],
+"9": [
+"sep",
+"sept",
+"september"
+]
+}
+}

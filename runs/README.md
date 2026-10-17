@@ -1,6 +1,6 @@
 # Launch scripts as run
 
-The shell scripts that launched the real runs, copied from session scratch on 2026-10-14 so the exact flags survive. Paths are rewritten: `$LOGS` (default `./logs`) replaces the old scratch folder, `$HOME` the user folder. Each script runs Modal commands from `pipeline/`. App-side evaluation steps are removed; that harness is private.
+The shell scripts that launched the real runs, copied from scratch on 2026-10-14 so the exact flags survive. Paths are rewritten: `$REPO` is the repo root, `$MODELS` a local folder of CoreML bundles, `$LOGS` (default `./logs`) replaces the old scratch folder. Each script runs Modal commands from `pipeline/`. Evaluation steps that ran in a private harness are removed.
 
 ## `model_b/`: the lineage of model B (2026-10-13), in order
 
@@ -13,7 +13,7 @@ The shell scripts that launched the real runs, copied from session scratch on 20
 | `mp_tts.sh`, `mp2_tts.sh` | year minimal-pair TTS sets `mp` and `mp2` (`make_tts_mp` → `filter_tts` → `mp_balance`) |
 | `ws.sh`, `ws2.sh` | warm-start experiments W1/W2 from A (mixes `mp`, `v2`, `v2v`) |
 | `ws3.sh` | **`r3_W3`** (mix v3, 1,000 steps, lr 3e-5, `--anchor-init`) and `soup3 --alphas 1.0,0.5 --base sbd0soup_a1.0@0` → **model B** `w3soup_a0.5@0` |
-| `post3.sh` | score all candidates (`score_retrain.select`), one sealed look, `export_weights`, `swap_weights.py` into a CoreML bundle, then app-side evaluation (private) |
+| `post3.sh` | score all candidates (`score_retrain.select`), one sealed look, `export_weights`, `swap_weights.py` into a CoreML bundle |
 | `sealed2.sh` | cache the sealed beds' encoder outputs |
 | `prebundle.sh` | export + bundle helper |
 | `step1000.sh`, `eval2000.sh`, `evald0.sh`, `e21eval.sh`, `win_eval.sh` | evaluation passes at checkpoints |

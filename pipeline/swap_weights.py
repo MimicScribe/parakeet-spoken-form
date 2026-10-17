@@ -83,7 +83,7 @@ def main() -> None:
     sd = load_file(weights)
     patch(f"{out}/{WEIGHT_FILES[0]}", DECODER, sd)
     patch(f"{out}/{WEIGHT_FILES[1]}", JOINT, sd)
-    # The app's v2-era joint program reads the same six blobs at the same offsets.
+    # The v2-era CoreML joint program reads the same six blobs at the same offsets.
     shutil.copyfile(f"{out}/{WEIGHT_FILES[1]}", f"{out}/{WEIGHT_FILES[2]}")
     if "--check" in sys.argv:
         same = [filecmp.cmp(f"{src}/{w}", f"{out}/{w}", shallow=False) for w in WEIGHT_FILES]

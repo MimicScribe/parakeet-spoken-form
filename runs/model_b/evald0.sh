@@ -1,6 +1,6 @@
 #!/bin/bash
 S=${LOGS:-./logs}
-cd $HOME/proj/parakeet-spoken-form/pipeline
+cd $REPO/pipeline
 ST=$1
 until modal volume ls parakeet-spoken-form exp/r3_SBd0 2>/dev/null | grep -q "step$ST.pt$"; do sleep 60; done
 modal run modal_app.py::eval_multi --runs "r3_SBd0@$ST" --tag _c || { echo EVAL FAILED; exit 1; }

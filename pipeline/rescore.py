@@ -1,4 +1,4 @@
-"""Dry run for an app-side number re-check: does the acoustic model prefer a close alternative reading?
+"""Dry run for a downstream number re-check: does the acoustic model prefer a close alternative reading?
 
 For each clip: greedy-decode with the candidate model, generate one-edit alternatives of every spoken number
 (teen<->ty, insert/delete "point", garbled number word -> nearest number word, "eine"/"ein" -> "eleven"/"one"), and
