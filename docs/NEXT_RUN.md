@@ -38,7 +38,7 @@ Today:
 
 ### 3. English fixes
 
-- **Short-phrase drops:** decide data vs loss with the step-0a census first (see OBSERVATIONS 2.1; about 1 h of private-harness runs, no GPU).
+- **Short-phrase drops:** decide data vs loss with the step-0a census first (see OBSERVATIONS 2.1; about 1 h of streaming-harness runs (harness not in this repo), no GPU).
   - **If data:** drop or relabel the caption rows that omit backchannels, or make them anchor-only.
   - **If loss:** anchor non-number tokens on span / `anchor_num` rows, and use a softer blank gate on human-verified rows.
   - Either way, add ICSI hand-off crops (`by_turns` only).
@@ -78,7 +78,7 @@ That test is the per-language "seam disputes" gate below; its B baseline is the 
 | GPU: mix build, one rehearsal, one main run, soups, NeMo evals | ≈ $10–20 |
 | Data | ≈ $0: the six languages are already labelled. Greek and the mixed-label cleanup are mix-build steps |
 | Maintainer time | one listening round on the six languages' held-out readings, ≈ 30 min |
-| Wall clock | about a day: mix + run + NeMo evals ≈ 6 h; private-harness gates overnight |
+| Wall clock | about a day: mix + run + NeMo evals ≈ 6 h; streaming-harness gates overnight |
 
 ## Road to all 25 languages
 
