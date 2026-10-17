@@ -12,9 +12,9 @@ Models referred to:
 Short version of what the multilingual data phase taught; details and numbers in [docs/CONCEPTS.md](docs/CONCEPTS.md), the step-by-step in [docs/RECIPE.md](docs/RECIPE.md).
 
 - A seam break (value right at one window offset, wrong at another) needs no reference transcript; about 70% of long-number breaks were merge-made splices.
-- Half-converted checkpoints (alpha 0.5 soups wrote words for 40-48% of numbers) made seams worse than digits-only; fully converted English had about 0 breaks. Select by conversion completeness under a damage gate.
+- Half-converted checkpoints (alpha 0.5 soups wrote words for 38-48% of numbers) made seams worse than digits-only; fully converted English had about 0 breaks. Select by conversion completeness under a damage gate.
 - Merge-side picks and edge trimming moved long-number errors by 1-2%; the fix is training on seam pairs cut inside numbers, under the 0.9 number-word edge rule.
-- Labels need agreement between CTC fit, a second transcript and value checks; synthetic readings come from code, not an LLM.
+- Labels need agreement between CTC fit, a second transcript and value checks; synthetic readings come from code where a tested reader exists; LLM-written readings (16 languages) are used only if they parse back to the written value.
 
 ## 1. What B does well (keep these when training anything new)
 

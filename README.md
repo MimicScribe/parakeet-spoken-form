@@ -8,7 +8,7 @@ Status (2026-10-17): model B ("retrain-3") is trained and published as CoreML we
 [MimicScribe/parakeet-ultra-spoken-coreml](https://huggingface.co/MimicScribe/parakeet-ultra-spoken-coreml)
 (revision `5edfc817`), queued for the next MimicScribe release. The next round (all 25 languages, long
 numbers across window seams) is in the data phase: labelling, census and held-out tooling are done, and no
-training run starts before the census passes its bar. **Start at [RESTART.md](RESTART.md)** for the state,
+training run starts before the census passes its bar. **Start at [RESTART.md](RESTART.md)** for the state ([docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for dependencies),
 then [docs/RECIPE.md](docs/RECIPE.md) (sources to a gated run) and [docs/CONCEPTS.md](docs/CONCEPTS.md)
 (the ideas worth borrowing), with the numbers in [docs/RESULTS.md](docs/RESULTS.md). Census, held-out, judge and seam scorers: [eval/quality/](eval/quality/).
 
@@ -47,27 +47,29 @@ French, Italian and Portuguese.
 
 ## Approach
 
-- **Base:** Parakeet Ultra, the NeMo checkpoint.
+- **Base:** Parakeet Ultra as a NeMo checkpoint. The code downloads `ultra.nemo` from the Hugging Face repo [`ncannings/parakeet-ultra-nemo`](https://huggingface.co/ncannings/parakeet-ultra-nemo) at a pinned revision (`pipeline/modal_app.py`). Ultra itself is credited to Moondream (see Credits); we have not verified that this hosting repo is byte-identical to Moondream's release. The CoreML twin used for export is `FluidInference/parakeet-ultra-coreml`.
 - **What trains:** the prediction network and joint only, about 18M of 627M parameters. The
   encoder is frozen.
 - **Data:**
   - Synthetic speech of number-dense sentences with several spoken readings per value, voiced
-    with [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M).
+    with [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), Piper voices, or Google Cloud
+    Text-to-Speech voices (see Credits).
   - Real speech with no digits in its labels, so the rest of the model's behaviour holds:
-    LibriSpeech-PC, FLEURS.
-- **Compute:** a single GPU on Modal. The full run is expected to take a few GPU-hours.
+    LibriSpeech-PC, FLEURS, ICSI meetings.
+  - For the multilingual run, real speech whose caption numbers are relabelled with the reading heard in the audio (see [docs/RECIPE.md](docs/RECIPE.md)).
+- **Compute:** a single GPU on Modal. Model B's final stage was 1,000 steps; see [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for what you need to run it.
 - **Export:** the decoder and joint weights are written into the existing CoreML bundle layout, so
   the int8 encoder is reused unchanged.
 
 ## Evaluation
 
-Each step is compared against unmodified Parakeet Ultra run through the same scripts:
+Candidates are compared against unmodified Parakeet Ultra run through the same scripts. What this repo contains, and what it does not:
 
-1. Held-out synthetic sentences: number spans exact, no digit tokens.
-2. Real speech with numbers (Earnings-22): values preserved, nothing dropped or invented.
-3. General accuracy: LibriSpeech, AMI, VoxPopuli, and five FLEURS languages.
-4. Error shapes: homophones ("to"/"two"), deletions after numbers, tokens per frame.
-5. Export check: the CoreML bundle matches NeMo token for token.
+1. Held-out synthetic sentences and year minimal pairs: `pipeline/score_mp.py`, `pipeline/score_gold.py`. Included.
+2. Real speech with numbers (Earnings-21 / Earnings-22): `pipeline/data_e22.py`, `pipeline/e44_bar.py`, `pipeline/score_retrain.py`. Included for the NeMo-side scoring; the Earnings-21 audio itself is not.
+3. General accuracy (LibriSpeech, VoxPopuli, FLEURS): `pipeline/beds.py`, `pipeline/ft_eval.py`, `pipeline/score_retrain.py`. AMI and the streaming-decoder tests run in a harness that is **not included**; only its scorers are (`eval/quality/`).
+4. Error shapes (homophones, deletions after numbers): partly in `score_retrain.py`. Tokens-per-frame is **not included**.
+5. Export check: `pipeline/swap_weights.py --check` verifies that unchanged tensors round-trip byte for byte. A token-for-token comparison of the CoreML bundle against NeMo is **not included**.
 
 `eval/probe_items.tsv` is the spoken-form probe set: 59 number formats and 7 controls.
 
@@ -84,8 +86,13 @@ This work builds on other people's open models, data and code:
   bundle layout the export reuses, and the [FluidAudio](https://github.com/FluidInference/FluidAudio) SDK.
 - **Training framework:** [NVIDIA NeMo](https://github.com/NVIDIA/NeMo), [PyTorch](https://pytorch.org),
   [Lightning](https://github.com/Lightning-AI/pytorch-lightning).
-- **Synthetic speech:** [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) and
-  [Piper](https://github.com/rhasspy/piper) with [piper-voices](https://huggingface.co/rhasspy/piper-voices).
+- **Synthetic speech:** [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M),
+  [Piper](https://github.com/rhasspy/piper) with [piper-voices](https://huggingface.co/rhasspy/piper-voices), and
+  [Google Cloud Text-to-Speech](https://cloud.google.com/text-to-speech) (Chirp 3 HD voices), used by
+  `pipeline/ml_tts_cloud.py`, `ml_tts_fill.py`, `ml_tts_multi.py` and `ml_variety_synth.py`.
+- **Text generation:** the Gemini API (Gemini 2.5 Flash-Lite, `pipeline/ml_llm.py`, key in `GEMINI_API_KEY`) writes some
+  spoken readings and carrier sentences for the 16 languages of `ml_multi`, and drafts the numeral lexicon. It sees public
+  caption text only; every reading is parse-checked before use (see [docs/RECIPE.md](docs/RECIPE.md)).
 - **Label checks (CTC alignment):** [wav2vec 2.0 XLSR-53 fine-tunes](https://huggingface.co/jonatasgrosman)
   by Jonatas Grosman (de, es, fr, it, nl, pt),
   [wav2vec2-large-960h-lv60-self](https://huggingface.co/facebook/wav2vec2-large-960h-lv60-self) and
@@ -106,6 +113,11 @@ This work builds on other people's open models, data and code:
 
 Training data licenses: VoxPopuli (CC0), YODAS-Granary (CC BY 3.0; machine transcripts, used only where a
 reading check confirms them), FLEURS (CC BY 4.0), LibriSpeech-PC (CC BY 4.0), ICSI meetings (CC BY 4.0).
+
+Synthetic speech and generated text: the generators are public, but **no synthetic audio is distributed** with this
+repo, and none of the Google Cloud Text-to-Speech or Gemini output is redistributed. If you run those generators you
+need your own accounts and must follow each provider's terms of service, including any limits on how the output may
+be used (for example, training models). Kokoro and Piper voices carry their own licences; check each voice.
 
 Code: Apache-2.0. Model weights: CC BY 4.0, derived from
 [parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) (NVIDIA, CC BY 4.0) and

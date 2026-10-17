@@ -3,7 +3,7 @@
 Benchmarks behind [CONCEPTS.md](CONCEPTS.md). Each table names its bed, its size and its scorer.
 
 **Caveats that apply to everything here:**
-- Every number comes from one run per arm. There is no sealed holdout.
+- Every number comes from one run per arm. None of the seam beds below is a sealed holdout: both can be scored again and again. The sealed beds that RESTART.md and OBSERVATIONS.md mention are a different thing: the VoxPopuli, Earnings-21 and FLEURS sets decoded on the NeMo side with `eval_multi --sealed` (`ft_eval.SEALED3_SETS`), looked at once for the final candidate. They measure word accuracy of the English and multilingual model, and no table in this file uses them.
 - The seam beds run through a production streaming decoder that is not part of this repo. It uses ~15 s overlapping windows, a token-level merge, and a digit verbalizer for digits the model leaves. The scorers are in [`eval/quality/`](../eval/quality).
 
 **Models:**
@@ -23,7 +23,7 @@ Benchmarks behind [CONCEPTS.md](CONCEPTS.md). Each table names its bed, its size
 | seam-broken | 209 | 256 |
 | always-wrong | 580 | 615 |
 
-Seam-broken by language:
+Seam-broken by language (11 of the 22 languages are shown here; the totals above cover all 22):
 
 | Lang | B | R5-b |
 |---|---|---|
@@ -63,6 +63,8 @@ Seam-broken by language:
 
 ## 3. Merge-side fixes (negative results)
 Both fixes were tested by replaying the recorded window decodes through alternative merge policies. Replays of the production policy reproduce the recorded runs exactly on the synthetic bed.
+
+**The "real" columns are not the section 2 totals.** The merge prototype replayed its own run of the real bed, with slightly different totals (production 410 and 418 here, against 92 + 240 lenient or 116 + 340 strict for B in section 2). Its replay was also not fully faithful on the real bed: 7 files differed from the recorded run by 0 to 4 tokens. Compare the policies with each other within a column, not with section 2.
 
 **Wrong readings (seam-broken + always-wrong):**
 

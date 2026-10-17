@@ -4,19 +4,31 @@
 
 Cliff notes for picking up spoken-form Parakeet training. They cover where things stand, what worked, what failed, and the exact path to the next run. Details:
 
-- The run-by-run history of both campaigns (v1–v10, retrain-1 to -4) is kept with the private evaluation records; the sections below carry what a restart needs.
-- [`docs/REPO_GUIDE.md`](docs/REPO_GUIDE.md): every script, every Modal function, the volume layout, and what is not in git.
+- The run-by-run history of both campaigns (v1–v10, retrain-1 to -4) is not in this repo; the sections below carry what a restart needs.
+- [`docs/REPO_GUIDE.md`](docs/REPO_GUIDE.md): a short map of the modules by stage. [`docs/RECIPE.md`](docs/RECIPE.md) is the data recipe; [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) lists dependencies and credentials.
 - [`OBSERVATIONS.md`](OBSERVATIONS.md): B's measured strengths and weaknesses, likely causes, and ideas for the next run.
 - [`runs/`](runs/): the launch scripts actually used (model B lineage, retrain-1/2, v12).
 - [`docs/NEXT_RUN.md`](docs/NEXT_RUN.md): the proposed next run (spoken-form numbers in de/es/fr/it/nl/pt, Greek, English drop fix).
 
-## 1. Where things stand (2026-10-14)
+## 0. Current data phase (run 2, 2026-10-17)
+
+The state above (section 1) is the model-B state. Since then the work is data only: spoken-form rows for 17 languages plus English, with long numbers cut across window seams. No training run starts before the census passes its bar and the maintainer approves that run. Order, all `modal run` commands from `pipeline/` (details in [`docs/RECIPE.md`](docs/RECIPE.md)):
+
+1. `ml_p3.py::label2` per language: label real speech with the heard reading.
+2. Judge each pass against the second transcript (`eval/quality/judge_reject.py`, `judge_plro.py`), then write the `judged_<pass>.json` marker and merge the rejects (manual unless `judge_plro.py --upload`).
+3. `ml_p3.py::windows2` and `ml_p3.py::seam_crops` (`--min-words 3` for the long-number set `seam_long`).
+4. `modal_app.py::build_mix4` with the run-2 flags (RECIPE section 11).
+5. `eval/quality/data_gate.py <mix dir>` (census; English needs a `p3_en.jsonl` that this repo does not build).
+6. If it passes and the maintainer approves: `modal_app.py::retrain3 --mix v4 --mix-dir <dir> ...`.
+7. `modal_app.py::probe_heldout`, then `eval/quality/score_heldout.py` on the pulled hyps.
+
+## 1. Where things stand (model B, 2026-10-14)
 
 - **Released to users:** stock Parakeet Ultra (`FluidInference/parakeet-ultra-coreml@95eaa59a`), in the current public release. No fine-tune has been released yet.
 - **Next release:** **model B** = `w3soup_a0.5@0`, published at `MimicScribe/parakeet-ultra-spoken-coreml@5edfc817ce69dcdf4ca7839bff5ad738e9d390b8` and queued for the next app release.
   - Checkpoint: `/vol/exp/w3soup_a0.5/step0.pt`. A local backup with SHA-256s exists outside this repo.
 - **Earlier fine-tunes, pinned on main but never released:** v9pr30 (HF `06d73144`), then v10pt (HF `ccdb31c9`).
-- **No new run is justified right now.** See section 5 for what would justify one.
+- **No corrective run from B is justified right now.** See section 5 for what would justify one; run 2 (section 0) is a separate, data-first effort.
 
 ## 2. Model B in one paragraph
 
@@ -74,7 +86,7 @@ Measurement traps that produced false results:
 
 **A run is justified by:** a measured, model-side problem (English or multi-language) that a few-hundred-step corrective run can plausibly move. Greek alone does not qualify (maintainer decision).
 
-**Fold in if a run happens** (details in [`OBSERVATIONS.md`](OBSERVATIONS.md) §2:
+**Fold in if a run happens** (details in [`OBSERVATIONS.md`](OBSERVATIONS.md) §2):
 1. **Greek final ς rows restored:** `mix_build.restore_unk_nonen`, run by `patch_mix3`. Committed, not yet trained.
 2. **Short-phrase drops.** Two hypotheses; test which one holds before changing anything:
    - **Data:** CE on caption labels that omit backchannels.
@@ -110,9 +122,12 @@ modal run modal_app.py::share_v3                              # number share mus
 modal run --detach modal_app.py::retrain3 --run r4_X --mix v3 --arm S-B --dur-weight 0 \
   --init-from w3soup_a0.5@0 --anchor-init --lr 3e-5 --warmup 20 --max-steps 1000 --save-every 250
 modal run modal_app.py::soup3 --run r4_X --steps 500,750,1000 --alphas 1.0,0.5 --base w3soup_a0.5@0 --name r4soup
-modal run modal_app.py::eval_multi --runs "w3soup_a0.5@0,r4soup_a1.0@0,r4soup_a0.5@0" --tag _c
-python score_retrain.py <pulled hyps> "<runs>" --base w3soup_a0.5@0_c --json scores.json
+modal run modal_app.py::eval_multi --runs "ultra,w3soup_a0.5@0,r4soup_a1.0@0,r4soup_a0.5@0" --tag _c
+# pull hyps/ from the volume, then (run names get the tag appended; stock "ultra" scores as ultra_rt_c):
+python score_retrain.py <pulled hyps> "ultra_rt_c,w3soup_a0.5@0_c,r4soup_a1.0@0_c,r4soup_a0.5@0_c" --base --json scores.json
+# to pick a checkpoint against B, add: --select --base w3soup_a0.5@0_c
 ```
+In `score_retrain.py`, `--base` alone turns on the FLEURS comparison against stock (`ultra_rt_c`). Only with `--select` is the value after `--base` read, as the baseline for the selection. `ultra` must be in the `eval_multi` run list: the stock default for `_c` runs is `ultra_rt_c`.
 `retrain3` defaults do NOT match B's recipe: always pass `--dur-weight 0`, `--mix`, `--init-from`, and `--base` on `soup3`. The exact B commands are in [`runs/model_b/ws3.sh`](runs/model_b/ws3.sh).
 
 **B. Rebuild the warm-start root from stock** (only if the volume is lost):
@@ -135,10 +150,10 @@ These flags come from [`runs/v12/train.sh`](runs/v12/train.sh) (v12 = the v10pt 
 1. `export_weights --run <run> --step 0`.
 2. `swap_weights.py <stock bundle> decoder_joint.safetensors <out bundle>`. Use `--check` on stock tensors first: it must round-trip byte-identical.
 3. Upload the three weight files to `MimicScribe/parakeet-ultra-spoken-coreml`.
-4. Re-pin the new revision and file hashes in the consuming app.
+4. Pin the new revision and file hashes in the downstream application that consumes the bundle.
 5. The maintainer approves every upload and push.
 
-**D. Evaluation in a consuming application** is not part of this repo. Rule that matters here: compare candidates on one frozen build, and confirm which weights each run loaded.
+**D. Evaluation in a downstream application** is not part of this repo. Rule that matters here: compare candidates on one frozen build, and confirm which weights each run loaded.
 
 ## 7. Not in git (needed for a restart)
 

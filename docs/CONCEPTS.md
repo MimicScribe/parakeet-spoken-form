@@ -23,8 +23,8 @@ A model that writes words for some numbers and digits for others, followed by a 
 
 - Digits-only baseline: consistent, few breaks.
 - Fully converted English: consistent, about 0 breaks.
-- A blended (soup) checkpoint at alpha 0.5: converted about 40-48% of numbers (Portuguese 19%) and left 50-59% as digits. Seam breaks were worse than the digits-only baseline (209 to 256 in the app-path test).
-- Numbers that mix digits and words inside one number were only 0.3-2.6%, so the split is between numbers, not within one.
+- A blended (soup) checkpoint at alpha 0.5: converted 38-48% of numbers (Portuguese 19%) and left 50-59% as digits (Portuguese 80%). Seam breaks were worse than the digits-only baseline (209 to 256 in the app-path test).
+- Numbers that mix digits and words inside one number were only 0.3-2.2% at alpha 0.5 (RESULTS section 4), so the split is between numbers, not within one.
 
 Lesson: pick candidates by **conversion completeness under a damage gate**. Among candidates that stay inside the no-damage limits, take the most converted. Raw accuracy alone will choose a half-converted model.
 
@@ -48,7 +48,7 @@ No single source is trusted. A reading becomes a label when independent evidence
 - partial rows: keep verified pieces around undecided spans rather than dropping the clip;
 - judge audits on samples, and on every reject class, before a reject rate is believed.
 
-Synthetic readings are built **in code from the grammar table, never by an LLM**. An LLM-written phone reading was the top reject cause: it dropped, merged or re-grouped digits. Code can be tested for gender, case and cents rules; an LLM cannot be.
+Where a reading can be built in code from the grammar table, it is (English and the larger European languages, and the phone, date and long-number sets). An LLM-written phone reading was the top reject cause: it dropped, merged or re-grouped digits. Code can be tested for gender, case and cents rules; an LLM cannot be. For the 16 languages without a tested reader, an LLM writes some spoken readings (and proposes candidate readings for real captions), but a reading is used only if it parses back to the written value and leaves the rest of the sentence unchanged; the CTC fit, second transcript and judges then apply as usual.
 
 ## 5. Census before training
 
@@ -65,3 +65,16 @@ Counts alone are not enough; check the spread of values. Many repeated failures 
 ## 6. Form conventions follow the audio
 
 Do not canonicalise how a number is read. People say phone numbers in pairs, in triples or digit by digit; "nineteen ninety" and "one thousand nine hundred ninety"; "thirteen hundred" and "one thousand three hundred". A label that forces one convention teaches the model to ignore what was said, and reintroduces the guessing that spoken form was meant to remove. Take the reading the evidence supports, keep several readings per value in the grammar table, and census the forms rather than normalising them.
+
+## Glossary
+
+- **Wave 1 / run 2:** wave 1 is the first six languages (de, es, fr, it, nl, pt). Run 2 is the data phase for 17 languages plus English, with long numbers across window seams.
+- **mix4 / mix4final:** the run-2 training mix built by `build_mix4`; `mix4final` is the candidate build (`--final`) written to its own directory.
+- **P3:** the real-speech labelling pipeline (`ml_p3.py`): caption numbers relabelled with the reading heard in the audio.
+- **ext:** the second transcript from a separate recognizer, used as independent evidence (`ext.jsonl`).
+- **B / R5-b:** B is the published model; R5-b is the previous spoken-form run on the wave-1 data (a soup at alpha 0.5 back toward B).
+- **Window:** one overlapping chunk of audio the streaming decoder transcribes; a training window crop mimics that geometry.
+- **Seam pair:** two adjacent window crops cut inside a number, each labelled only with what its side heard.
+- **seam_long:** seam pairs restricted to cuts inside readings of 3 or more words (`seam_crops --min-words 3`).
+- **Anchor:** FLEURS digit rows of the languages a run does not train, listed `--anchor18` times and held at stock behaviour (KL to stock), so those languages keep writing digits.
+- **Census:** the per-language, per-class count of spans and value spread in a mix, checked before any run (`data_gate.py`).

@@ -34,9 +34,9 @@ code4	code	Check issue sixty six on the feedback board.	66
 part1	part	Order part number A B three seven seven dash two.	AB377-2|AB 377-2|AB3772
 part2	part	The model is an M four Pro with twenty four gigs of RAM.	M4 Pro
 part3	part	Use the RTX forty ninety for training.	4090
-email1	email	Send it to support at mimicscribe dot app.	support@mimicscribe.app
+email1	email	Send it to support at example dot com.	support@example.com
 email2	email	My address is john dot smith at gmail dot com.	john.smith@gmail.com
-url1	url	The docs are at mimicscribe dot app slash feedback.	mimicscribe.app/feedback
+url1	url	The docs are at example dot com slash feedback.	example.com/feedback
 url2	url	Go to github dot com slash nvidia slash nemo.	github.com/nvidia/nemo
 date1	date	The launch is on October seventh twenty twenty six.	October 7, 2026|October 7th, 2026
 date2	date	We started back in March of twenty twenty four.	2024

@@ -1,6 +1,6 @@
 # Next training run: proposal (2026-10-14, proposal only)
 
-**Maintainer decision 2026-10-14: the goal is spoken-form numbers in ALL 25 languages, eventually** ("I want everything in spoken form"). Digits from the model become the exception. The app's number reader stays as the backstop for any digits the model still writes.
+**Maintainer decision 2026-10-14: the goal is spoken-form numbers in ALL 25 languages, eventually** ("I want everything in spoken form"). Digits from the model become the exception. A downstream application's number reader stays as the backstop for any digits the model still writes.
 
 Builds on [`OBSERVATIONS.md`](../OBSERVATIONS.md) and [`RESTART.md`](../RESTART.md). Init from model B (`w3soup_a0.5@0`). Same method as B: decoder + joint only, KL to stock, `dur_weight 0`, soup + α blend.
 
