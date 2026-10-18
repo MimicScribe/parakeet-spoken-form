@@ -1902,8 +1902,10 @@ def _seam_rows(base: str, files=SEAM_FILES, bare_first: bool = False) -> list:
 # has), and the synthetic sets' train rows (ml_p3.syn_seam_crops, SYN_SEAM_LONG_FILES: their own parent rule,
 # keep_syn_pairs). Synthetic-set windows (windows_syn) join the synthetic windows (TTS_SHARE of win_h). Every synthetic
 # pair / window row carries synthetic=True.
-SEAM_LONG_FILES = ("seam_long", "seam_long_b", "seam_long_c")  # _b: the full stream set (seed 1), _c: seed 2
-SYN_SEAM_LONG_FILES = ("seam_long_syn", "seam_long_syn2")  # syn2: the second-batch sets (ttsYRs / YRn / LTw / LTr)
+# real top-ups: _b the full stream set (seed 1), _c / _d / _e seeds 2 / 3 / 4 (re-stitched streams, new cuts only)
+SEAM_LONG_FILES = ("seam_long", "seam_long_b", "seam_long_c", "seam_long_d", "seam_long_e")
+# syn2: the second-batch sets (ttsYRs / YRn / LTw / LTr); syn3 / syn4: every set, seeds 2 / 3 (re-stitched streams)
+SYN_SEAM_LONG_FILES = ("seam_long_syn", "seam_long_syn2", "seam_long_syn3", "seam_long_syn4")
 WIN_FILES = ("windows", "windows_syn", "windows_syn2")
 
 
