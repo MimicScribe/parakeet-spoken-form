@@ -57,7 +57,7 @@ class Replacing(unittest.TestCase):
             self.assertIs(st["italian_split_elided"], want, sl)
         st = MB.build4(self.vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True, split_langs=("de",))
         self.assertNotIn("italian_split_elided", st)
-        self.assertTrue(CS.IT_SPLIT_ELIDED)  # owner decision: always split
+        self.assertTrue(CS.IT_SPLIT_ELIDED)  # default: always split
 
 
 if __name__ == "__main__":
