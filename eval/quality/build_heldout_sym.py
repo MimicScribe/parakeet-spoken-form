@@ -100,21 +100,27 @@ def row_classes(r: dict, lang: str) -> collections.Counter:
     return collections.Counter(CC.gate_class(r, sp, lang) for sp in r.get("spans") or [])
 
 
-def build(lang: str, work: Path, base_mix: str, train_mixes: list) -> tuple:
+def build(lang: str, work: Path, base_mix: str, train_mixes: list, extra_passes=(), extra_rej: Path = None, text_only=()) -> tuple:
     w = work / "p3v2" / lang
     fetch(work, f"ml/p3v2/heldout_{lang}.txt")
     listing = V.vlist(f"ml/p3v2/{lang}")
     names = sorted(n for n in listing if re.fullmatch(r"(rows[a-z0-9_]*|val_[a-z0-9_]*)\.jsonl", n))
-    for n in names:
+    extra_names = [f"{x}.jsonl" for x in extra_passes if f"{x}.jsonl" in listing]  # a pass outside the rows* / val_* globs
+    for n in names + extra_names:
         fetch(work, f"ml/p3v2/{lang}/{n}")
     rej_p = fetch(work, f"ml/p3v2/{lang}/reject_ids.txt")
     rej = {l.strip() for l in open(rej_p) if l.strip()} if rej_p.exists() else set()
+    if extra_rej and (extra_rej / f"{lang}_reject_ids.txt").exists():  # the new pass's judge rejects, never uploaded
+        rej |= {l.strip() for l in open(extra_rej / f"{lang}_reject_ids.txt") if l.strip()}
     held, units = CC.read_held_list(work / "p3v2" / f"heldout_{lang}.txt")
     vals = [n for n in names if n.startswith("val_")]
     val_rows = [(n, r) for n in vals for r in rd(w / n)]
     held |= {r["id"] for _, r in val_rows}
     passes = sorted((w / n for n in names if n.startswith("rows")), key=lambda p: (not p.name.endswith("_regional.jsonl"), str(p)))
     row_src = {}
+    for n in extra_names:  # judged new pass: its rows are labelled and judged like rows*; held out by construction (units)
+        for r in rd(w / n):
+            row_src.setdefault(r["id"], (n[:-6], r))
     for p in reversed(passes):  # carve_heldout / mix_build._one_per_id: a regional pass first, else the first in name order
         for r in rd(p):
             row_src[r["id"]] = (p.stem, r)
@@ -124,6 +130,19 @@ def build(lang: str, work: Path, base_mix: str, train_mixes: list) -> tuple:
     base = rd(work / base_mix / f"heldout_{lang}.jsonl")
     base_ids = {r["id"] for r in base}
     tr = training_index(work, train_mixes, lang)
+    for pat in text_only:  # synthetic parts (ttsSYM1*, win15*): the text only
+        remote = pat.format(lang=lang)
+        d, _, f = remote.rpartition("/")
+        try:
+            if f not in V.vlist(d):
+                continue
+        except V.VolumeReadError:
+            continue
+        for r in rd(fetch(work, remote)):
+            for t in (r.get("text"), r.get("caption"), r.get("written"), r.get("label")):
+                if t and len(norm(t).split()) >= 4:
+                    tr["texts"].add(norm(t))
+        tr.setdefault("text_only_files", []).append(remote)
     rep = collections.Counter()
     out = []
     for r in base:
@@ -158,6 +177,7 @@ def build(lang: str, work: Path, base_mix: str, train_mixes: list) -> tuple:
         rep["extra_kept"] += 1
         out.append(dict(r, sym_origin="extra:" + name, sym_classes={k: v for k, v in c.items() if v}))
     rep["overlap_units"] = len(units_hit)
+    rep["text_only_files"] = len(tr.get("text_only_files", []))
     return out, rep
 
 
@@ -168,14 +188,18 @@ def main():
     ap.add_argument("--base-mix", default="mix4final9b")
     ap.add_argument("--train-mixes", default="mix4final9b,mix4final8")
     ap.add_argument("--out", default="")
+    ap.add_argument("--extra-pass", default="", help="comma list of label2 pass names outside rows* / val_* (e.g. symho_v2)")
+    ap.add_argument("--extra-rejects", default="", help="dir with <lang>_reject_ids.txt of those passes (judge output, local)")
+    ap.add_argument("--text-only", default="", help="comma list of volume paths with {lang}: synthetic parts compared by text only")
     ap.add_argument("--put", default="", help="NEW volume path, e.g. eval/heldout_sym_v1 (refused when it exists)")
     a = ap.parse_args()
-    work = Path(a.work)
+    work = Path(a.work).resolve()  # modal runs with cwd=pipeline/: a relative path would land there
     out_dir = Path(a.out or work / "out")
     out_dir.mkdir(parents=True, exist_ok=True)
     allrows, table = [], {}
     for lang in a.langs.split(","):
-        rows, rep = build(lang, work, a.base_mix, a.train_mixes.split(","))
+        rows, rep = build(lang, work, a.base_mix, a.train_mixes.split(","), [x for x in a.extra_pass.split(",") if x],
+                          Path(a.extra_rejects) if a.extra_rejects else None, [x for x in a.text_only.split(",") if x])
         with open(out_dir / f"{lang}.jsonl", "w", encoding="utf-8") as f:
             for r in rows:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
