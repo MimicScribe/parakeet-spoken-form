@@ -15,18 +15,16 @@ Reference transcripts are a weak test for number seams, because most references 
 
 We do **not** train on the harness outputs. The harness only measures. Training data comes from real and separately synthesised speech, so the test stays independent of the training set.
 
-Measured breakdown (numbers being rescored): on the synthetic bank, about 70% of model B's long-number seam breaks were merge-made splices (94 of 130); the rest were edge garbles inside one window. On real held-out speech about 50% of breaks were merge-touched (RESULTS sections 1 and 2).
+Measured breakdown: on the synthetic bank, about 70% of model B's long-number seam breaks were merge-made splices (94 of 130); the rest were edge garbles inside one window. On real held-out speech about 50% were merge-touched (57 of 116; RESULTS sections 1 and 2).
 
 ## 2. Half-conversion causes seam breaks
-
-*(The seam-break figures in this file are the earlier scoring and are being rescored: total wrong becomes the headline, strict replaces lenient, and a boundary guard is added. Treat the numbers as provisional; the reasoning stands.)*
 
 A model that writes words for some numbers and digits for others, followed by a downstream digit-to-words step, is the worst of both. Two overlapping windows decode the same audio; one writes the number as words, the other as digits, and the later step reads the digits in its own grammar. The two forms differ, the merge has nothing to align on, and the stitch splices them.
 
 - Digits-only baseline: the windows agree on the form; seam breaks were not tabulated for it here.
 - English: 0 seam breaks in both B and R5-b on the synthetic bank, so English does not separate them.
-- Model B has 209 seam breaks on the 22-language synthetic bank, mostly outside English.
-- R5-b, a blended (soup) checkpoint at alpha 0.5, converted 38-48% of numbers on real held-out speech in 6 languages (Portuguese 19%) and left 50-59% as digits (Portuguese 80%). On the 22-language synthetic bank its seam breaks rose from 209 to 256 in a streaming-decoder test. On real speech the difference (92 to 101 lenient, 116 to 130 strict) is within noise. These are three different populations; do not add them up.
+- Model B has 212 seam breaks (767 wrong readings in total) on the 22-language synthetic bank, mostly outside English.
+- R5-b, a blended (soup) checkpoint at alpha 0.5, converted 38-48% of numbers on real held-out speech in 6 languages (Portuguese 19%) and left 50-59% as digits (Portuguese 80%). On the synthetic bank its wrong readings rose from 767 to 856 (seam breaks 212 to 251). On real speech they rose from 466 to 509 (strict; +43, 90% CI +9 to +81), with wave 1 alone within noise. By language only German is clearly worse. These are three different populations; do not add them up.
 - Numbers that mix digits and words inside one number were only 0.3-2.2% at alpha 0.5 (RESULTS section 4), so the split is between numbers, not within one.
 
 Hypothesis (one run per arm, not yet tested at alpha 1.0): the half-conversion is what raised the breaks.
