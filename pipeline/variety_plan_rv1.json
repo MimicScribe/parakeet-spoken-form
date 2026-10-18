@@ -1,0 +1,554 @@
+{
+ "note": "Reading-variety fill plan (census of 2026-10-18): per language x class the target share of each reading convention (reading_conv names). replace = the cell keeps its synthetic size, new readings replace rows of over-represented conventions; grow = add rows. basis R = real-speech shares, E = native-usage estimate. The range grow cells (de es fr it pt) were left out (2026-10-18 review: real speech meets the range bar and B already reads ranges well); the nl range replacement stays.",
+ "cells": [
+  {
+   "lang": "de",
+   "cls": "clock",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "digital_hourword": 0.45,
+    "digital_bare": 0.05,
+    "oclock_hourword": 0.1,
+    "half_next": 0.15,
+    "quarter_past": 0.08,
+    "quarter_to": 0.07,
+    "min_past": 0.05,
+    "min_to": 0.03,
+    "near_half": 0.02
+   },
+   "basis": "E (real 344 spans are 92% parliament '14.30 Uhr'; phrase rows: halb 19, Viertel 6)",
+   "realizer": "R1"
+  },
+  {
+   "lang": "nl",
+   "cls": "clock",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "digital_hourword": 0.35,
+    "digital_bare": 0.07,
+    "oclock_hourword": 0.08,
+    "half_next": 0.22,
+    "quarter_past": 0.09,
+    "quarter_to": 0.09,
+    "near_half": 0.05,
+    "min_past": 0.03,
+    "min_to": 0.02
+   },
+   "basis": "R (real 98: 42% relative)",
+   "realizer": "R1"
+  },
+  {
+   "lang": "es",
+   "cls": "clock",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "oclock": 0.22,
+    "digital_joiner": 0.28,
+    "digital_bare": 0.05,
+    "digital_hourword": 0.05,
+    "half_past": 0.17,
+    "quarter_past": 0.08,
+    "quarter_to": 0.08,
+    "min_to": 0.05,
+    "noon_midnight": 0.02
+   },
+   "basis": "R+E (real spans mostly 'a las siete de la tarde'; 'y media' in 88 real rows)",
+   "realizer": "R1"
+  },
+  {
+   "lang": "fr",
+   "cls": "clock",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "digital_hourword": 0.55,
+    "digital_bare": 0.05,
+    "oclock_hourword": 0.05,
+    "half_past": 0.1,
+    "quarter_past": 0.07,
+    "quarter_to": 0.07,
+    "min_to": 0.05,
+    "noon_midnight": 0.06
+   },
+   "basis": "R+E (real 182: 90% 'quatorze heures quinze')",
+   "realizer": "R1"
+  },
+  {
+   "lang": "it",
+   "cls": "clock",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "digital_joiner": 0.55,
+    "digital_bare": 0.05,
+    "oclock": 0.1,
+    "half_past": 0.12,
+    "quarter_past": 0.06,
+    "quarter_to": 0.06,
+    "min_to": 0.03,
+    "noon_midnight": 0.03
+   },
+   "basis": "R+E (real 208)",
+   "realizer": "R1"
+  },
+  {
+   "lang": "pt",
+   "cls": "clock",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "digital_joiner": 0.45,
+    "digital_bare": 0.03,
+    "oclock": 0.08,
+    "half_past": 0.25,
+    "quarter_past": 0.04,
+    "quarter_to": 0.06,
+    "min_to": 0.05,
+    "noon_midnight": 0.04
+   },
+   "basis": "R (real 529: 'e meia' 34%)",
+   "realizer": "R1"
+  },
+  {
+   "lang": "de",
+   "cls": "phone",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "digits": 0.5,
+    "pairs": 0.3,
+    "mixed_natural": 0.1,
+    "1+2_splits": 0.05,
+    "hundreds": 0.05
+   },
+   "basis": "E (real 7 numbers); + 'zwo' for 2 in ~30% of numbers",
+   "realizer": "R2+R3"
+  },
+  {
+   "lang": "nl",
+   "cls": "phone",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "digits": 0.5,
+    "pairs": 0.35,
+    "mixed_natural": 0.05,
+    "1+2_splits": 0.05,
+    "hundreds+pairs": 0.05
+   },
+   "basis": "E (real 8 numbers)",
+   "realizer": "R2"
+  },
+  {
+   "lang": "es",
+   "cls": "phone",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "1+2_splits": 0.46,
+    "pairs": 0.27,
+    "digits": 0.17,
+    "hundreds+pairs": 0.05,
+    "hundreds": 0.01,
+    "mixed_natural": 0.04
+   },
+   "basis": "R (real 957 numbers)",
+   "realizer": "R2"
+  },
+  {
+   "lang": "fr",
+   "cls": "phone",
+   "mode": "grow",
+   "add": 33,
+   "target": {
+    "pairs": 0.5,
+    "hundreds+pairs": 0.2,
+    "digits": 0.12,
+    "1+2_splits": 0.08,
+    "hundreds": 0.07,
+    "mixed_natural": 0.03
+   },
+   "basis": "R (real 196) weighted to France 2-2-2-2-2",
+   "realizer": "R2"
+  },
+  {
+   "lang": "it",
+   "cls": "phone",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "digits": 0.47,
+    "pairs": 0.4,
+    "hundreds+pairs": 0.09,
+    "1+2_splits": 0.02,
+    "mixed_natural": 0.02
+   },
+   "basis": "R (real 57)",
+   "realizer": "R2"
+  },
+  {
+   "lang": "pt",
+   "cls": "phone",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "pairs": 0.43,
+    "1+2_splits": 0.33,
+    "digits": 0.11,
+    "hundreds": 0.1,
+    "mixed_natural": 0.03
+   },
+   "basis": "R (real 122); + BR 'meia' for 6 in ~half the numbers",
+   "realizer": "R2+R3"
+  },
+  {
+   "lang": "de",
+   "cls": "year:1800s-1900s",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "hundreds": 0.79,
+    "two_digit": 0.15,
+    "pairs": 0.04,
+    "thousands": 0.02
+   },
+   "basis": "R",
+   "realizer": "R4"
+  },
+  {
+   "lang": "de",
+   "cls": "year:2000s",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "thousands": 0.88,
+    "pairs": 0.1,
+    "two_digit": 0.02
+   },
+   "basis": "R",
+   "realizer": "R4"
+  },
+  {
+   "lang": "fr",
+   "cls": "year:1800s-1900s",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "thousands": 0.69,
+    "hundreds": 0.15,
+    "two_digit": 0.16
+   },
+   "basis": "R",
+   "realizer": "R4"
+  },
+  {
+   "lang": "fr",
+   "cls": "year:2000s",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "thousands": 0.98,
+    "pairs": 0.02
+   },
+   "basis": "R",
+   "realizer": "R4"
+  },
+  {
+   "lang": "it",
+   "cls": "year:1800s-1900s",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "thousands": 0.83,
+    "two_digit": 0.17
+   },
+   "basis": "R",
+   "realizer": "R4"
+  },
+  {
+   "lang": "it",
+   "cls": "year:2000s",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "thousands": 0.97,
+    "pairs": 0.02,
+    "two_digit": 0.01
+   },
+   "basis": "R",
+   "realizer": "R4"
+  },
+  {
+   "lang": "nl",
+   "cls": "year:1800s-1900s",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "pairs": 0.75,
+    "hundreds": 0.22,
+    "pairs_zero": 0.03
+   },
+   "basis": "R (real 536: 78% pairs)",
+   "realizer": "R4"
+  },
+  {
+   "lang": "nl",
+   "cls": "year:2000s",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "thousands": 0.88,
+    "pairs": 0.12
+   },
+   "basis": "E (real 0 pairs; nl second transcript writes digits)",
+   "realizer": "R4"
+  },
+  {
+   "lang": "pt",
+   "cls": "year:1800s-1900s",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "thousands": 0.83,
+    "two_digit": 0.17
+   },
+   "basis": "R",
+   "realizer": "R4"
+  },
+  {
+   "lang": "es",
+   "cls": "year:1800s-1900s",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "thousands": 0.97,
+    "two_digit": 0.03
+   },
+   "basis": "R",
+   "realizer": "R4"
+  },
+  {
+   "lang": "de",
+   "cls": "cur",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "unit+cents": 0.5,
+    "bare_no_unit": 0.25,
+    "unit+join+cents+centword": 0.08,
+    "unit+cents+centword": 0.05,
+    "unit+join+cents": 0.04,
+    "decimal_word+unit": 0.05,
+    "cents_only": 0.03
+   },
+   "basis": "R+E (real 55 cents prices, 95% 'zwei Euro fünfzig'; bare not a candidate)",
+   "realizer": "R5"
+  },
+  {
+   "lang": "nl",
+   "cls": "cur",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "unit+cents": 0.45,
+    "bare_no_unit": 0.25,
+    "unit+join+cents+centword": 0.1,
+    "unit+cents+centword": 0.05,
+    "unit+join+cents": 0.05,
+    "decimal_word+unit": 0.05,
+    "cents_only": 0.05
+   },
+   "basis": "E (real 12)",
+   "realizer": "R5"
+  },
+  {
+   "lang": "es",
+   "cls": "cur",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "unit+join+cents": 0.25,
+    "unit+join+cents+centword": 0.15,
+    "bare_joiner": 0.15,
+    "unit+cents": 0.15,
+    "unit+cents+centword": 0.05,
+    "decimal_word+unit": 0.1,
+    "bare_no_unit": 0.05,
+    "cents_only": 0.1
+   },
+   "basis": "R (real ~70 cents prices)",
+   "realizer": "R5"
+  },
+  {
+   "lang": "fr",
+   "cls": "cur",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "unit+cents": 0.62,
+    "unit+join+cents": 0.1,
+    "unit+join+cents+centword": 0.05,
+    "unit+cents+centword": 0.05,
+    "decimal_word+unit": 0.06,
+    "bare_no_unit": 0.07,
+    "cents_only": 0.05
+   },
+   "basis": "R (real 124: 73% 'vingt-cinq euros soixante-quinze')",
+   "realizer": "R5"
+  },
+  {
+   "lang": "it",
+   "cls": "cur",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "unit+join+cents": 0.35,
+    "bare_joiner": 0.3,
+    "unit+join+cents+centword": 0.1,
+    "unit+cents": 0.1,
+    "decimal_word+unit": 0.05,
+    "cents_only": 0.05,
+    "bare_no_unit": 0.05
+   },
+   "basis": "R+E (real 13; drop the 20 'euro virgola .. centesimi' hybrids)",
+   "realizer": "R5"
+  },
+  {
+   "lang": "pt",
+   "cls": "cur",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "bare_joiner": 0.5,
+    "unit+join+cents+centword": 0.2,
+    "unit+join+cents": 0.15,
+    "cents_only": 0.07,
+    "decimal_word+unit": 0.03,
+    "unit+cents": 0.03,
+    "unit+cents+centword": 0.02
+   },
+   "basis": "R (real 279: 69% 'vinte e três e noventa')",
+   "realizer": "R5"
+  },
+  {
+   "lang": "it",
+   "cls": "dec",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "comma_1digit": 0.65,
+    "comma_as_number": 0.17,
+    "comma_digitwise": 0.03,
+    "point_1digit": 0.1,
+    "half_word": 0.05
+   },
+   "basis": "R (2-digit fractions: 23 as number vs 4 digit-wise)",
+   "realizer": "R6"
+  },
+  {
+   "lang": "nl",
+   "cls": "dec",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "comma_1digit": 0.6,
+    "comma_as_number": 0.15,
+    "comma_digitwise": 0.1,
+    "point_1digit": 0.05,
+    "half_word": 0.1
+   },
+   "basis": "R+E ('tweeënhalf')",
+   "realizer": "R6"
+  },
+  {
+   "lang": "fr",
+   "cls": "dec",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "comma_1digit": 0.5,
+    "comma_as_number": 0.2,
+    "comma_digitwise": 0.08,
+    "point_1digit": 0.15,
+    "half_word": 0.07
+   },
+   "basis": "R",
+   "realizer": "R6"
+  },
+  {
+   "lang": "es",
+   "cls": "dec",
+   "mode": "grow",
+   "add": 60,
+   "target": {
+    "con": 0.65,
+    "half_word": 0.35
+   },
+   "basis": "E ('tres con cinco', 'dos y medio'; con not a candidate)",
+   "realizer": "R6"
+  },
+  {
+   "lang": "nl",
+   "cls": "pct",
+   "mode": "grow",
+   "add": 40,
+   "target": {
+    "percent": 1.0
+   },
+   "basis": "E (nl 'percent' beside 'procent'; not a candidate)",
+   "realizer": "R7"
+  },
+  {
+   "lang": "es",
+   "cls": "pct",
+   "mode": "grow",
+   "add": 20,
+   "target": {
+    "por cien": 1.0
+   },
+   "basis": "E ('cien por cien'; not a candidate)",
+   "realizer": "R7"
+  },
+  {
+   "lang": "nl",
+   "cls": "int_big",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "hundreds": 0.3,
+    "full": 0.7
+   },
+   "basis": "E ('vijftienhonderd euro'; not a candidate for non-years)",
+   "realizer": "R8"
+  },
+  {
+   "lang": "de",
+   "cls": "int_big",
+   "mode": "grow",
+   "add": 60,
+   "target": {
+    "hundreds": 1.0
+   },
+   "basis": "E ('fünfzehnhundert Euro')",
+   "realizer": "R8"
+  },
+  {
+   "lang": "nl",
+   "cls": "range",
+   "mode": "replace",
+   "add": 0,
+   "target": {
+    "tot": 0.35,
+    "van..tot": 0.2,
+    "between..en": 0.2,
+    "a": 0.2,
+    "of": 0.05
+   },
+   "basis": "E ('twee à drie'; à not a joiner)",
+   "realizer": "R9"
+  }
+ ]
+}

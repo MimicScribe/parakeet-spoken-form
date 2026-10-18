@@ -368,7 +368,7 @@ _DEC_ALT = {"de": {"punkt"}, "nl": {"punt"}, "it": {"punto"}, "es": {"punto"}, "
 _SCALE_VALS = {Decimal(10) ** 3, Decimal(10) ** 6, Decimal(10) ** 9, Decimal(10) ** 12}
 _WEAK = {"en": {"one", "second", "hundreds", "thousands", "millions", "billions"}, "de": {"ein", "eins", "eine", "einen", "einem", "einer", "eines"}, "nl": {"een"}, "it": {"uno", "un", "una"},
          "es": {"uno", "un", "una", "segundo", "segunda", "segundos", "segundas"}, "pt": {"um", "uma", "segundo", "segunda", "segundos", "segundas"}, "fr": {"un", "une"}}
-_PCT = {"en": r"\b(?:per ?cent|percent)\b", "de": r"\bprozent\b", "nl": r"\bprocent\b", "fr": r"\bpour cent\b", "es": r"\bpor ciento\b", "it": r"\bper cento\b", "pt": r"\bpor cento\b"}
+_PCT = {"en": r"\b(?:per ?cent|percent)\b", "de": r"\bprozent\b", "nl": r"\b(?:procent|percent)\b", "fr": r"\bpour cent\b", "es": r"\bpor cien(?:to)?\b", "it": r"\bper cento\b", "pt": r"\bpor cento\b"}
 _CURCONN = {"e", "et", "y", "con", "und", "en", "mit", "and", "com"}
 _CUR = {"euro", "euros", "dollar", "dollars", "dolar", "dolares", "pfund", "pound", "pounds", "livre", "livres", "libra", "libras", "franc", "francs", "franken",
         "real", "reais", "gulden", "peso", "pesos", "dollari", "sterlina", "sterline", "franchi", "yen", "dolaren", "dollaro"}
@@ -617,6 +617,169 @@ def _romans(text: str) -> str:
     return _ROMAN.sub(rep, text)
 
 
+# relative clock readings (2026-10-18, the reading-variety fill): "halb drei", "Viertel vor vier", "zehn nach zwei",
+# "kwart over drie", "tien voor half vijf", "las tres menos cuarto", "cuarto para las tres", "às duas e meia", "le tre
+# meno un quarto", "trois heures moins le quart", "midi". The hour is said on a 12-hour clock, so it stands for both
+# halves of the day ({2, 14}); the minutes are a second number, as in a digital "14:30". Phrases that need a clock
+# context (a minute count before "nach" / "over" / "menos" ...) only count after a clock preposition ("um", "om",
+# "las", "às", "alle") or with the hour word ("heures").
+_REL_PREP = {"de": {"um", "gegen", "ab", "bis", "ist", "seit", "von"}, "nl": {"om", "rond", "tot", "vanaf", "is", "van"},
+             "es": {"las", "la"}, "pt": {"as", "a"}, "it": {"le", "alle", "dalle", "verso", "alla", "dalla", "l"},
+             "fr": set()}
+
+
+def _num_at(lang: str, w: list, i: int, lo: int, hi: int):
+    """(value, next index) of a cardinal of 1-3 words starting at w[i] (es / pt "treinta y cinco" with the connector),
+    or None; the value must lie in [lo, hi]."""
+    best = None
+    for j in range(i + 1, min(len(w), i + 3) + 1):
+        morphs = []
+        for k in range(i, j):
+            seg = _segment(lang, w[k])
+            if seg:
+                morphs += seg
+            elif w[k] == _CONN[lang] and morphs and k + 1 < j:
+                morphs.append((w[k], "C", 0, False))
+            else:
+                morphs = None
+                break
+        if not morphs:
+            break
+        its = _items(lang, morphs)
+        if len(its) == 1 and not its[0][1] and its[0][3] == 0 and its[0][4] == len(morphs) - 1 and lo <= its[0][0] <= hi:
+            best = (int(its[0][0]), j)
+    return best
+
+
+def _rel_at(lang: str, w: list, i: int):
+    """(end index, hour 0-23, minute) of a relative clock reading starting at w[i], or None."""
+    def H(k):  # an hour word 1-12 (24-hour forms only where the language says them: fr "quatorze heures moins")
+        return _num_at(lang, w, k, 1, 24 if lang == "fr" else 12) if k < len(w) else None
+
+    def M(k, hi=29):
+        return _num_at(lang, w, k, 1, hi) if k < len(w) else None
+
+    at = lambda k, *xs: k < len(w) and w[k] in xs  # noqa: E731
+    prep = i > 0 and w[i - 1] in _REL_PREP[lang]
+    if lang in ("de", "nl"):
+        half, quarter = ("halb", "viertel") if lang == "de" else ("half", "kwart")
+        past, to = (("nach",), ("vor",)) if lang == "de" else (("over", "na"), ("voor",))
+        if at(i, half) and (h := H(i + 1)) and (lang == "de" or h[0] != 1 or prep):
+            return h[1], h[0] - 1, 30
+        if at(i, quarter):
+            if at(i + 1, *past) and (h := H(i + 2)):
+                return h[1], h[0], 15
+            if at(i + 1, *to) and (h := H(i + 2)):
+                return h[1], h[0] - 1, 45
+            if lang == "de" and (h := H(i + 1)):
+                return h[1], h[0] - 1, 15  # "viertel drei" = 2:15
+        if lang == "de" and at(i, "dreiviertel") and (h := H(i + 1)):
+            return h[1], h[0] - 1, 45
+        if (m := M(i)) and m[1] < len(w):
+            k = m[1]
+            if at(k, *(past + to)) and at(k + 1, half) and (h := H(k + 2)):
+                return h[1], h[0] - 1, 30 + m[0] if w[k] in past else 30 - m[0]
+            if prep and at(k, *past) and (h := H(k + 1)):
+                return h[1], h[0], m[0]
+            if prep and at(k, *to) and (h := H(k + 1)):
+                return h[1], h[0] - 1, 60 - m[0]
+        return None
+    if lang in ("es", "pt"):
+        minus, conn, quart, art = "menos", _CONN[lang], "cuarto" if lang == "es" else "quarto", (
+            ("las", "la") if lang == "es" else ("as", "a"))
+        half = "media" if lang == "es" else "meia"
+        one = "un" if lang == "es" else "um"
+        k0 = i + 1 if at(i, one) else i
+        if at(k0, quart) and at(k0 + 1, "para") and at(k0 + 2, *art) and (h := H(k0 + 3)):
+            return h[1], h[0] - 1, 45
+        if (m := M(i, 30)) and at(m[1], "para") and at(m[1] + 1, *art) and (h := H(m[1] + 2)):
+            return h[1], h[0] - 1, 60 - m[0]
+        if prep and (h := H(i)):
+            k = h[1]
+            if at(k, minus):
+                if at(k + 1, quart) or (at(k + 1, one) and at(k + 2, quart)):
+                    return k + (2 if at(k + 1, quart) else 3), h[0] - 1, 45
+                if (m := M(k + 1, 30)):
+                    return m[1], h[0] - 1, 60 - m[0]
+            if at(k, conn) and at(k + 1, quart):
+                return k + 2, h[0], 15
+            if at(k, conn) and at(k + 1, one) and at(k + 2, quart):
+                return k + 3, h[0], 15
+            if at(k, conn) and at(k + 1, half):
+                return k + 2, h[0], 30
+        if lang == "pt" and at(i, "meio") and at(i + 1, "dia"):
+            return i + 2, 12, 0
+        if lang == "pt" and at(i, "meia") and at(i + 1, "noite"):
+            return i + 2, 0, 0
+        return None
+    if lang == "it":
+        if at(i, "mezzogiorno", "mezzanotte"):
+            return i + 1, 12 if w[i] == "mezzogiorno" else 0, 0
+        if prep and (h := H(i)):
+            k = h[1]
+            if at(k, "meno"):
+                if at(k + 1, "quarto") or (at(k + 1, "un") and at(k + 2, "quarto")):
+                    return k + (2 if at(k + 1, "quarto") else 3), h[0] - 1, 45
+                if (m := M(k + 1, 30)):
+                    return m[1], h[0] - 1, 60 - m[0]
+            if at(k, "e") and at(k + 1, "un") and at(k + 2, "quarto"):
+                return k + 3, h[0], 15
+            if at(k, "e") and at(k + 1, "tre") and at(k + 2, "quarti"):
+                return k + 3, h[0], 45
+            if at(k, "e") and at(k + 1, "mezza", "mezzo"):
+                return k + 2, h[0], 30
+        return None
+    if lang == "fr":
+        if at(i, "midi", "minuit"):
+            return i + 1, 12 if w[i] == "midi" else 0, 0
+        if (h := H(i)) and at(h[1], "heure", "heures"):
+            k = h[1] + 1
+            if at(k, "moins"):
+                if at(k + 1, "quart") or (at(k + 1, "le") and at(k + 2, "quart")):
+                    return k + (2 if at(k + 1, "quart") else 3), h[0] - 1, 45
+                if (m := M(k + 1, 30)):
+                    return m[1], h[0] - 1, 60 - m[0]
+            if at(k, "et") and at(k + 1, "quart"):
+                return k + 2, h[0], 15
+            if at(k, "et") and at(k + 1, "demie", "demi"):
+                return k + 2, h[0], 30
+        return None
+    return None
+
+
+def _rel_clocks(lang: str, t: str) -> str:
+    """Relative clock readings in the folded text -> one placeholder token each ("zzrel" + hour + minute letters),
+    read back by extract_numbers as an hour (both halves of the day) and a minute number."""
+    if lang not in _REL_PREP:
+        return t
+    toks = list(re.finditer(r"[^\W\d_]+", t))
+    w = [m.group(0) for m in toks]
+    out, last, i = [], 0, 0
+    while i < len(w):
+        r = _rel_at(lang, w, i)
+        if r is None:
+            i += 1
+            continue
+        j, h, mm = r
+        out += [t[last:toks[i].start()], " zzrel" + chr(97 + h % 24) + chr(97 + mm // 10) + chr(97 + mm % 10) + " "]
+        last, i = toks[j - 1].end(), j
+    return "".join(out) + t[last:]
+
+
+def _rel_nums(tk: str, ti: int) -> list:
+    h, mm = ord(tk[5]) - 97, (ord(tk[6]) - 97) * 10 + ord(tk[7]) - 97
+    h12 = h % 12
+    out = [Num({Decimal(h12 or 12), Decimal(h12 + 12 if h12 else 0)}, "words", start=ti, end=ti)]
+    if mm:
+        out.append(Num({Decimal(mm)}, "words", start=ti, end=ti))
+    return out
+
+
+def _digit_word(lang: str, tok: str) -> bool:
+    seg = _segment(lang, tok)
+    return bool(seg) and len(seg) == 1 and seg[0][1] in ("U", "Z")
+
+
 def extract_numbers(text: str, lang: str, keep_weak: bool = True, garbles: bool = False) -> list:
     """Every number in `text`, digits and words, in order. Words: en de es fr it nl pt (grammar above) and, through
     `_ext_numbers`, the other 18 languages when the pipeline's number-form tables are importable (else digits only).
@@ -624,7 +787,7 @@ def extract_numbers(text: str, lang: str, keep_weak: bool = True, garbles: bool 
     text = _romans(text)
     if lang not in _LEX and _ext_reader(lang) is not None:
         return _ext_numbers(text, lang, keep_weak, garbles)
-    t = _fold(text)
+    t = _rel_clocks(lang, _fold(text))
     for pat, rep in _HALF.get(lang, ()):
         t = re.sub(pat, rep, t)
     if lang in _PCT:
@@ -651,7 +814,15 @@ def extract_numbers(text: str, lang: str, keep_weak: bool = True, garbles: bool 
             nums.append(Num(_digit_vals(tk), "digits", start=ti, end=ti))
             rep = 1
             continue
+        if tk.startswith("zzrel") and len(tk) == 8:  # a relative clock reading (_rel_clocks)
+            flush()
+            nums.extend(_rel_nums(tk, ti))
+            rep = 1
+            continue
         seg = _segment(lang, tk) if words else None
+        if lang == "pt" and tk == "meia" and (ti == 0 or toks[ti - 1] != "e") and (
+                (cur and ti > 0 and _digit_word(lang, toks[ti - 1])) or (ti + 1 < len(toks) and _digit_word(lang, toks[ti + 1]))):
+            seg = [("meia", "U", 6, False)]  # Brazilian "meia" (meia dúzia) = 6 among digits said one by one
         if lang == "en" and seg is None:  # UK / AU digit forms (2026-10-17): "nought", "oh" inside digit runs, doubles
             if tk in ("nought", "naught"):
                 seg = _segment(lang, "zero")
@@ -671,6 +842,8 @@ def extract_numbers(text: str, lang: str, keep_weak: bool = True, garbles: bool 
             cur.append((ti, (tk, "C", 0, False)))
         elif words and (tk == _DEC[lang] or tk in _DEC_ALT.get(lang, ())) and cur:
             cur.append((ti, (tk, "P", 0, False)))
+        elif words and lang == "es" and tk == "con" and cur and ti + 1 < len(toks) and _segment(lang, toks[ti + 1]):
+            cur.append((ti, (tk, "P", 0, False)))  # "tres con cinco" = 3.5 (a number on both sides)
         else:
             flush()
             if garbles and words and _garble(lang, tk):
@@ -1133,12 +1306,52 @@ def _digit_split(H: list, R: list) -> list:
     return out
 
 
+def _cents_split(H: list, R: list) -> list:
+    """Hypothesis side: a price "23,90" is one number while a reference said without the unit ("vinte e três e
+    noventa", "zwei fünfzig") holds two: split a hypothesis A.BC (BC 10-99) when the reference has A and BC next to
+    each other (_clock_split does the same for times, minutes < 60)."""
+    out = []
+    for x in H:
+        hit = None
+        for v in x.vals:
+            if v.as_tuple().exponent == -2 and v >= 1:
+                a, c = Decimal(int(v)), Decimal(int(round((v % 1) * 100)))
+                if c >= 10 and any(a in R[k].vals and c in R[k + 1].vals and R[k + 1].start - R[k].end <= 2
+                                   for k in range(len(R) - 1)):
+                    hit = (a, c)
+        if hit:
+            out += [Num({hit[0]}, x.form, start=x.start, end=x.start), Num({hit[1]}, x.form, start=x.end, end=x.end)]
+        else:
+            out.append(x)
+    return out
+
+
+def _cents_join(H: list, R: list) -> list:
+    """The other direction: the reference writes a price "2,50" and the hypothesis says it without the unit ("zwei
+    fünfzig", "veinte con cincuenta" reads 20.5 already): join two adjacent hypothesis integers A, BC (BC 10-99, at
+    most one word between) into A.BC when that is a reference value and neither is one on its own."""
+    rv = {v for r in R for v in r.vals}
+    out, k = [], 0
+    while k < len(H):
+        a, b = H[k], H[k + 1] if k + 1 < len(H) else None
+        if b is not None and b.start - a.end <= 2 and a.vals and b.vals and not (a.vals & rv) and not (b.vals & rv):
+            hit = next((x + y / 100 for x in a.vals for y in b.vals if 10 <= y <= 99 and x == int(x) and y == int(y)
+                        and x + y / 100 in rv), None)
+            if hit is not None:
+                out.append(Num({hit}, a.form, start=a.start, end=b.end))
+                k += 2
+                continue
+        out.append(a)
+        k += 1
+    return out
+
+
 def number_outcomes(ref: str, hyp: str, lang: str) -> list:
     """One dict per reference number: {value, outcome, ref_form, hyp_form, mode}. See module docstring."""
     mode = _mode(lang)
     R = extract_numbers(ref, lang, keep_weak=False)
     H = extract_numbers(hyp, lang, keep_weak=True, garbles=True)
-    H = _digit_split(_pair_join(_clock_join(_clock_split(H, R), R), R), R)
+    H = _digit_split(_pair_join(_cents_join(_clock_join(_cents_split(_clock_split(H, R), R), R), R), R), R)
     n, m = len(R), len(H)
     dp = [[0] * (m + 1) for _ in range(n + 1)]
     for i in range(n - 1, -1, -1):

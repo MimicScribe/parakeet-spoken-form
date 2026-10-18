@@ -76,9 +76,25 @@ def fetch(run: str, lang: str, work: Path, set_: str = "heldout") -> list:
     return [json.loads(l) for l in open(p, encoding="utf-8") if l.strip()] if r.returncode == 0 else []
 
 
+# Italian elision (2026-10-18): the split label form "venti uno" / "cento ottanta" and a joined "ventiuno" are the
+# same number words as "ventuno" / "centottanta"; the audio cannot tell them apart
+_IT_ELIDE = re.compile(r"(vent)i(?=[uo])|(trent|quarant|cinquant|sessant|settant|ottant|novant)a(?=[uo])|(cent)o(?=ottant)")
+
+
+def _elide(k: str) -> str:
+    return _IT_ELIDE.sub(lambda m: m.group(1) or m.group(2) or m.group(3), k)
+
+
 def _whole(reading: str, hyp_words: list) -> bool:
-    k = D.key(reading)
-    return any("".join(hyp_words[i:j]) == k for i in range(len(hyp_words)) for j in range(i + 1, min(len(hyp_words), i + 14) + 1))
+    k = _elide(D.key(reading))
+    return any(_elide("".join(hyp_words[i:j])) == k for i in range(len(hyp_words))
+               for j in range(i + 1, min(len(hyp_words), i + 14) + 1))
+
+
+# the readings a span may be said with: the candidates plus the regional and the reading-variety fill readings
+# (relative clock times, "zwei fünfzig", "tres con cinco", "zwo" / "meia", nl "à" / "percent", es "por cien"), the
+# readings the training rows now use; each is a value-preserving reading, so it only adds right answers
+READINGS = M.VARIETY_ALL | M.FILL_ALL
 
 
 def _region(label: str, chars: tuple, hyp_raw: list, slack: int = 1, all_chars: tuple = ()) -> tuple:
@@ -182,7 +198,7 @@ def score_spans(rows: list, lang: str, caps: dict, per_span: list = None, forms:
         hw_all = [_nw(w) for w in hyp_raw]
         row_spans, nc = m.get("spans") or [], m.get("num_chars") or []
         k = 0
-        for sp in M.spans(cap, lang):
+        for sp in M.spans_regional(cap, lang, READINGS):
             if not sp.cands:
                 continue
             place = None

@@ -40,6 +40,9 @@ VOL = "/vol"
 OUT = f"{VOL}/ml/{TAG}"
 
 CER_MAX = 0.15
+# planned-row fields a verified row keeps when present (the reading-variety fill: the rows it replaces, the convention
+# of each number, the voice locale); rows without them are written exactly as before
+PASS_THROUGH = ("supersedes", "convs", "locale", "ckey", "register")
 SPEED_LO, SPEED_HI = 0.9, 1.3
 WORDS_MIN, WORDS_MAX = 8, 20
 FORBIDDEN = re.compile(r"[0-9$€£¥%#/+°²³½¼¾ºª‰&]")  # the build audit's list
@@ -524,6 +527,14 @@ DP_MOR = re.compile(r"(?:mañana|manhã|\bmatin\b|mattina|mattino|vormittags|mor
 DP_MAD = re.compile(r"madrugada")
 
 
+VARIETY_FILL = False  # the reading-variety fill (ml_tts_variety) sets it: relative / 12-hour clock readings and decimal halves allowed
+REL_WORDS = {"de": re.compile(r"\b(?:halb|[Vv]iertel|dreiviertel|nach|vor)\b"),
+             "nl": re.compile(r"\b(?:half|kwart|over|na|voor)\b"),
+             "es": re.compile(r"\b(?:menos|cuarto|media|mediodía)\b"), "fr": re.compile(r"\b(?:moins|quart|demie?|midi|minuit)\b"),
+             "it": re.compile(r"\b(?:meno|quarto|quarti|mezza|mezzo|mezzogiorno|mezzanotte)\b"),
+             "pt": re.compile(r"\b(?:menos|quarto|meia|meio-dia|meia-noite)\b")}
+
+
 def _clock_ok(lang, span, reading):
     """Natural spoken clock readings only (the candidate list is liberal: it also holds "tres horas" for 15:00)."""
     m = re.match(r"(\d{1,2})", span.text)
@@ -538,6 +549,10 @@ def _clock_ok(lang, span, reading):
         cw = []
     if lang == "fr" and G.FR_ET_BAD.search(reading):
         return False  # "seize heures et quinze", "cinq et vingt deux" are not French; "et quart" / "et demie" are
+    if VARIETY_FILL and not ap and (REL_WORDS[lang].search(reading) or (h > 12 and ws[:1] != cw[:1])):
+        # the reading-variety fill: a 24 h time said the everyday way ("halb drei", "kwart over twee", "las tres y
+        # media", "Viertel nach neun") or with the 12-hour word; a duration-like "tres horas" stays out
+        return not (lang in ("es", "pt", "it") and re.search(r"\b(?:horas?|ore)\b", reading))
     if h > 12 and not ap:
         return ws[:len(cw)] == cw or ws[:len(cw)] == M._fem_hour(cw, lang, h)  # 24 h written: the 24 h number
     if lang in ("es", "pt", "it") and re.search(r"\b(?:horas?|ore)\b", reading) and h <= 12:
@@ -616,6 +631,8 @@ def _roman_ok(lang, written, span, reading):
 # feminine number forms are right only before a feminine noun (a count / amount of one) or for clock hours in pt
 # ("às duas"); a year, date, percent, version, decimal or price never takes them ("mil novecentas e cinquenta",
 # "duas mil e três", "cincuenta y una por ciento", "el una de mayo": judge audit 2026-10-17)
+DEC_WORD_RE = re.compile(r"\b(?:komma|Komma|coma|virgule|virgola|vírgula|punto|ponto|point|Punkt|punt)\b")
+CENT_WORD_RE = re.compile(r"\b(?:[Cc]ent|cents|centimes?|céntimos?|cêntimos?|centesim[oi]|centavos?)\b")
 FEM_OK_CLS = {"count", "large", "range_between", "range_from", "unit", "frac", "temp"}
 APOCOPE_BAD = {"es": re.compile(r"\bun\b"), "it": re.compile(r"(?:un|prima)\b")}  # "el un de", "duemilaun", "il prima"
 MASC_HOUR = {"pt": re.compile(r"\b(?:um|dois) horas?\b"), "fr": re.compile(r"\bun heures?\b")}
@@ -679,7 +696,7 @@ def reading_ok(lang, grp, cls, gender, span, reading, date_pos, written=""):
     if span.kind == "clock" or (span.kind == "int" and cls == "clock12"):
         if not _clock_ok(lang, span, reading):
             return False
-    if cls in ("large", "dec") and span.kind == "dec" and HALF_BAD.search(reading):
+    if cls in ("large", "dec") and span.kind == "dec" and HALF_BAD.search(reading) and not VARIETY_FILL:
         return False
     if span.kind == "int" and cls in ("count", "large") and not _whole_number_reading(lang, span, reading):
         return False  # "191362 klanten" read "één negen één drie tweeënzestig": a count is said as one number
@@ -690,6 +707,8 @@ def reading_ok(lang, grp, cls, gender, span, reading, date_pos, written=""):
         return False
     if YEAR_QUOTA and cls == "year" and re.fullmatch(r"(19|20)\d\d", span.text) and reading.strip() != span.cands[0].strip():
         return False  # a year top-up trains the full reading; the clipped "'55" and pair forms add no year value
+    if span.kind == "cur" and DEC_WORD_RE.search(reading) and CENT_WORD_RE.search(reading):
+        return False  # "dodici euro virgola cinquanta centesimi": a decimal word AND a cents word is no reading
     if span.kind == "amp" and re.search(r"\band\b", reading):
         return False  # an English "and" in a native sentence: the voice cannot say it and the label would teach it
     return True
@@ -734,10 +753,22 @@ def build_text(lang, cls, rng, P, broad=False):
     return text, grp, gender, reg
 
 
-def realize(lang, cls, written, grp, gender, rng, used):
-    """Spans of the written form -> (label, spans, offsets) or (None, reason). `used` counts picks per (kind, reading)."""
+def _natural_group(lang, span, reading) -> bool:
+    """A phone group's reading has a shape speakers use (reading_conv.group_shape): digit by digit, one number,
+    1+2, pairs, ... never a 2+1 / 3+1 split ("sesenta y uno dos" for "612")."""
+    import reading_conv as RC
+
+    sh = RC.group_shape(lang, re.sub(r"\D", "", span.text), reading)
+    return not (sh.startswith("X") or sh == "?")
+
+
+def realize(lang, cls, written, grp, gender, rng, used, names=None, pick=None):
+    """Spans of the written form -> (label, spans, offsets) or (None, reason). `used` counts picks per (kind, reading).
+    names (optional): ml_cands readings to add (spans_regional names: the regional / fill readings). pick (optional):
+    pick(spans, ok) -> one candidate index per span chosen from ok[i] (the readings that fit the clause), or None when
+    no choice gives what the caller wants (the reading-variety fill picks by convention, ml_tts_variety)."""
     try:
-        sp = M.spans(written, lang)
+        sp = M.spans_regional(written, lang, names) if names else M.spans(written, lang)
     except Exception as e:  # a candidate-machinery error is a drop, not a crash
         return None, f"spans_error {type(e).__name__}"
     if not sp:
@@ -750,9 +781,11 @@ def realize(lang, cls, written, grp, gender, rng, used):
     if not (kinds & EXPECT[cls]):
         return None, "shape_not_recognised"
     style = rng.choices(["digits", "chunks", "mix"], [0.4, 0.35, 0.25])[0]
-    picks, dpos, prev_conn = [], 0, None
+    picks, dpos, prev_conn, oks = [], 0, None, []
     for s in sp:
         ok = [i for i, c in enumerate(s.cands) if reading_ok(lang, grp, cls, gender, s, c, dpos, written)]
+        if s.kind == "phone":  # never an unnatural split (the old "chunks" fallback let 2+1 splits through for 3-digit groups)
+            ok = [i for i in ok if _natural_group(lang, s, s.cands[i])]
         if s.kind == "date":
             if lang in ("es", "pt") and dpos in (1, 2):
                 ok = [i for i in ok if CONN.match(s.cands[i])] or ok  # "quince de marzo de dos mil seis"
@@ -761,6 +794,9 @@ def realize(lang, cls, written, grp, gender, rng, used):
             dpos += 1
         if not ok:
             return None, "no_reading_fits_clause"
+        if pick is not None:
+            oks.append(ok)
+            continue
         if s.kind in ("phone", "version") and style != "mix":
             want_d = style == "digits"
             ok2 = [i for i in ok if _digit_style(s, s.cands[i]) == want_d]
@@ -771,10 +807,14 @@ def realize(lang, cls, written, grp, gender, rng, used):
         for i in ok:
             base = 3.0 if i == 0 else 1.5 if i <= 2 else 1.0
             w.append(base / (1.0 + 0.7 * used[(lang, s.kind, s.cands[i].strip())]))
-        pick = rng.choices(ok, w)[0]
-        picks.append(pick)
+        choice = rng.choices(ok, w)[0]
+        picks.append(choice)
         if s.kind == "date" and dpos == 2:
-            prev_conn = bool(CONN.match(s.cands[pick]))
+            prev_conn = bool(CONN.match(s.cands[choice]))
+    if pick is not None:
+        picks = pick(sp, oks)
+        if picks is None:
+            return None, "no_reading_of_convention"
     offs: list = []
     label = C.render_cap(written, sp, picks, offs)
     if written.endswith(".") and not label.endswith("."):
@@ -998,12 +1038,26 @@ class _Synth:
         return x
 
 
+def _kept_row(row, path, x, wt, info, lang) -> dict:
+    """The rows.jsonl row of a verified clip (x = the written audio, wt = its word times)."""
+    return {"audio_filepath": path, "duration": round(len(x) / 16000, 3), "text": row["text"], "lang": lang, "src": "tts",
+            "id": row["id"], "origin": f"{TAG}/{row['voice']}", "caption": row["caption"], "kind": row["kind"],
+            "cls": row["cls"], "spans": row["spans"], "num_chars": row["num_chars"],
+            "word_times": [[round(a, 3), round(b, 3)] for a, b in wt], "cer_ctc": info["cer_ctc"],
+            "fit": info.get("fit"), "edge_quiet": C.edge_quiet(x), "split": row["split"], "voice": row["voice"],
+            "voice_license": row["voice_license"], "speed": row["speed"], "engine": row["engine"],
+            **{k: row[k] for k in PASS_THROUGH if k in row}}
+
+
 @_fn
 def tts_lang(lang: str, n: int = 600, seed: int = 1, hours: float = 0.0, overgen: float = 1.6, broad: bool = False,
-             classes: str = "", out_tag: str = TAG, rows_file: str = "") -> dict:
+             classes: str = "", out_tag: str = TAG, rows_file: str = "", keep_failed: bool = False) -> dict:
     """Plan ~n*overgen sentences, synthesise, keep the clips the CTC reader confirms, write /vol/ml/tts1/<lang>/.
     `hours` > 0 stops once that much audio is kept. `broad`: draw values from wide domains instead of the ones the grammar table already
-    holds (use after the table was extended with `needed` keys). Writes rows.jsonl, wav/*.wav and stats.json (drops per class/voice)."""
+    holds (use after the table was extended with `needed` keys). Writes rows.jsonl, wav/*.wav and stats.json (drops per class/voice).
+    keep_failed (2026-10-18, default off = unchanged): the clips the CTC reader rejects but can still align are written too,
+    to rows_ctc_failed.jsonl (with the greedy text and the reason), never to rows.jsonl: a second, independent check (a
+    verbatim second transcript that matches the label word for word) may accept them later (the reading-variety fill)."""
     import soundfile as sf
     import numpy as np
 
@@ -1020,7 +1074,7 @@ def tts_lang(lang: str, n: int = 600, seed: int = 1, hours: float = 0.0, overgen
     ctc = D.LangCTC(lang)
     syn = _Synth()
     r = random.Random(f"{TAG}|audio|{seed}|{lang}")
-    kept, secs = [], 0.0
+    kept, failed, secs = [], [], 0.0
     by_cls = collections.defaultdict(collections.Counter)
     by_voice = collections.defaultdict(collections.Counter)
     for row in rows:
@@ -1048,6 +1102,12 @@ def tts_lang(lang: str, n: int = 600, seed: int = 1, hours: float = 0.0, overgen
             by_cls[row["cls"]]["drop_" + why] += 1
             by_voice[vk]["dropped"] += 1
             by_voice[vk]["drop_" + why] += 1
+            if keep_failed:
+                wt = ctc.word_times(lp, row["text"])
+                if all(t is not None for t in wt):
+                    path = f"{out}/wav/{row['id']}.wav"
+                    sf.write(path, x, 16000, subtype="PCM_16")
+                    failed.append(_kept_row(row, path, x, wt, info, lang) | {"ctc_fail": why, "greedy": greedy})
             continue
         wt = ctc.word_times(lp, row["text"])
         if any(t is None for t in wt):
@@ -1056,22 +1116,22 @@ def tts_lang(lang: str, n: int = 600, seed: int = 1, hours: float = 0.0, overgen
             continue
         path = f"{out}/wav/{row['id']}.wav"
         sf.write(path, x, 16000, subtype="PCM_16")
-        dur = round(len(x) / 16000, 3)
-        secs += dur
+        secs += round(len(x) / 16000, 3)
         by_cls[row["cls"]]["kept"] += 1
         by_voice[vk]["kept"] += 1
-        kept.append({"audio_filepath": path, "duration": dur, "text": row["text"], "lang": lang, "src": "tts",
-                     "id": row["id"], "origin": f"{TAG}/{row['voice']}", "caption": row["caption"], "kind": row["kind"],
-                     "cls": row["cls"], "spans": row["spans"], "num_chars": row["num_chars"],
-                     "word_times": [[round(a, 3), round(b, 3)] for a, b in wt], "cer_ctc": info["cer_ctc"],
-                     "fit": info.get("fit"), "edge_quiet": C.edge_quiet(x), "split": row["split"], "voice": row["voice"],
-                     "voice_license": row["voice_license"], "speed": row["speed"], "engine": row["engine"]})
+        kept.append(_kept_row(row, path, x, wt, info, lang))
     with open(f"{out}/rows.jsonl", "w", encoding="utf-8") as f:
         for k in kept:
             f.write(json.dumps(k, ensure_ascii=False) + "\n")
+    if keep_failed:
+        with open(f"{out}/rows_ctc_failed.jsonl", "w", encoding="utf-8") as f:
+            for k in failed:
+                f.write(json.dumps(k, ensure_ascii=False) + "\n")
     stats = {"lang": lang, "seed": seed, "planned": len(rows), "kept": len(kept), "hours": round(secs / 3600, 3),
              "plan_report": rep, "by_class": {c: dict(v) for c, v in by_cls.items()},
              "by_voice": {v: dict(c) for v, c in by_voice.items()}}
+    if keep_failed:
+        stats["ctc_failed_aligned"] = len(failed)
     json.dump(stats, open(f"{out}/stats.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     vol.commit()
     print(lang, "kept", len(kept), "of", len(rows), f"{secs / 3600:.2f} h")
@@ -1081,10 +1141,11 @@ def tts_lang(lang: str, n: int = 600, seed: int = 1, hours: float = 0.0, overgen
 if _MODAL:
     @app.local_entrypoint()
     def main(langs: str = "es,fr,de,it,pt,nl", n: int = 600, seed: int = 1, hours: float = 0.0, broad: bool = False,
-             classes: str = "", out_tag: str = TAG, rows_file: str = ""):
+             classes: str = "", out_tag: str = TAG, rows_file: str = "", keep_failed: bool = False):
         # rows_file: a per-language path template with {lang}, e.g. ml/tts3/{lang}/planned.jsonl
         for res in tts_lang.starmap([(lang, n, seed, hours, 1.6, broad, classes, out_tag,
-                                      rows_file.format(lang=lang) if rows_file else "") for lang in langs.split(",")]):
+                                      rows_file.format(lang=lang) if rows_file else "", keep_failed)
+                                     for lang in langs.split(",")]):
             print(res)
 
 

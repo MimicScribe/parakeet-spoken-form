@@ -7,6 +7,23 @@ Models referred to:
 - **v10pt**: an earlier fine-tune, pinned for testing, never released.
 - **B**: retrain-3 `w3soup_a0.5` (`MimicScribe/parakeet-ultra-spoken-coreml@5edfc817`), the model for the next release. Decoder + joint trained, encoder frozen, KL to stock, L2-SP to the init.
 
+## 0b. 2026-10-18: reading variety in the synthetic rows (ttsRV1b)
+
+- The synthetic rows used one reading convention where real speech uses several: no relative clock times ("halb drei",
+  "kwart over twee": 42% of real Dutch clock times), Dutch 1900s years never in pairs ("negentien negentig": 78% of
+  real), 26% of synthetic phone numbers split a 3-digit group 2+1 (a fallback in the realizer, fixed), prices always
+  with the unit word. `reading_conv.py` names the convention of every spoken number; `variety_census.py` counts them.
+- ttsRV1b re-reads ~1,540 numbers of over-represented conventions with the missing ones (same values where the
+  convention allows) and REPLACES the rows it re-reads (`supersedes`, mix_build `TTS_REPLACING`), so class sizes and
+  value spread stay; plus two-digit-fraction decimals for es / fr / nl. Distance of the synthetic convention shares
+  from the target shares fell from 0.2-0.8 to 0.0-0.1 in every replaced cell.
+- Counting check: about half of the Spanish "decimal" spans (274 of 544) were dotted pairs said as two numbers ("8.30"
+  -> "ocho treinta"); the gate now counts those apart (`dec_pair`), which put es / fr / nl under the decimal bar until
+  the decimal top-up.
+- The per-language CTC reader rejected 10-27% of these clips (word joins, "nulleins-vier"); a verbatim second
+  transcript showed the audio said exactly the label in nearly all of them. A reject now passes when that transcript
+  matches the label letter for letter (`ml_tts.tts_lang --keep-failed`); the value judge still runs on every row.
+
 ## 0a. 2026-10-18: why decoder-only spoken form garbles numbers (root cause)
 
 Nine arms over three rounds (de / nl / it compound numbers split into separate number words, digit fallback allowed, binding L2-SP, suffix anchoring, stock vs B init, 1,000-3,000 steps). None reached the damage gate. Measured with forced-alignment log-probs and decode variants on labelled rows.

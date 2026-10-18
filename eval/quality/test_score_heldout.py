@@ -142,5 +142,31 @@ class References(unittest.TestCase):
             v.close()
 
 
+class VarietyReadings(unittest.TestCase):
+    """2026-10-18: a split Italian label form and the reading-variety fill readings score as right words."""
+
+    def one(self, lang, cap, label, hyp, chars):
+        caps = {"r": {"caption": cap, "text": label, "spans": [{"text": t} for t, _ in chars],
+                      "num_chars": [list(c) for _, c in chars]}}
+        res, _ = S.score_spans([{"id": "r", "hyp": hyp, "ref": label}], lang, caps)
+        return res["all"]
+
+    def test_elided_split_form(self):
+        self.assertTrue(S._whole("ventuno", ["venti", "uno"]))
+        self.assertTrue(S._whole("centottanta", ["cento", "ottanta"]))
+        self.assertTrue(S._whole("venti uno", ["ventuno"]))
+        self.assertFalse(S._whole("ventuno", ["venti", "due"]))
+        lab = "ne arrivarono ventuno ieri"
+        got = self.one("it", "ne arrivarono 21 ieri", lab, "ne arrivarono venti uno ieri", [("21", (14, 21))])
+        self.assertEqual(got, {"WORDS_RIGHT_VALUE": 1})
+
+    def test_fill_readings(self):
+        for lang, cap, lab, hyp, span, ch in [
+                ("de", "Er kommt um 14:30 an.", "Er kommt um vierzehn Uhr dreißig an.", "er kommt um halb drei an", "14:30", (12, 32)),
+                ("de", "Es kostet 2,50 € heute.", "Es kostet zwei Euro fünfzig heute.", "es kostet zwei fünfzig heute", "2,50 €", (10, 27)),
+                ("es", "Mide 3,5 metros.", "Mide tres coma cinco metros.", "mide tres con cinco metros", "3,5", (5, 20))]:
+            self.assertEqual(self.one(lang, cap, lab, hyp, [(span, ch)]), {"WORDS_RIGHT_VALUE": 1}, (lang, hyp))
+
+
 if __name__ == "__main__":
     unittest.main()

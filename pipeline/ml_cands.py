@@ -57,6 +57,16 @@ VARIETY_ALL = frozenset({"fr_belch", "pt_eu", "de_at", "clock_rel"})
 VARIETY = VARIETY_ALL & set(filter(None, os.environ.get("ML_CANDS_ON", "").split(",")))
 CAND_FIXES |= VARIETY  # offered like the parliament additions: with an external transcript only (ml_decide.spans_for)
 ALL_CAND_FIXES = frozenset(CAND_FIXES)  # the start-up set; label_lang resets to it on every call
+# Readings for the synthetic reading-variety fill (2026-10-18, ml_tts_variety; reading_conv names them). Offered ONLY
+# when a caller names them (spans_regional(text, lang, names)); never in spans(), labelling or ml_variety's regional
+# relabel, so real-speech labels are unchanged. Appended after the existing readings, like the regional ones:
+#   cur_bare    a price with cents said with no unit and no joiner ("2,50 €" -> "zwei fünfzig", "twee vijftig")
+#   dec_con     Spanish decimals with "con" ("3,5" -> "tres con cinco", "dos con cincuenta")
+#   pct_alt     Dutch "percent" beside "procent", Spanish "por cien" beside "por ciento"
+#   phone_alt   German "zwo" for a spoken digit 2, Brazilian "meia" for a spoken digit 6 in phone numbers
+#   range_a     the Dutch range joiner "à" ("twee à drie")
+#   clock_noon  Spanish noon said with "del mediodía" ("12:30" -> "doce y media del mediodía")
+FILL_ALL = frozenset({"cur_bare", "dec_con", "pct_alt", "phone_alt", "range_a", "clock_noon"})
 _TABLE: dict | None = None
 
 
@@ -2081,12 +2091,42 @@ def _regional(d: dict, lang: str, base: list[str], names=None) -> list[str]:
             rel = []
         ap = d.get("ap")
         extra += [c + (" " + w if w else "") for c in rel for w in ([""] + DAYPART[lang][ap] if ap else [""])]
+    extra += _fill_readings(d, lang, base, on & FILL_ALL)
     seen = set(base)
     out = list(base)
     for c in extra:
         if c and c not in seen:
             seen.add(c)
             out.append(c)
+    return out
+
+
+_ALT_DIGIT = {"de": ("zwei", "zwo"), "pt": ("seis", "meia")}  # phone_alt: one spoken digit, its colloquial word
+
+
+def _fill_readings(d: dict, lang: str, base: list[str], on: set) -> list[str]:
+    """The FILL_ALL readings named in `on` for one span (d = its _find dict, base = its readings)."""
+    out = []
+    k = d["kind"]
+    if k == "cur" and "cur_bare" in on and d.get("frac") and len(d["frac"]) == 2 and int(d["frac"]) >= 10:
+        n = _int(d["int"])
+        if n:
+            out.append(" ".join(g(lang, "card", n) + g(lang, "card", int(d["frac"]))))
+    if k == "dec" and "dec_con" in on and lang == "es":
+        out += [re.sub(r"\bcoma\b", "con", c) for c in base if re.search(r"\bcoma\b", c)]
+    if k == "pct" and "pct_alt" in on:
+        if lang == "nl":
+            out += [re.sub(r"\bprocent\b", "percent", c) for c in base if re.search(r"\bprocent\b", c)]
+        elif lang == "es":
+            out += [re.sub(r"\bpor ciento\b", "por cien", c) for c in base if re.search(r"\bpor ciento\b", c)]
+    if k == "phone" and "phone_alt" in on and lang in _ALT_DIGIT:
+        a, b = _ALT_DIGIT[lang]
+        alone = rf"(?<!\S)(?<!\be ){a}(?!\S)"  # the digit said alone, never inside "noventa e seis"
+        out += [re.sub(alone, b, c) for c in base if re.search(alone, c)]
+    if k == "range" and d.get("part") == "r" and "range_a" in on and lang == "nl":
+        out += [" à" + c[len(" tot"):] for c in base if c.startswith(" tot ") and not c.startswith(" tot en met ")]
+    if k == "clock" and "clock_noon" in on and lang == "es" and d.get("h") == 12 and not d.get("ap"):
+        out += [c + " del mediodía" for c in base if c.split()[0] == "doce" and "horas" not in c.split()]
     return out
 
 

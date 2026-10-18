@@ -1,0 +1,41 @@
+{
+ "note": "Decimal top-up (2026-10-18, label audit A56, after the gate counts dotted pairs apart as dec_pair): two-digit fractions read as one number (es also 'con'), where the dec bar (300) fails without the pairs: es real 270, fr 254 + 26 synthetic, nl 187 + 106 synthetic (nl capped by fill-to-bar: bar - real + 4).",
+ "cells": [
+  {
+   "lang": "es",
+   "cls": "dec",
+   "mode": "grow",
+   "add": 200,
+   "target": {
+    "comma_as_number": 0.8,
+    "con": 0.2
+   },
+   "basis": "A56",
+   "realizer": "R6"
+  },
+  {
+   "lang": "fr",
+   "cls": "dec",
+   "mode": "grow",
+   "add": 150,
+   "target": {
+    "comma_as_number": 0.85,
+    "comma_digitwise": 0.15
+   },
+   "basis": "A56",
+   "realizer": "R6"
+  },
+  {
+   "lang": "nl",
+   "cls": "dec",
+   "mode": "grow",
+   "add": 12,
+   "target": {
+    "comma_as_number": 0.85,
+    "comma_digitwise": 0.15
+   },
+   "basis": "A56 (fill-to-bar room 11-12)",
+   "realizer": "R6"
+  }
+ ]
+}

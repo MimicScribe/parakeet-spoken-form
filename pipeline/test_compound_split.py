@@ -33,16 +33,44 @@ KEEP = {
            "ottobre", "tredici", "centinaia", "sei", "mille"],
 }
 
+OLD_IT = {"it_elided": False}  # the form before 2026-10-18 (elided compounds whole); the default splits them too
 for lang, cases in SPLIT.items():
     for tok, want in cases.items():
-        got = C.split_token(tok, lang)
+        got = C.split_token(tok, lang, **(OLD_IT if lang == "it" else {}))
         assert " ".join(got) == want, (lang, tok, got)
         assert C.join_morphemes(got, lang) == tok, (lang, tok, got)  # round trip
-        assert all(C.split_token(p, lang) == [p] for p in got), (lang, tok, got)  # idempotent
-        assert C.split_text(" ".join(got), lang)[0] == want
+        assert all(C.split_token(p, lang, **(OLD_IT if lang == "it" else {})) == [p] for p in got), (lang, tok, got)
+        assert C.split_text(" ".join(got), lang, **(OLD_IT if lang == "it" else {}))[0] == want
 for lang, toks in KEEP.items():
     for tok in toks:
-        assert C.split_token(tok, lang) == [tok], (lang, tok, C.split_token(tok, lang))
+        assert C.split_token(tok, lang, **(OLD_IT if lang == "it" else {})) == [tok], (lang, tok)
+# Italian with the elided forms split (IT_SPLIT_ELIDED / it_elided=True, 2026-10-18): the full morphemes, the elided
+# vowel written back; the default above is unchanged
+IT_ELIDED = {"ventuno": "venti uno", "trentotto": "trenta otto", "centottanta": "cento ottanta",
+             "ventunesimo": "venti unesimo", "novantotto": "novanta otto", "centottantuno": "cento ottanta uno",
+             "duecentottantotto": "due cento ottanta otto", "ventun": "venti un", "ventuna": "venti una",
+             "Centottanta,": "Cento ottanta,", "l'ottantuno": "l'ottanta uno", "centottantesimo": "cento ottantesimo",
+             "milleottocentottanta": "mille otto cento ottanta", "novecentottantanove": "nove cento ottanta nove",
+             "ventunomila": "venti uno mila", "duemilaventitré": "due mila venti tré", "centouno": "cento uno"}
+for tok, want in IT_ELIDED.items():
+    got = C.split_token(tok, "it", it_elided=True)
+    assert " ".join(got) == want, (tok, got)
+    assert C.join_morphemes(got, "it") == tok, (tok, got)
+    assert all(C.split_token(p, "it", it_elided=True) == [p] for p in got), (tok, got)
+for tok, (want, back) in {"centuno": ("cento uno", "centouno"), "centotto": ("cento otto", "centootto"),
+                          "centunomila": ("cento uno mila", "centounomila")}.items():
+    got = C.split_token(tok, "it", it_elided=True)  # the elided hundred before uno / otto joins back unelided
+    assert " ".join(got) == want and C.join_morphemes(got, "it") == back, (tok, got)
+    assert C.split_token(back, "it", it_elided=True) == got
+for tok in ("trenta", "centro", "ottanta", "otto", "uno", "una", "un", "Trento", "quarantena", "centrale", "venti"):
+    assert C.split_token(tok, "it", it_elided=True) == [tok], tok
+assert C.split_token("ventuno", "it") == ["venti", "uno"] and C.IT_SPLIT_ELIDED  # the default: always split
+assert C.split_token("ventuno", "it", it_elided=False) == ["ventuno"]
+assert C.split_text("costa ventuno euro", "it", it_elided=True)[0] == "costa venti uno euro"
+r_it = {"text": "ne arrivarono ventotto", "num_chars": [[14, 22]], "spans": [{"reading": "ventotto"}]}
+assert C.split_row(r_it, "it", it_elided=False) is r_it
+assert C.split_row(r_it, "it", it_elided=True)["spans"][0]["reading"] == "venti otto"
+assert C.split_rows([r_it], "it", it_elided=True)[1]["rows_changed"] == 1
 # another language's rules never apply (es / fr / ... untouched)
 assert C.split_token("veinticinco", "es") == ["veinticinco"]
 

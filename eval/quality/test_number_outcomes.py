@@ -391,5 +391,41 @@ class SplitFormValues(unittest.TestCase):  # red-on-base: control (the reader al
         self.assertEqual([r["outcome"] for r in N.number_outcomes("costa 20,75 euro", "costa venti euro e settantasei centesimi", "it")], ["WRONG_VALUE"])
 
 
+class VarietyReadings(unittest.TestCase):
+    """2026-10-18 (reading-variety fill): relative clock times on a 12-hour clock, prices without the unit, Spanish
+    "con" decimals, nl "percent" / es "por cien", Brazilian "meia" among digits are read by value."""
+
+    def outs(self, ref, hyp, lang):
+        return [r["outcome"] for r in N.number_outcomes(ref, hyp, lang)]
+
+    def test_relative_clocks(self):
+        for lang, words, digits in [("de", "um halb drei", "um 14:30"), ("de", "um Viertel vor vier", "um 15:45"),
+                                    ("de", "um zehn nach halb drei", "um 14:40"), ("nl", "om half drie", "om 14.30 uur"),
+                                    ("nl", "om kwart over twee", "om 14:15"), ("nl", "om tien voor half vijf", "om 16:20"),
+                                    ("es", "a las tres menos cuarto", "a las 14:45"), ("es", "a las tres y media", "a las 15:30"),
+                                    ("es", "un cuarto para las tres", "14:45"), ("fr", "à trois heures moins le quart", "à 14h45"),
+                                    ("it", "alle tre meno un quarto", "alle 14:45"), ("pt", "às duas e meia", "às 14:30"),
+                                    ("it", "a mezzogiorno", "12:00"), ("fr", "à midi", "à 12:00")]:
+            for ref, hyp in ((words, digits), (digits, words)):
+                o = self.outs(ref, hyp, lang)
+                self.assertTrue(o and all(x.endswith("RIGHT_VALUE") for x in o), (lang, ref, hyp, o))
+
+    def test_relative_needs_clock_context(self):  # red-on-base: control (no false clock outside a clock context)
+        # a minute count before "nach" / "menos" is a clock only after a clock preposition
+        self.assertEqual([sorted(n.vals) for n in N.extract_numbers("cinco menos tres", "es")], [[5], [3]])
+        self.assertEqual([sorted(n.vals) for n in N.extract_numbers("drei nach zwei Jahren", "de")], [[3], [2]])
+
+    def test_bare_prices_con_percent_meia(self):
+        for lang, ref, hyp in [("de", "das kostet 2,50", "das kostet zwei fünfzig"), ("nl", "2,50 euro", "twee vijftig"),
+                               ("pt", "23,90", "vinte e três e noventa"), ("es", "3,5 metros", "tres con cinco metros"),
+                               ("es", "100%", "cien por cien"), ("nl", "12% meer", "twaalf percent meer"),
+                               ("pt", "9 6 3", "nove meia três")]:
+            for r, h in ((ref, hyp), (hyp, ref)):
+                o = self.outs(r, h, lang)
+                self.assertTrue(o and all(x.endswith("RIGHT_VALUE") for x in o), (lang, r, h, o))
+        self.assertEqual([sorted(n.vals) for n in N.extract_numbers("às duas e meia", "pt")], [[2, 14], [30]])
+        self.assertEqual(self.outs("meia hora", "meia hora", "pt"), [])  # "meia hora" is no six
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -871,7 +871,11 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
             ("ttsNL1", "ttsNL1_judge"), ("ttsNL2", "ttsNL2_judge"),
             # near-miss top-up (2026-10-18, ml_tts_topup): it decimals / decades / counts, pt big counts + years, es years,
             # de phone, nl long classes + headroom over the bar
-            ("ttsW1", "ttsW1_judge"))
+            ("ttsW1", "ttsW1_judge"),
+            # reading-variety fill (2026-10-18, ml_tts_variety): the same numbers read the other ways people say them
+            # (relative clock times, natural phone groupings, paired years, prices without the unit, ...); its rows
+            # REPLACE the older synthetic rows they name (TTS_REPLACING)
+            ("ttsRV1b", "ttsRV1b_judge"))
 # sets planned against the census's per-value gaps (tts5y: thin year values, normal speaking rates): the share cap
 # applies, the "real speech has enough of this class" cut-off does not (synthetic years and counts
 # are fine within the cap)
@@ -886,10 +890,17 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
 TTS_TARGETED = {"tts5y", "tts6uk", "tts7", "tts8", "tts9nl", "tts9ru", "tts9ru2", "ttsm2", "ttsm1", "ttsL0", "ttsL1", "ttsL2p", "ttsL2", "ttsES1",
                 "ttsFT1", "ttsFT2", "ttsFT3", "ttsFT4", "ttsFT5", "ttsFT5c", "ttsFT5d",
                 "ttsFT6c", "ttsFT6r", "ttsFT6rd", "ttsLNw", "ttsLNr", "ttsLNm", "ttsYRm", "ttsYRr",
-                "ttsYRs", "ttsYRn", "ttsCNm", "ttsLTw", "ttsLTr", "ttsNL1", "ttsNL2", "ttsW1"}
+                "ttsYRs", "ttsYRn", "ttsCNm", "ttsLTw", "ttsLTr", "ttsNL1", "ttsNL2", "ttsW1", "ttsRV1b"}
+# sets whose rows replace older synthetic rows (2026-10-18, B2): a row's "supersedes" lists the ids it replaces (rows of
+# the same class and value spread, read one convention; ml_tts_variety picked them). order_synthetic drops those ids
+# and puts the set's rows first, so they take the room the dropped rows leave (a class at its fill-to-bar or share cap
+# would otherwise admit none of them)
+TTS_REPLACING = {"ttsRV1b"}
 TTS_AUG_FRAC = 0.6  # share of chosen synthetic rows given a degraded copy instead of the clean audio
 # the long-number top-up sets (2026-10-17): mostly synthetic in their classes (fill-to-bar), so more of them are degraded
-TTS_LONG_SETS = {"ttsLNw", "ttsLNr", "ttsLNm", "ttsLTw", "ttsLTr", "ttsNL2", "ttsW1"}
+# ttsRV1 (2026-10-18): its cells are synthetic-heavy too (clock / phone / price rows mostly synthetic), and it replaces
+# rows of the long sets, so it keeps their degraded share
+TTS_LONG_SETS = {"ttsLNw", "ttsLNr", "ttsLNm", "ttsLTw", "ttsLTr", "ttsNL2", "ttsW1", "ttsRV1b"}
 TTS_AUG_FRAC_LONG = 0.75
 
 
@@ -1734,6 +1745,20 @@ def _needs_any(lang: str, add_v: dict, real_v: dict, syn_v: dict, n_dist: Counte
                for c, cnt in add_v.items() for v in cnt)
 
 
+def order_synthetic(tts: list, rng, seed, lang: str) -> tuple:
+    """The synthetic pool in selection order: the rows of the other sets shuffled with the build's rng exactly as a
+    build without the TTS_REPLACING sets shuffles them, minus the ids that a replacing row (one that is still in the
+    pool) supersedes; the replacing rows first, in their own seeded order. Returns (rows, stats)."""
+    repl = [x for x in tts if x.get("_set") in TTS_REPLACING]
+    rest = [x for x in tts if x.get("_set") not in TTS_REPLACING]
+    rng.shuffle(rest)
+    gone = {i for x in repl for i in x.get("supersedes") or []}
+    n0 = len(rest)
+    rest = [x for x in rest if x["id"] not in gone]
+    random.Random(f"{seed}-replace-{lang}").shuffle(repl)
+    return repl + rest, {"replacing_rows": len(repl), "superseded_ids": len(gone), "superseded_dropped": n0 - len(rest)}
+
+
 def select_synthetic(tts: list, real: list, lang: str, real_h: dict, enough_h: float = None) -> list:
     """Synthetic rows taken while every class they hold stays within the data gate's synthetic rule
     (census_common.syn_ok: spans per gate class over real + synthetic spans, syn_limit, the exempt floors, fill-to-bar),
@@ -2019,10 +2044,12 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
     unsplit_targets = set()  # the unsplit texts of split target rows (the anchor-collision check below)
 
     def S(rows_, lang_, part, pairs=False):
-        """rows_ as written: split (a copy) when lang_ is a split language, else unchanged."""
-        if lang_ not in split_langs:
+        """rows_ as written: split (a copy) when lang_ is a split language, else unchanged. "it+" in split_langs: Italian
+        with the elided forms split too ("venti uno"; compound_split.IT_SPLIT_ELIDED)."""
+        it_plus = lang_ == "it" and "it+" in split_langs
+        if lang_ not in split_langs and not it_plus:
             return rows_
-        out_, st_ = CS.split_rows(rows_, lang_, pairs=pairs)
+        out_, st_ = CS.split_rows(rows_, lang_, pairs=pairs, it_elided=True if it_plus else None)
         stats.setdefault("split_compounds", {}).setdefault(lang_, {})[part] = st_
         if part in ("p3", "win", "win15", "tts", "seam", "seam_long"):
             unsplit_targets.update(x["text"] for x in rows_)
@@ -2220,7 +2247,8 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         if dedupe:  # a synthetic text equal to a held-out / eval text leaves training too (text keys only)
             tts, trep = B.dedupe(tts, protect[lang], within=False, part_of=lambda x: "tts")
             stats["dedupe"][lang]["tts"] = trep["counts"]
-        rng.shuffle(tts)
+        tts, rst = order_synthetic(tts, rng, seed, lang)  # = rng.shuffle(tts) when no TTS_REPLACING set has rows
+        stats.setdefault("synthetic_replaced", {})[lang] = rst
         before = gate_counts(tr, [], lang)  # the first-stage caps' result: a later step must not undo it
         took = select_synthetic(tts, tr, lang, real_h)
         before_syn = gate_counts(tr, took, lang)
@@ -2254,6 +2282,13 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
                 stats.setdefault("year_cap_after_ext2", {})[lang] = ycap3
             took, n_syn_trim = trim_synthetic(took, tr, lang)
             stats.setdefault("synthetic_trimmed_after_ext2", {})[lang] = n_syn_trim
+        # B2 check: a replacing row the caps / trims refused leaves its class one row short (its superseded rows are
+        # out of the pool): say so, never silently
+        miss = sorted({x["id"] for x in tts if x.get("_set") in TTS_REPLACING} - {x["id"] for x in took})
+        stats["synthetic_replaced"][lang]["not_admitted"] = len(miss)
+        if miss:
+            print(f"WARNING {lang}: {len(miss)} replacing synthetic rows not admitted (their classes lost the rows "
+                  f"they replace), e.g. {miss[:5]}")
         reg = post_build_check(tr, took, lang, before_syn)["regressions"]
         # fail loudly: a later step undid what the caps / fill had reached (the gate would fail where it passed)
         assert not reg, f"{lang}: the build's later steps undid the earlier caps: {reg}"

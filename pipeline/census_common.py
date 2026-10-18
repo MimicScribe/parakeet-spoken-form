@@ -105,6 +105,14 @@ SPOKEN_DATE.update({"de": re.compile(r"^\s*(?:" + _M["de"] + r")\b"), "it": re.c
 # Italian "alle 18.30" is labelled a decimal span whose reading is the time ("diciotto e trenta"): a dec span written
 # H.MM (H <= 23, MM <= 59) without the decimal word in its reading is a clock time
 DOT_CLOCK = {"it": "virgola"}
+# a "decimal" span read as TWO numbers ("8.30" -> "ocho treinta", "5.2" -> "cinque due"; dot_bare / dot_clock readings)
+# is no decimal reading: the gate counts it apart, as "dec_pair" (2026-10-18; it was half of the es "dec" spans). A
+# decimal reading says the decimal word (or "con" in es) or a half ("zweieinhalb", "dos y medio")
+DEC_SAID = {"de": re.compile(r"\b(?:komma|punkt)\b"), "nl": re.compile(r"\b(?:komma|punt)\b"),
+            "es": re.compile(r"\b(?:coma|punto|con)\b"), "fr": re.compile(r"\b(?:virgule|point)\b"),
+            "it": re.compile(r"\b(?:virgola|punto|comma)\b"), "pt": re.compile(r"\b(?:v[ií]rgula|ponto)\b")}
+HALF_SAID = re.compile(r"(?:einhalb|anderthalb|enhalf|ënhalf|anderhalf|\ben half\b|"
+                       r"\b(?:y|e|et) (?:medio|media|mezzo|mezza|meio|meia|demi|demie)\b)")
 SPOKEN_CLOCK = {"es": (re.compile(r"\b(?:a|desde|hasta|de|para|sobre)\s+las?\s+$"),
                        re.compile(r"^\s*(?:horas?|y media|y cuarto|menos cuarto|de la mañana|de la tarde|de la noche|"
                                   r"de la madrugada|en punto)\b"))}
@@ -196,6 +204,8 @@ def spoken_shape(text, sp, c, v, lang):
     if c == "dec" and lang in DOT_CLOCK and re.fullmatch(r"\s*([01]?\d|2[0-3])\.[0-5]\d\s*", str(v)) and rd0 \
             and DOT_CLOCK[lang] not in rd0:
         return "clock"
+    if c == "dec" and lang in DEC_SAID and rd0 and not DEC_SAID[lang].search(rd0) and not HALF_SAID.search(rd0):
+        return "dec_pair"
     if c == "ord" and lang in ("de", "it", "nl", "pt") and re.fullmatch(r"\s*\d{1,2}\s*(?:\.|º|\.º|°)?\s*", str(v)):
         c, v = "int_small", int(re.sub(r"\D", "", str(v)))  # a day number written as an ordinal; reverts below if no month
         if not (1 <= v <= 31 and SPOKEN_DATE[lang].match((lambda t, r: t[t.find(r) + len(r):] if r and r in t else "")(
