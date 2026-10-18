@@ -13,7 +13,8 @@ with tempfile.TemporaryDirectory() as d:
     base = MA.retrain3_mix_v4(R2, anchor18=2, win_repeat=2, mix_dir="mix4final9")
     assert not any("win15" in p for p, _, _ in base)  # no part written: the listing is unchanged
     for name in ("win15_de.jsonl", "win15_it.jsonl", "en_win15.jsonl"):
-        open(f"{d}/mix4final9/{name}", "w").close()
+        open(f"{d}/mix4final9/{name}", "w").write("{}\n")
+    open(f"{d}/mix4final9/win15_ru.jsonl", "w").close()  # an empty part (no windows for the language): not listed
     on = MA.retrain3_mix_v4(R2, anchor18=2, win_repeat=2, mix_dir="mix4final9")
     assert on[:len(base)] == base  # appended, nothing else moves
     new = on[len(base):]
@@ -23,7 +24,7 @@ with tempfile.TemporaryDirectory() as d:
     assert two == new * 2
     assert MA.retrain3_mix_v4(R2, anchor18=2, win_repeat=2, mix_dir="mix4final9", win15_repeat=0) == base
     os.makedirs(f"{d}/mix4")  # the mix4 dir keeps its own names
-    open(f"{d}/mix4/win15_fr.jsonl", "w").close()
+    open(f"{d}/mix4/win15_fr.jsonl", "w").write("{}\n")
     assert ("mix4/win15_fr.jsonl", 0, "nonen_span") in MA.retrain3_mix_v4(R2, anchor18=2, win_repeat=2)
 # share bookkeeping: per-language windows are non-English, the English windows are English; both number-bearing
 assert "mix4/win15_de.jsonl".startswith(MA._NON_EN_PARTS) and not "mix4/en_win15.jsonl".startswith(MA._NON_EN_PARTS)

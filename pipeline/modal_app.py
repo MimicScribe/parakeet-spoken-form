@@ -1223,8 +1223,9 @@ def retrain3_mix_v4(langs=WAVE1, repeat: int = 1, anchor18: int = 0, win_repeat:
     # long-number seam pairs (build4 seam_long_h; their own weight: seam_long_repeat, 0 = win_repeat)
     slong = [(f"mix4/seam_long_{l}.jsonl", 0, "nonen_span") for l in langs
              if os.path.exists(f"{VOL}/{mix_dir}/seam_long_{l}.jsonl")] * (seam_long_repeat or win_repeat or 1)
-    w15 = ([(f"mix4/win15_{l}.jsonl", 0, "nonen_span") for l in langs if os.path.exists(f"{VOL}/{mix_dir}/win15_{l}.jsonl")]
-           + [("mix4/en_win15.jsonl", 0, "span")] * os.path.exists(f"{VOL}/{mix_dir}/en_win15.jsonl")) * win15_repeat
+    has = lambda n: os.path.exists(f"{VOL}/{mix_dir}/{n}") and os.path.getsize(f"{VOL}/{mix_dir}/{n}") > 0  # noqa: E731
+    w15 = ([(f"mix4/win15_{l}.jsonl", 0, "nonen_span") for l in langs if has(f"win15_{l}.jsonl")]  # (no empty parts)
+           + [("mix4/en_win15.jsonl", 0, "span")] * has("en_win15.jsonl")) * win15_repeat
     if win_repeat:  # run 2: windows + seam pairs together, win_repeat times
         out = base + extra * repeat + (wins + seam) * win_repeat + slong + anchors + phone + plain + w15
     else:
