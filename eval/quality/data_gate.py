@@ -7,7 +7,9 @@ usage: data_gate.py <dir with mix4 copies> [--langs de,es,fr,it,nl,pt] [--tier f
 
 mix_report.py describes a mix; this tool JUDGES it against the bar, from what the trainer will read:
   * judged rows count toward the bar; synthetic spans count too but are <= 30% of each class (years and
-    counts included; 50% for clock / price / phone / date, and for every class in en / es / fr);
+    counts included; 50% for clock / price / phone / date, and for every class in en / es / fr); a thin class may be
+    synthetic up to its bar, thin values up to their floors on top (census_common.syn_allowed, "filled to bar"), and
+    a class with no bar and (almost) no real speech up to 0.15 h of synthetic rows (rare_floor_ok, "waived floor");
   * a spoken number + scale word ("cinco millones") counts toward the million / billion scale; an es / fr day number +
     month is a date and an es "a las siete de la tarde" a clock time (SCALE_WORDS, SPOKEN_DATE, SPOKEN_CLOCK); real number-row hours count real speech only; second-recognizer spans (census_common.EXT_BY) count but their share per
     class must be <= 25%);
@@ -41,6 +43,7 @@ from census_common import (CLASS_MIN, CLOCK_CTX, DOT_CLOCK, EXT_BY, GROUP_CAP, G
                            gate_class, gate_class_value, group_cap, group_id, morph_class, span_class, spoken_shape,
                            syn_floor, syn_limit, synthetic, template_key, tier_of)
 from census_common import BAR_YEARS, FORWARD_KEY, MOD_BARS, WAVE_BARS, filled_to_bar, syn_ok  # noqa: E402
+from census_common import rare_floor_ok  # noqa: E402
 
 
 def rows(d, name):
@@ -238,6 +241,14 @@ def common_checks(ctx, tier):
                 out.append(check(f"{k} synthetic share <= {lim:.0%} or filled to bar", True,
                                  f"filled to bar (synthetic {x['syn']}, real {x['spans'] - x['syn']})", lim))
                 continue
+            sh_h = ctx.get("syn_h", {}).get(k, 0.0)
+            if not syn_ok(ctx["lang"], k, x["syn"], x["spans"], tier, real_vals, x["syn_vals"]) and rare_floor_ok(
+                    ctx["lang"], k, x["syn"], x["spans"] - x["syn"], sh_h, tier):
+                # the rare-class floor (census_common.rare_floor_ok, the build's syn_room): a class with no bar and
+                # (almost) no real speech, synthetic rows <= RARE_FLOOR_H hours: an accepted waiver
+                out.append(check(f"{k} synthetic share <= {lim:.0%} or waived floor", True,
+                                 f"waived floor (synthetic {x['syn']}, real {x['spans'] - x['syn']}, {sh_h:.3f} h)", lim))
+                continue
             if floor is not None:
                 out.append(check(f"{k} synthetic share <= {lim:.0%} or synthetic spans <= floor {floor}",
                                  sh <= lim or x["syn"] <= floor, {"share": round(sh, 3), "synthetic": x["syn"]},
@@ -268,9 +279,13 @@ def gate_lang(d, lang, tier=None):
     groups = collections.Counter()
     templates = collections.Counter()
     word_scales = collections.Counter()  # (scale) -> spans: spoken number + scale word
+    syn_h = collections.Counter()  # class -> hours of the synthetic rows holding it (the rare-class floor)
     for r in train:
         sps = r.get("spans") or []
         syn = synthetic(r)
+        if syn:
+            for c in {gate_class(r, sp, lang) for sp in sps}:
+                syn_h[c] += r.get("duration", 0) / 3600
         if not syn and sps:
             real_h += r.get("duration", 0) / 3600
             groups[group_id(r)] += 1
@@ -304,7 +319,7 @@ def gate_lang(d, lang, tier=None):
     wh = sum(w.get("duration", 0) for w in win if not synthetic(w)) / 3600
     hc = collections.Counter(gate_class(r, sp, lang) for r in ho for sp in r.get("spans") or [])
     ctx = {"cls": cls, "real_h": real_h, "wh": wh, "groups": groups, "templates": templates, "hc": hc, "lang": lang,
-           "word_scales": word_scales}
+           "word_scales": word_scales, "syn_h": syn_h}
     if tier in ("full", "next"):
         out = checks_wave(ctx, TIER_P[tier], BAR_YEARS.get(lang, 1500))
     elif tier == "moderate":

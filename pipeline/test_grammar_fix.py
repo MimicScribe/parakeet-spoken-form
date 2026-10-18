@@ -345,22 +345,8 @@ class FillToBar(unittest.TestCase):
         self.assertFalse(c[0]["pass"])  # one over the bar
 
 
-class LongSets(unittest.TestCase):
-    def test_long_sets_degraded_more(self):
-        # red-on-base: every set had the same 0.6 degraded share
-        self.assertEqual(MB.aug_frac({"_set": "ttsLNw"}), MB.TTS_AUG_FRAC_LONG)
-        self.assertEqual(MB.TTS_AUG_FRAC_LONG, 0.75)
-        self.assertEqual(MB.aug_frac({"_set": "tts2"}), MB.TTS_AUG_FRAC)
-        self.assertEqual(MB.aug_frac({}), 0.6)
-        for t in MB.TTS_LONG_SETS:
-            self.assertIn((t, f"{t}_judge"), MB.TTS_SETS)
-            self.assertIn(t, MB.TTS_TARGETED)
-        src = open(MB.__file__).read()
-        self.assertIn("rng.random() < aug_frac(x)", src)
-        self.assertIn('x.pop("_set", None)', src)
-
-
 class LongGenerators(unittest.TestCase):
+    # (test_long_sets_degraded_more: behavioural now, test_fill_review.LongSets)
     def test_counts_read_as_one_number(self):
         # red-on-base: "191362 klanten" could be read "één negen één drie tweeënzestig" (digit chunks)
         sp = M.spans("Het bureau noemt 191362 klanten.", "nl")[0]

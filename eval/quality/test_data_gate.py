@@ -135,7 +135,9 @@ class ShareExceptions(unittest.TestCase):
             with tempfile.TemporaryDirectory() as d:
                 sp = {"text": "1/2", "kind": kind, "reading": "un demi"}
                 write(d, f"p3_{lang}", [dict(real(i, "un demi", [sp]), id=f"en000_{i}_abcdefghijk_{i}") for i in range(3)])
-                write(d, f"tts_{lang}", [{"id": f"t{i}", "duration": 3.0, "text": "un demi", "spans": [sp]}
+                # 6 s rows: 100 of them are over the rare-class floor's 0.15 h (census_common.rare_floor_ok), so the
+                # share / exempt-floor rule decides here
+                write(d, f"tts_{lang}", [{"id": f"t{i}", "duration": 6.0, "text": "un demi", "spans": [sp]}
                                          for i in range(n_syn)])
                 cs = [c for c in G.gate_lang(d, lang, "full")["checks"] if c["check"].startswith(f"{kind} synthetic")]
                 return cs[0] if cs else None

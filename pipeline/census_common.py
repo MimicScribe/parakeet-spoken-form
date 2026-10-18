@@ -338,10 +338,11 @@ def syn_floor(lang, k, tier=None):
 
 # ---------------------------------------------------------------- fill-to-bar (2026-10-17)
 # Synthetic spans of a class may fill it up to its training bar: allowed synthetic = max(the share rule, bar - real
-# spans, the value floors' shortfall). Real rows always count first; where real speech already meets the bar the
-# share caps above still decide. Value-level bars (every year 1990-2030 / 2031-2060 / the key years, each 0-100 and
-# hundred count, distinct int_big values) count as part of the bar: a synthetic span of a thin value may fill it up to
-# its floor. bg stays at the share caps. These are the data gate's bars (data_gate TIER_P / MOD mirror them).
+# spans) + the value fill (syn_allowed). Real rows always count first; where real speech already meets the bar the
+# share caps above decide for every span that fills no thin value. Value-level bars (every year 1990-2030 / 2031-2060
+# / the key years, each 0-100 and hundred count, distinct int_big values): a synthetic span of a thin value may fill
+# it up to its floor on top of that, in a class whose real spans meet its bar up to VALUE_FILL_MAX_SHARE of the class.
+# bg stays at the share caps. These are the data gate's bars (data_gate TIER_P / MOD mirror them).
 FILL_EXCEPT = {"bg"}
 BAR_YEARS = {"de": 2000, "it": 2000, "nl": 2000}  # year-span bar of a full / next language (default 1500) x tier factor
 WAVE_BARS = {"full": dict(f=1.0, each=40, fwd=10, key=40, ints=2500, i100=10, hund=5, big=400, bigd=200),
@@ -393,25 +394,82 @@ def distinct_bar(lang, k, tier=None) -> int:
     return WAVE_BARS[tier]["bigd"] if k == "int_big" and tier in WAVE_BARS and lang not in FILL_EXCEPT else 0
 
 
+# value-floor fill in a class whose REAL spans already meet its bar may pass the class's share cap, but the class's
+# synthetic spans stay <= this share of its spans (interim rule 2026-10-17, one constant). Classes under their bar: no cap
+VALUE_FILL_MAX_SHARE = 0.5
+
+
+def _n_distinct(real_vals, syn_vals) -> int:
+    rv, sv = real_vals or {}, syn_vals or {}
+    return len({v for v, c in rv.items() if c} | {v for v, c in sv.items() if c})
+
+
+def value_needs(lang, k, v, real_vals=None, syn_vals=None, tier=None, n_distinct=None) -> bool:
+    """Would one more synthetic span of value v (class k) count in the value fill of syn_allowed: v is under its value
+    floor (real + synthetic spans), or k is int_big, v is a new distinct value and the distinct values are under the
+    distinct bar? (n_distinct: the distinct values of real + synthetic, when the caller keeps the count.)"""
+    rv, sv = real_vals or {}, syn_vals or {}
+    f = value_floor(lang, k, v, tier)
+    if f and rv.get(v, 0) + sv.get(v, 0) < f:
+        return True
+    db = distinct_bar(lang, k, tier)
+    if db and not rv.get(v) and not sv.get(v):
+        return (_n_distinct(rv, sv) if n_distinct is None else n_distinct) < db
+    return False
+
+
+def value_fill(lang, k, real_vals=None, syn_vals=None, tier=None) -> int:
+    """The synthetic spans of class k that fill thin values up to their floors and, for int_big, new distinct values
+    up to the distinct bar (before the VALUE_FILL_MAX_SHARE cap)."""
+    if not syn_vals:
+        return 0
+    rv = real_vals or {}
+    vfill = 0
+    for v, c in syn_vals.items():
+        vfill += min(c, max(0, value_floor(lang, k, v, tier) - rv.get(v, 0)))
+    db = distinct_bar(lang, k, tier)
+    if db:
+        new_d = sum(1 for v, c in syn_vals.items() if c and not rv.get(v))
+        vfill += min(new_d, max(0, db - len([v for v, c in rv.items() if c])))
+    return vfill
+
+
 def syn_allowed(lang, k, real, real_vals=None, syn_vals=None, tier=None) -> int:
-    """Synthetic spans class k may hold beside `real` real spans: max(the share rule, bar - real, value fill). The
-    value fill counts the synthetic spans of thin values up to their floors (real_vals / syn_vals: {value: spans}) and,
-    for int_big, synthetic spans of new distinct values up to the distinct bar."""
+    """Synthetic spans class k may hold beside `real` real spans: max(the share rule, bar - real) + the value fill. The
+    value fill (value_fill) counts the synthetic spans of thin values up to their floors and, for int_big, synthetic
+    spans of new distinct values up to the distinct bar; they come ON TOP of the class allowance, so a non-thin
+    synthetic span (an older set, a 1900-1989 year) uses the allowance and never freezes the thin values. In a class
+    whose real spans meet its bar the total stays <= VALUE_FILL_MAX_SHARE of the class's spans (or the share rule,
+    if that is more)."""
     lim = syn_limit(lang, k)
     share = int(lim * real / (1 - lim) + 1e-9) if lim < 1 else 10 ** 9
     fl = syn_floor(lang, k, tier)
     share = max(share, fl or 0)
-    bar = max(0, class_bar(lang, k, tier) - real)
-    vfill = 0
-    if syn_vals:
-        rv = real_vals or {}
-        for v, c in syn_vals.items():
-            vfill += min(c, max(0, value_floor(lang, k, v, tier) - rv.get(v, 0)))
-        db = distinct_bar(lang, k, tier)
-        if db:
-            new_d = sum(1 for v in syn_vals if not rv.get(v))
-            vfill += min(new_d, max(0, db - len([v for v, c in rv.items() if c])))
-    return max(share, bar, vfill)
+    cb = class_bar(lang, k, tier)
+    base = max(share, cb - real)
+    vfill = value_fill(lang, k, real_vals, syn_vals, tier)
+    if not vfill:
+        return base
+    total = base + vfill
+    if real >= cb:
+        m = VALUE_FILL_MAX_SHARE
+        total = max(share, min(total, int(m * real / (1 - m) + 1e-9) if m < 1 else total))
+    return total
+
+
+# the rare-class floor (the floor the share rule replaced): a class with NO bar (class_bar 0; never a FILL_EXCEPT
+# language) and (almost) no real speech (de / it / nl "&", fractions, roman numerals, versions) may hold up to
+# RARE_FLOOR_H hours of synthetic rows whatever its share, so it is represented at all. The build allows it
+# (mix_build.syn_room) and the data gate passes it as a "waived floor" (rare_floor_ok, the same rule)
+RARE_FLOOR_H = 0.15
+RARE_REAL_MAX = 19  # real spans at or under which a class has (almost) no real speech: under the gate's 20-span floor
+
+
+def rare_floor_ok(lang, k, syn, real, syn_h, tier=None) -> bool:
+    """May class k hold `syn` synthetic spans (rows of `syn_h` hours) beside `real` real spans under the rare-class
+    floor: no bar for the class, not a FILL_EXCEPT language, real <= RARE_REAL_MAX, syn_h <= RARE_FLOOR_H."""
+    return (lang not in FILL_EXCEPT and class_bar(lang, k, tier) == 0 and real <= RARE_REAL_MAX
+            and syn_h <= RARE_FLOOR_H + 1e-9)
 
 
 def filled_to_bar(lang, k, syn, spans, real_vals=None, syn_vals=None, tier=None) -> bool:
