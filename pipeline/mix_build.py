@@ -364,7 +364,7 @@ NUMBER_PART = {"tts/v10pt/train_ok.jsonl": 0.9, "tts/d9sup/train_ok.jsonl": 1.0,
 
 # per-language parts any build4 language writes (wave 1 and beyond): spoken-form rows, windows, synthetic rows and seam
 # pairs are number-bearing; d2anchor_<lang> holds an untrained language's digit rows
-_LANG_PART = re.compile(r"^mix4\w*/(p3|win|tts|seam|seam_long|d2anchor|d2_phonefmt|d2phone)_([a-z]{2})\.jsonl$")
+_LANG_PART = re.compile(r"^mix4\w*/(p3|win|win15|tts|seam|seam_long|d2anchor|d2_phonefmt|d2phone)_([a-z]{2})\.jsonl$")
 
 
 def number_share_of(path: str, rows: list | None = None) -> float:
@@ -1969,7 +1969,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
            dedupe: bool = False, seam_h: float = 0.0, plain_share: float = 0.0,
            plain_glob: str = "ml/plain/{lang}/plain*.jsonl", protected_globs: tuple = (), balance: bool = False,
            seam_files: tuple = SEAM_FILES, mix_dir: str = "mix4", seam_long_h: float = 0.0,
-           split_langs: tuple = ()) -> dict:
+           split_langs: tuple = (), win15_share: float = 0.0, win15_dir: str = "ml/win15b") -> dict:
     """mix4/ manifests for the wave-1 run (all CPU, idempotent):
     - mix4/d2.jsonl: mix3/d2 (Greek restore applied) WITHOUT wave-1 languages: their digit rows were relabelled by P3
       (origin d2) and would otherwise teach digits through the stock token KL;
@@ -2006,7 +2006,11 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
       seam, seam_long, plain, pairs, heldout, tts_dev, tts_dev_other) spells compound number words as separate
       morphemes (compound_split: "zweihundertsiebzig" -> "zwei hundert siebzig"). Applied at WRITE time only: every
       selection, cap, dedupe and pair choice above runs on the unsplit text, so the rows are the ones the same build
-      without the flag writes; the anchor parts (d2, d2p, fleurs_train_multi) keep their stock labels."""
+      without the flag writes; the anchor parts (d2, d2p, fleurs_train_multi) keep their stock labels.
+    - win15_share > 0 (2026-10-18): mix4/win15_<lang>.jsonl, 15 s multi-number windows (win15.py, <win15_dir>/<lang>/
+      windows.jsonl) whose every parent is a row this build trains on with the same label, none held out / rejected /
+      ext; <= win15_share x the language's number hours (rows + synthetic + windows + seam parts), synthetic windows
+      <= TTS_SHARE of that target, the year value spread kept (win15.select_for_build)."""
     import compound_split as CS
     import ml_balance as B
 
@@ -2020,7 +2024,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
             return rows_
         out_, st_ = CS.split_rows(rows_, lang_, pairs=pairs)
         stats.setdefault("split_compounds", {}).setdefault(lang_, {})[part] = st_
-        if part in ("p3", "win", "tts", "seam", "seam_long"):
+        if part in ("p3", "win", "win15", "tts", "seam", "seam_long"):
             unsplit_targets.update(x["text"] for x in rows_)
         return out_
     # a language's D2 digit rows leave only when it has labelled spoken-form rows (rows*.jsonl) to replace them
@@ -2356,6 +2360,23 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
             if n_sl0 and not sl_syn:
                 print(f"WARNING {lang}: synthetic long seam pairs on disk but none kept: {stats['seam_long_synthetic'][lang]}")
             _write(f"{vol}/{mix_dir}/seam_long_{lang}.jsonl", S(seam_long, lang, "seam_long"))
+        win15 = []
+        if os.path.exists(f"{vol}/{mix_dir}/win15_{lang}.jsonl") and not win15_share:
+            os.remove(f"{vol}/{mix_dir}/win15_{lang}.jsonl")  # a part this build does not make must not survive
+        if win15_share > 0:
+            import win15 as W15
+
+            w15 = _rows(f"{vol}/{win15_dir}/{lang}/windows.jsonl")
+            if dedupe:
+                w15, _ = B.dedupe(w15, protect[lang], within=False, part_of=lambda x: "win15")
+            w15_h = win15_share * (_h(tr) + _h(took) + _h(win) + _h(seam) + _h(seam_long))
+            win15, w15st = W15.select_for_build(w15, {x["id"]: x for x in tr + took},
+                                                held | rej | held_dup | ext_all | gram_rej, w15_h,
+                                                random.Random(f"{seed}-win15-{lang}"), lang=lang)
+            for x in win15:
+                assert "num_tokens" in x and not WF_LABEL.search(x["text"]), f"{lang}: bad win15 window {x['id']}"
+            stats.setdefault("win15", {})[lang] = dict(w15st, target_h=round(w15_h, 3))
+            _write(f"{vol}/{mix_dir}/win15_{lang}.jsonl", S(win15, lang, "win15"))
         if plain_share > 0:
             pool = _rows(f"{vol}/{plain_glob.format(lang=lang)}")
             units = {B.held_unit(i) for i in held} - {None}
@@ -2364,7 +2385,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
             if dedupe:
                 pool, prep = B.dedupe(pool, protect[lang], part_of=lambda x: "plain")
                 stats["dedupe"][lang]["plain"] = prep["counts"]
-            number_h = _h(tr) + _h(win) + _h(took) + _h(seam) + _h(seam_long)
+            number_h = _h(tr) + _h(win) + _h(took) + _h(seam) + _h(seam_long) + _h(win15)
             need = B.plain_target_h(number_h, plain_share, anchor_h.get(lang, 0.0))
             plain, pst = B.pick_plain(pool, lang, need, rng)
             _write(f"{vol}/{mix_dir}/plain_{lang}.jsonl", S(plain, lang, "plain"))
@@ -2423,7 +2444,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
     # rehearsal crash 2026-10-15: a text that is a wave-1 spoken-form target (nonen_span) must not also sit in a
     # stock-anchored part (ft_train asserts it); drop such rows from the anchor parts instead of crashing at launch
     targets = {x["text"] for lang in langs for k in ("p3", "win", "tts") + (("seam",) if seam_h > 0 else ())
-               + (("seam_long",) if seam_long_h > 0 else ())
+               + (("seam_long",) if seam_long_h > 0 else ()) + (("win15",) if win15_share > 0 else ())
                for x in _rows(f"{vol}/{mix_dir}/{k}_{lang}.jsonl")} | unsplit_targets  # + the same rows unsplit
     for part in ("d2p.jsonl", "fleurs_train_multi.jsonl", "d2.jsonl") + tuple(f"plain_{l}.jsonl" for l in langs if plain_share > 0):
         pth = f"{vol}/{mix_dir}/{part}"
@@ -2442,6 +2463,7 @@ for _l in WAVE1:  # wave-1 spoken-form rows and windows are number-bearing rows 
     NUMBER_PART[f"mix4/tts_{_l}.jsonl"] = 1.0
     NUMBER_PART[f"mix4/p3_{_l}.jsonl"] = 1.0
     NUMBER_PART[f"mix4/win_{_l}.jsonl"] = 1.0
+    NUMBER_PART[f"mix4/win15_{_l}.jsonl"] = 1.0
 NUMBER_PART["mix4/d2.jsonl"] = 1.0  # (mix4/d2p and mix4/fleurs_train_multi stay 0: plain anchor rows)
 # English parts added 2026-10-17 (modal_app EN4_PARTS / EN_WIN_PARTS and the year-capped mix3b manifests): every row
 # carries a number except the cloud set's control sentences and a few seam crops (shares measured on the manifests)
