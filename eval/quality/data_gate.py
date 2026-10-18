@@ -42,7 +42,7 @@ from census_common import (CLASS_MIN, CLOCK_CTX, DOT_CLOCK, EXT_BY, GROUP_CAP, G
                            SYN_SHARE_LANG, TEMPLATE_CAP, TIER_FACTOR, TIER_LANGS, TIER_OF, by_value, ext_span,
                            gate_class, gate_class_value, group_cap, group_id, morph_class, span_class, spoken_shape,
                            syn_floor, syn_limit, synthetic, template_key, tier_of)
-from census_common import BAR_YEARS, FORWARD_KEY, MOD_BARS, WAVE_BARS, filled_to_bar, syn_ok  # noqa: E402
+from census_common import BAR_YEARS, FILL_OVERSHOOT, FORWARD_KEY, MOD_BARS, WAVE_BARS, filled_to_bar, syn_ok  # noqa: E402,F401
 from census_common import rare_floor_ok  # noqa: E402
 
 

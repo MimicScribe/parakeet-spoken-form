@@ -109,7 +109,7 @@ class ValueFillCap(unittest.TestCase):
         self.assertEqual(CC.syn_allowed("pt", "year", 1500, Counter({1985: 1500}), sv), 1500)  # 50%, not 1640
         self.assertFalse(CC.syn_ok("pt", "year", 1640, 3140, real_vals=Counter({1985: 1500}), syn_vals=sv))
         # a class under its bar: the bar room plus the full value fill, no cap
-        self.assertEqual(CC.syn_allowed("pt", "year", 100, Counter({1985: 100}), sv), 1400 + 1640)
+        self.assertEqual(CC.syn_allowed("pt", "year", 100, Counter({1985: 100}), sv), 1400 + CC.FILL_OVERSHOOT + 1640)
 
     def test_thin_values_fill_on_top_of_a_class_at_its_bar(self):
         # red-on-base: ru years (55 real, bar 825) stopped at exactly 770 synthetic from spread 1900-1989 years: at the
@@ -125,7 +125,7 @@ class ValueFillCap(unittest.TestCase):
             # every thin value to its floor (820 spans) on top of the class allowance (bar - real = 770), which the
             # spread years and the thin values' spans over their floors share
             self.assertTrue(all(vals[v] >= 20 for v in range(1990, 2031)), vals)
-            self.assertEqual(len(took), 770 + 41 * 20)
+            self.assertEqual(len(took), 770 + CC.FILL_OVERSHOOT + 41 * 20)
 
 
 class RareFloor(unittest.TestCase):
@@ -133,7 +133,7 @@ class RareFloor(unittest.TestCase):
         # red-on-base: the rare-class floor (0.15 h) applied to classes with a bar (de unit, bar 150) and to bg
         realr = [{"id": f"r{i}", "text": "x", "spans": [{"kind": "unit", "text": "5 km"}]} for i in range(5)]
         tts = [syn(i, "unit", f"{i} km", dur=1.0) for i in range(600)]
-        self.assertEqual(len(MB.select_synthetic(tts, realr, "de", {"unit": 0.01})), 145)  # fill to the 150 bar
+        self.assertEqual(len(MB.select_synthetic(tts, realr, "de", {"unit": 0.01})), 145 + CC.FILL_OVERSHOOT)  # fill to the 150 bar (+ slack)
         amp = [syn(i, "amp", "AT&T", dur=6.5) for i in range(120)]
         self.assertEqual(len(MB.select_synthetic(amp, [], "bg", {})), 0)  # bg keeps the share caps exactly
         self.assertEqual(len(MB.select_synthetic(amp, [], "de", {})), 83)  # no bar: the floor (0.15 h)

@@ -276,10 +276,10 @@ class FillToBar(unittest.TestCase):
         tts = [{"id": f"t{i}", "text": "x", "src": "tts", "_targeted": True, "duration": 5.0,
                 "spans": [{"kind": "range", "text": f"{30 + i}-{40 + i}"}]} for i in range(200)]
         took = MB.select_synthetic(tts, real, "nl", {"range": 9.0})
-        self.assertEqual(len(took), 90)  # 60 real + 90 synthetic = the 150 bar
+        self.assertEqual(len(took), 90 + CC.FILL_OVERSHOOT)  # 60 real + 90 synthetic = the 150 bar (+ slack)
         chk = MB.post_build_check(real, took, "nl")
         self.assertEqual(chk["synthetic_over"], {})
-        self.assertEqual(chk["filled_to_bar"]["range"], {"synthetic": 90, "real": 60, "bar": 150})
+        self.assertEqual(chk["filled_to_bar"]["range"], {"synthetic": 90 + CC.FILL_OVERSHOOT, "real": 60, "bar": 150})
         self.assertEqual(MB.trim_synthetic(took, real, "nl")[1], 0)
         self.assertEqual(len(MB.select_synthetic(tts, real, "bg", {"range": 9.0})), 25)  # bg keeps the caps
 
@@ -313,7 +313,7 @@ class FillToBar(unittest.TestCase):
         before = {x["id"] for x in rj(f"{vol}/ml/p3v2/de/rows.jsonl")}
         MB.build4(vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True)
         p3 = {x["id"] for x in rj(f"{vol}/mix4/p3_de.jsonl")}
-        self.assertEqual(len(rj(f"{vol}/mix4/tts_de.jsonl")), 292)  # 8 real + 292 synthetic = the 300 pct bar
+        self.assertEqual(len(rj(f"{vol}/mix4/tts_de.jsonl")), 292 + CC.FILL_OVERSHOOT)  # 8 real + 292 synthetic = the 300 pct bar (+ slack)
         self.assertEqual(len(p3), 8)  # every real row kept, with the synthetic rows beside them
         self.assertTrue(p3 <= before)
 
@@ -340,9 +340,9 @@ class FillToBar(unittest.TestCase):
         self.assertTrue(c[0]["pass"], c)
         self.assertIn("filled to bar (synthetic 90, real 60)", str(c[0]["got"]))
         wj(d, "tts_nl.jsonl", [{"id": f"t{i}", "text": "x", "duration": 3.0, "spans": [{"kind": "range", "text": "1-9"}]}
-                               for i in range(91)])
+                               for i in range(91 + CC.FILL_OVERSHOOT)])
         c = [x for x in DG.gate_lang(d, "nl")["checks"] if x["check"].startswith("range synthetic share")]
-        self.assertFalse(c[0]["pass"])  # one over the bar
+        self.assertFalse(c[0]["pass"])  # one over the bar + its slack
 
 
 class LongGenerators(unittest.TestCase):

@@ -1564,6 +1564,20 @@ R3_ARMS.update({
     "R8-e": dict(_R8, lr=1e-4, l2sp_c=30.0, en_set="first", en_weight=3.0),
     "R8-s": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE),
 })
+# R8 try 3 (2026-10-18), one change each against R8-s (stock start, lr 1e-4, c 10), 3,000 steps, --r3-sub-batch 1
+# (R8-s ran out of GPU memory in the auxiliary pass at ~1,460 steps with sub-batch 2):
+#   T3-a = R8-s unchanged, run longer.
+#   R8-s3e = R8-s + the written-form penalty x 3 on English rows (wf_en_weight; nonen_span rows keep x 1, so their digit
+#           fallback stays): English spoken form stalled at c 10 with only RNNT + wf_pen (weight 1) pushing it.
+#   R8-sc = R8-s + the decimal-comma penalty (comma_weight = wf_weight: "," / ",-" / ",." at the number columns of
+#           nonen_span rows, not at columns whose own target is a comma; ft_train.add_r3_losses).
+#   modal run --detach modal_app.py::retrain3 --run <run> --arm <R8-s | R8-s3e | R8-sc> --mix v4 --mix-dir <dir> \
+#     --langs <RUN2_LANGS> --init-from ultra --anchor-init --dur-weight 0 --warmup 20 --max-steps 3000 \
+#     --save-every 250 --r3-sub-batch 1
+R3_ARMS.update({
+    "R8-s3e": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, wf_en_weight=3.0),
+    "R8-sc": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, comma_weight=_R8["wf_weight"]),
+})
 R3_ARMS.update({
     "R4-a": dict(wf_weight=3.0, l2sp_c=1.0, lr=3e-5, recipe=_R4_RECIPE),
     "R4-b": dict(wf_weight=3.0, l2sp_c=1.0, lr=3e-5, recipe=_R4_RECIPE, suffix_anchor=True, anchor_after=1,
@@ -1605,6 +1619,8 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
         en_weight = cfg.get("en_weight", 1.0)
     cfg["en_weight"] = en_weight
     cfg.setdefault("en_set", "whole")
+    cfg.setdefault("comma_weight", 0.0)
+    cfg.setdefault("wf_en_weight", 1.0)
     given = dict(mix=mix, init_from=init_from, anchor_init=anchor_init, dur_weight=dur_weight, warmup=warmup,
                  langs=",".join(_langs(langs)))
     bad = {k: (given[k], v) for k, v in cfg.pop("recipe", {}).items() if given[k] != v}
@@ -1627,6 +1643,8 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
         print("BUILD", mix_dir, json.dumps(check_build_langs(langs, mix_dir).get("langs_without_rows", [])))
     # a warm start anchors L2-SP to its own init, not v10pt (the prior being trained away)
     i_run, _, i_step = init_from.partition("@")
+    if init_from == "ultra":  # a stock start anchored to v10pt would pull it toward a fine-tuned prior
+        assert anchor_init, "init_from ultra needs --anchor-init (the L2-SP anchor must be stock, not v10pt)"
     if not anchor_init:
         anchor = f"{VOL}/exp/v10pt/step1500.pt"
     elif init_from == "ultra":  # stock: the decoder + joint tensors of the .nemo, NeMo names as in exp checkpoints
@@ -1652,7 +1670,8 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
                    spec_augment=False, kl_weight=10.0, kl_punct=30.0, kl_tok=1.0, save_every=save_every,
                    on_save=vol.commit, stage_dir="/tmp/stage", r3=True, wf_weight=cfg["wf_weight"],
                    en_weight=en_weight, l2sp_c=cfg["l2sp_c"], l2sp_anchor=anchor, dur_weight=dur_weight,
-                   en_set=cfg["en_set"], r3_sub_batch=r3_sub_batch, **r4)
+                   en_set=cfg["en_set"], r3_sub_batch=r3_sub_batch, comma_weight=cfg["comma_weight"],
+                   wf_en_weight=cfg["wf_en_weight"], **r4)
     vol.commit()
 
 

@@ -525,6 +525,38 @@ def en_num_first_piece_ids(spm, encode, nonen_labels, words=EN_NUM_WORDS_FIRST, 
     return sorted(kept), rep
 
 
+# decimal-comma penalty (comma_weight, try 3): the stock prior writes "3,5" where a spoken-form label says the decimal
+# word (komma / coma / virgule / virgola); "," is no written-form piece and the punctuation KL anchors terminal marks
+# only, so no other term covers it. Exact pieces only (a substring match would reach every piece holding a comma); the
+# Ultra vocabulary has ",", ",-" and ",." ("▁," listed in case a tokenizer has it).
+COMMA_PIECES = (",", "\u2581,", ",-", ",.")
+
+
+def comma_piece_ids(spm) -> list[int]:
+    """The ids of the pieces that are exactly one of COMMA_PIECES."""
+    return [i for i in range(spm.get_piece_size()) if spm.id_to_piece(i) in COMMA_PIECES]
+
+
+def comma_target_cols(row_toks, comma_ids, W: int) -> "torch.Tensor":
+    """(B, W) True at label column u where the row's own target piece row_toks[i][u] is a comma piece: the comma
+    penalty skips those columns (a list or clause comma in the label is right there, and penalising it would fight the
+    RNNT loss); the rest of the row keeps the penalty."""
+    cs = {int(c) for c in comma_ids}
+    out = torch.zeros(len(row_toks), W, dtype=torch.bool)
+    for i, toks in enumerate(row_toks):
+        for u, t in enumerate(toks[:W]):
+            if int(t) in cs:
+                out[i, u] = True
+    return out
+
+
+def wf_row_weights(is_nspan, wf_en: float) -> "torch.Tensor":
+    """Per-row factor on wf_pen (wf_en_weight): wf_en on the rows wf_pen covers that are not nonen_span (the English
+    spoken-form rows), 1 on nonen_span rows, so their digit fallback stays as it is."""
+    return torch.where(is_nspan, torch.ones((), device=is_nspan.device),
+                       torch.full((), float(wf_en), device=is_nspan.device))
+
+
 def en_pen_cols(klu, nonen, nspan, en_set: str):
     """Label columns where en_pen applies, per row: "whole" = every column (rows: nonen + nonen_span); "first" = every
     column of nonen rows, and on nonen_span rows only the number columns (klu False: where the token KL to stock is
@@ -816,12 +848,15 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                   dur_weight: float = 0.0, span_prefix: dict | None = None, suffix_anchor: bool = False,
                   anchor_after: int = 1, nspan_pos: dict | None = None, gate: float = 0.9, gate_human: float = 0.0,
                   synthetic: set | None = None, cons_weight: float = 0.0, pair_bank: "PairBank | None" = None,
-                  en_set: str = "whole"):
+                  en_set: str = "whole", comma_weight: float = 0.0, wf_en_weight: float = 1.0):
     """R3 losses (table above). R4 options, all off by default: suffix_anchor (arm b: anchor every non-number position of
     span / anchor_num rows, and of nonen_span rows via nspan_pos {label ids: anchor_positions}), gate_human (arm b: the
     blank-KL teacher gate on human-verified rows, `gate` elsewhere), cons_weight + pair_bank (arm c: cross-window
     consistency, consistency_term). en_set: the en_pen piece set and columns ("whole" | "first"; EN_NUM_WORDS_FIRST,
-    en_pen_cols)."""
+    en_pen_cols). comma_weight > 0: the decimal-comma penalty (comma_piece_ids) at the number columns of nonen_span rows
+    (klu False, as en_set "first"), except columns whose own target is a comma (comma_target_cols); 0 = the loss is
+    unchanged bit for bit. wf_en_weight != 1: wf_pen per row x wf_row_weights (English rows x wf_en_weight, nonen_span
+    rows x 1); 1 = unchanged bit for bit."""
     import copy
 
     assert en_set in ("whole", "first"), en_set
@@ -844,6 +879,12 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
     wf_t, en_t = torch.tensor(wf_piece_ids(spm)), torch.tensor(en_ids, dtype=torch.long)
     th_first = int(m.tokenizer.text_to_ids("thousand")[0])
     th_t = torch.tensor([th_first])
+    cm_t = torch.tensor(comma_piece_ids(spm) if comma_weight else [], dtype=torch.long)
+    if comma_weight:
+        assert len(cm_t), "comma_weight > 0 but no comma piece in the tokenizer"
+        print(f"comma pen: weight {comma_weight} pieces {[(int(i), spm.id_to_piece(int(i))) for i in cm_t]}", flush=True)
+    if wf_en_weight != 1.0:
+        print(f"wf_en_weight {wf_en_weight}: wf_pen x {wf_en_weight} on English rows, x 1 on nonen_span rows", flush=True)
     print(f"R3 losses: wf pieces {len(wf_t)} e.g. {[spm.id_to_piece(int(i)) for i in wf_t[:12]]}; "
           f"en_num pieces ({en_set}) {[spm.id_to_piece(int(i)) for i in en_t]}; thousand first piece {spm.id_to_piece(th_first)!r}; tags {dict(collections.Counter(row_tags.values()))}",
           flush=True)
@@ -894,9 +935,11 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                     if row_toks[i][u] != th_first:
                         yrcol[i, u] = True
         yrcol = yrcol.to(dev)
-        tid, wf, en, th = term_t.to(dev), wf_t.to(dev), en_t.to(dev), th_t.to(dev)
+        tid, wf, en, th, cm = term_t.to(dev), wf_t.to(dev), en_t.to(dev), th_t.to(dev), cm_t.to(dev)
+        # comma penalty: columns open to it (not a comma target of the row's own label); unused when comma_weight 0
+        cm_ok = (~comma_target_cols(row_toks, cm_t.tolist(), W)).to(dev) if comma_weight else torch.ones_like(klu)
 
-        def chunk(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, klu_sl, nonen_sl, nspan_sl, yr_sl, yrcol_sl, thr_sl):
+        def chunk(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, klu_sl, nonen_sl, nspan_sl, yr_sl, yrcol_sl, thr_sl, cmok_sl):
             with NoDropout(m.joint):
                 s_logits = m.joint.joint(f_sl, s_sl).float()
             with torch.no_grad():
@@ -951,13 +994,18 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                 return per_row, rows_sl.float()  # per row: 0 off rows_sl (no emitting cell counted there)
 
             wf_s, wf_n = pen(wf, ~nonen_sl)
+            if wf_en_weight != 1.0:  # off: wf_s untouched, bit for bit
+                wf_s = wf_s * wf_row_weights(nspan_sl, wf_en_weight)
             en_s, en_n = (pen(en, nonen_sl | nspan_sl, en_pen_cols(klu_sl, nonen_sl, nspan_sl, en_set)) if len(en)
                           else (torch.zeros_like(nonen_sl, dtype=torch.float),) * 2)
             th_s, th_n = pen(th, yr_sl, yrcol_sl)
+            # decimal comma: nonen_span rows, number columns only (klu False), not where the label itself has a comma
+            cm_s, cm_n = (pen(cm, nspan_sl, nspan_sl[:, None] & ~klu_sl & cmok_sl) if comma_weight
+                          else (torch.zeros_like(nonen_sl, dtype=torch.float),) * 2)
             # per-row sums (summed over the batch below; per tag for the r3tag log line)
             return ((kl_blank * bmask).sum((1, 2)), bmask.sum((1, 2)).float(), (kl_p * kmask).sum((1, 2)),
                     kmask.sum((1, 2)).float(), (kl_t * tmask).sum((1, 2)), tmask.sum((1, 2)).float(), wf_s, wf_n, en_s,
-                    en_n, th_s, th_n, (kl_d * dmask).sum((1, 2)), dmask.sum((1, 2)).float())
+                    en_n, th_s, th_n, (kl_d * dmask).sum((1, 2)), dmask.sum((1, 2)).float(), cm_s, cm_n)
 
         parts = []
         for j in range(0, B, sub_batch):
@@ -967,8 +1015,8 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             parts.append(torch.utils.checkpoint.checkpoint(
                 chunk, f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
                 enc_len[sl], tokens_len[sl], klu[sl], is_nonen[sl], is_nspan[sl], is_yr[sl], yrcol[sl], thr[sl],
-                use_reentrant=False))
-        acc = [torch.cat(v) for v in zip(*parts)]  # 14 per-row vectors (B,)
+                cm_ok[sl], use_reentrant=False))
+        acc = [torch.cat(v) for v in zip(*parts)]  # 16 per-row vectors (B,)
         tot = [a.sum() for a in acc]
         kl_b = tot[0] / tot[1].clamp(min=1)
         kl_p = tot[2] / tot[3].clamp(min=1)
@@ -977,15 +1025,19 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
         en_pen = tot[8] / tot[9].clamp(min=1)
         th_pen = tot[10] / tot[11].clamp(min=1)
         kl_d = tot[12] / tot[13].clamp(min=1)
+        cm_pen = tot[14] / tot[15].clamp(min=1)
         aux = (kl_weight * kl_b + punct_weight * kl_p + tok_weight * kl_t + wf_weight * wf_pen + en_weight * en_pen
                + wf_weight * th_pen + dur_weight * kl_d)
+        if comma_weight:  # off: the sum above, unchanged bit for bit
+            aux = aux + comma_weight * cm_pen
         cons, n_pairs = torch.zeros((), device=dev), 0
         if cons_weight and pair_bank is not None:
             cons, n_pairs = consistency_term(m, pair_bank, dev, nb)
             aux = aux + cons_weight * cons
         m._r3_parts = {"rnnt": out["loss"].detach(), "kl_b": kl_b.detach(), "kl_p": kl_p.detach(),
                        "kl_t": kl_t.detach(), "wf": wf_pen.detach(), "en": en_pen.detach(),
-                       "th": th_pen.detach(), "kl_d": kl_d.detach(), "cons": cons.detach()}
+                       "th": th_pen.detach(), "kl_d": kl_d.detach(), "cons": cons.detach(),
+                       "comma": cm_pen.detach()}
         if os.environ.get("R3_GRADSHARE") and batch_idx % 50 == 0:
             # acceptance check: each term's gradient on the joint's last layer, overall and on the written-form
             # output rows (wf_pen must reach >= 10% of the RNNT gradient there)
@@ -1178,14 +1230,17 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           r3: bool = False, wf_weight: float = 1.0, en_weight: float = 1.0, l2sp_c: float = 0.0,
           l2sp_anchor: str = "", accumulate: int = 1, dur_weight: float = 0.0, suffix_anchor: bool = False,
           anchor_after: int = 1, gate: float = 0.9, gate_human: float = 0.0, cons_weight: float = 0.0,
-          cons_pairs: str = "", cons_per_batch: int = 1, en_set: str = "whole", r3_sub_batch: int = 2):
+          cons_pairs: str = "", cons_per_batch: int = 1, en_set: str = "whole", r3_sub_batch: int = 2,
+          comma_weight: float = 0.0, wf_en_weight: float = 1.0):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
     entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists.
     R4 (r3 only, all off by default): suffix_anchor / anchor_after / gate / gate_human (arm b), cons_weight + cons_pairs
     (comma-separated volume-relative pair lists; missing files are skipped) + cons_per_batch (arm c).
     en_set (r3): the en_pen piece set ("whole" | "first", add_r3_losses). r3_sub_batch: rows per auxiliary joint pass
-    (add_r3_losses sub_batch): 1 halves that pass's peak memory, same batch and loss values, slower step."""
+    (add_r3_losses sub_batch): 1 halves that pass's peak memory, same batch and loss values, slower step.
+    comma_weight (r3): the decimal-comma penalty's weight (add_r3_losses; 0 = off). wf_en_weight (r3): wf_pen's factor
+    on English rows (add_r3_losses; 1 = off)."""
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
@@ -1288,7 +1343,8 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
                       wf_weight=wf_weight, en_weight=en_weight, dur_weight=dur_weight, span_prefix=span_prefix,
                       suffix_anchor=suffix_anchor, anchor_after=anchor_after, nspan_pos=nspan_pos, gate=gate,
                       gate_human=gate_human, synthetic=synthetic, cons_weight=cons_weight, pair_bank=bank,
-                      en_set=en_set, sub_batch=r3_sub_batch)
+                      en_set=en_set, sub_batch=r3_sub_batch, comma_weight=comma_weight,
+                      wf_en_weight=wf_en_weight)
         if l2sp_c:
             last_layer = m.joint.joint_net[-1].weight.shape[0]
             exempt = [i for i in wf_piece_ids(m.tokenizer.tokenizer) if i < last_layer]

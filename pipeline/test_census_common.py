@@ -265,6 +265,22 @@ class Round2(unittest.TestCase):
         took2, n = MB.trim_synthetic(took, real[:350], "de")  # real rows a later cap removed: shares re-checked
         self.assertEqual((len(took2), n), (150, 21))  # 150 / 500 = 0.30
 
+    def test_fill_to_bar_reaches_the_bar_with_two_span_rows(self):
+        # red-on-base: the allowance stopped at bar - real, so when every free row carries 2 spans of the class the
+        # fill landed one short (nl dec 197 real + 102 synthetic = 299 / 300); the build and the gate count alike
+        real = [{"id": f"r{i}", "text": "x", "spans": [{"kind": "dec", "text": "1,5"}]} for i in range(197)]
+        tts = [{"id": f"t{i}", "text": "x", "src": "tts", "_targeted": True,
+                "spans": [{"kind": "dec", "text": "2,5"}, {"kind": "dec", "text": "3,5"}]} for i in range(80)]
+        bar = CC.class_bar("nl", "dec")
+        self.assertEqual(bar, 300)
+        took = MB.select_synthetic(tts, real, "nl", {"dec": 1.0})
+        syn = 2 * len(took)
+        self.assertGreaterEqual(197 + syn, bar)
+        self.assertLessEqual(197 + syn, bar + CC.FILL_OVERSHOOT)
+        self.assertTrue(CC.syn_ok("nl", "dec", syn, 197 + syn))  # the gate passes what the build took
+        self.assertFalse(CC.syn_ok("nl", "dec", syn + 2 * 3, 197 + syn + 2 * 3))  # and no more than the slack
+        self.assertFalse(MB.post_build_check(real, took, "nl")["synthetic_over"])
+
     def test_windows2_held_unit(self):
         # red-on-base: windows2 held out PLENARY days only (committee sessions of a held-out day trained)
         src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_p3.py")).read()

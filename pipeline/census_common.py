@@ -397,6 +397,11 @@ def distinct_bar(lang, k, tier=None) -> int:
 # value-floor fill in a class whose REAL spans already meet its bar may pass the class's share cap, but the class's
 # synthetic spans stay <= this share of its spans (interim rule 2026-10-17, one constant). Classes under their bar: no cap
 VALUE_FILL_MAX_SHARE = 0.5
+# fill-to-bar may pass the bar by up to this many synthetic spans, so the row that reaches the bar fits: a generated
+# sentence holds up to 5 spans of one class, and without the slack a class whose last free rows each carry 2+ spans
+# stopped one short of its bar (de phone, nl dec at 299 / 300 in mix4final6 / 7). The build and the gate both read
+# it through syn_allowed, so they count the same allowance.
+FILL_OVERSHOOT = 4
 
 
 def _n_distinct(real_vals, syn_vals) -> int:
@@ -436,6 +441,7 @@ def value_fill(lang, k, real_vals=None, syn_vals=None, tier=None) -> int:
 
 def syn_allowed(lang, k, real, real_vals=None, syn_vals=None, tier=None) -> int:
     """Synthetic spans class k may hold beside `real` real spans: max(the share rule, bar - real) + the value fill. The
+    class allowance stops FILL_OVERSHOOT spans above the bar (a multi-span row may cross it). The
     value fill (value_fill) counts the synthetic spans of thin values up to their floors and, for int_big, synthetic
     spans of new distinct values up to the distinct bar; they come ON TOP of the class allowance, so a non-thin
     synthetic span (an older set, a 1900-1989 year) uses the allowance and never freezes the thin values. In a class
@@ -446,7 +452,7 @@ def syn_allowed(lang, k, real, real_vals=None, syn_vals=None, tier=None) -> int:
     fl = syn_floor(lang, k, tier)
     share = max(share, fl or 0)
     cb = class_bar(lang, k, tier)
-    base = max(share, cb - real)
+    base = max(share, cb - real + FILL_OVERSHOOT if real < cb else 0)
     vfill = value_fill(lang, k, real_vals, syn_vals, tier)
     if not vfill:
         return base

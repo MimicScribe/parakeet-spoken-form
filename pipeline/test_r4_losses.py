@@ -525,3 +525,93 @@ def test_sub_batch_same_loss():
                         sub_batch=sb, en_set="first")
         losses.append(m.training_step(b, 0)["loss"].item())
     assert losses[0] == pytest.approx(losses[1], rel=1e-5) == pytest.approx(losses[2], rel=1e-5)
+
+
+# ---------------------------------------------------------------- decimal-comma penalty (comma_weight, try 3)
+def comma_part(texts_tags, comma_weight=0.0, prefix=3, wf_en_weight=1.0):
+    m = FakeModel()
+    for p in (",", ",-", ",.", ",5", "a,"):  # exact pieces only: ",5" / "a," hold a comma but are not comma pieces
+        m.tokenizer.tokenizer._id(p)
+    batch, ids = fake_batch(m, [t for t, _ in texts_tags])
+    tags = {tuple(i): tg for i, (_, tg) in zip(ids, texts_tags)}
+    F.add_r3_losses(m, tags, span_prefix={tuple(i): prefix for i, (_, tg) in zip(ids, texts_tags) if tg == "nonen_span"},
+                    comma_weight=comma_weight, wf_en_weight=wf_en_weight)
+    out = m.training_step(batch, 0)
+    assert torch.isfinite(out["loss"])
+    return m, out["loss"]
+
+
+def test_comma_piece_ids_exact():
+    spm = TinySPM()
+    for p in (",", ",-", ",.", ",5", "a,", ",,", "\u2581,,"):
+        spm._id(p)
+    assert sorted(spm.id_to_piece(i) for i in F.comma_piece_ids(spm)) == [",", ",-", ",."]
+
+
+def test_comma_target_cols():
+    cols = F.comma_target_cols([[5, 7, 9], [7, 7]], [7], 4)
+    assert cols.tolist() == [[False, True, False, False], [True, True, False, False]]
+
+
+def test_comma_pen_positive_at_number_columns(capsys):
+    m, _ = comma_part([("wir zahlen drei komma fünf euro", "nonen_span")], 2.0)
+    assert m._r3_parts["comma"].item() > 0
+    line = next(l for l in capsys.readouterr().out.splitlines() if l.startswith("comma pen:"))
+    assert line.startswith("comma pen: weight 2.0 pieces") and "','" in line and "',-'" in line and "',.'" in line
+    assert "',5'" not in line and "'a,'" not in line
+
+
+def test_comma_pen_skips_the_labels_own_comma_columns(monkeypatch):
+    """A row whose label has a comma piece (FakeSPM: "fünfx,-" -> "▁fünfx", ",-"): the comma column is skipped, the
+    other number columns keep the penalty."""
+    rows = [("wir zahlen fünfx,- vier euro", "nonen_span")]
+    m = FakeModel()
+    m.tokenizer.tokenizer._id(",-")
+    assert ",-" in [m.tokenizer.tokenizer.id_to_piece(i) for i in m.tokenizer.text_to_ids(rows[0][0])]
+    with_skip = comma_part(rows, 2.0)[0]._r3_parts["comma"].item()
+    assert with_skip > 0
+    monkeypatch.setattr(F, "comma_target_cols", lambda toks, ids, W: torch.zeros(len(toks), W, dtype=torch.bool))
+    no_skip = comma_part(rows, 2.0)[0]._r3_parts["comma"].item()
+    assert no_skip != pytest.approx(with_skip)
+
+
+def test_comma_pen_zero_without_number_columns_or_off_rows():
+    m, _ = comma_part([("wir zahlen drei komma fünf euro", "nonen_span")], 2.0, prefix=99)  # klu all True
+    assert m._r3_parts["comma"].item() == 0.0
+    m, _ = comma_part([("so in the year twenty nineteen we grew", "span"), ("wir haben zwei Hunde", "nonen")], 2.0)
+    assert m._r3_parts["comma"].item() == 0.0
+
+
+ROWS3 = [("wir zahlen drei komma fünf euro", "nonen_span"), ("so in the year twenty nineteen we grew 5", "span"),
+         ("wir haben two Hunde", "nonen")]
+
+
+def test_comma_and_wf_en_off_bit_identical():
+    m1, m2 = FakeModel(), FakeModel()
+    b1, ids = fake_batch(m1, [t for t, _ in ROWS3])
+    b2, _ = fake_batch(m2, [t for t, _ in ROWS3])
+    tags = {tuple(i): tg for i, (_, tg) in zip(ids, ROWS3)}
+    F.add_r3_losses(m1, tags, span_prefix={tuple(ids[0]): 3})
+    F.add_r3_losses(m2, tags, span_prefix={tuple(ids[0]): 3}, comma_weight=0.0, wf_en_weight=1.0)
+    l1, l2 = m1.training_step(b1, 0)["loss"], m2.training_step(b2, 0)["loss"]
+    assert torch.equal(l1, l2)
+    _, l3 = comma_part(ROWS3, 2.0)
+    assert l3.item() > l1.item()  # the penalty adds to the loss when on
+
+
+# ---------------------------------------------------------------- wf_pen x wf_en_weight on English rows (try 3)
+def test_wf_row_weights():
+    assert F.wf_row_weights(torch.tensor([True, False, False]), 3.0).tolist() == [1.0, 3.0, 3.0]
+    assert F.wf_row_weights(torch.tensor([True, False]), 1.0).tolist() == [1.0, 1.0]
+
+
+def test_wf_en_weight_scales_english_rows_only():
+    base = comma_part(ROWS3)[0]._r3_parts["wf"].item()
+    up = comma_part(ROWS3, wf_en_weight=3.0)[0]._r3_parts["wf"].item()
+    assert base > 0 and up > base
+    nspan_only = [ROWS3[0]]  # a nonen_span row alone: x 1, unchanged
+    assert (comma_part(nspan_only, wf_en_weight=3.0)[0]._r3_parts["wf"].item()
+            == pytest.approx(comma_part(nspan_only)[0]._r3_parts["wf"].item(), rel=1e-6))
+    eng_only = [ROWS3[1]]  # an English row alone: x 3 exactly
+    assert (comma_part(eng_only, wf_en_weight=3.0)[0]._r3_parts["wf"].item()
+            == pytest.approx(3 * comma_part(eng_only)[0]._r3_parts["wf"].item(), rel=1e-5))

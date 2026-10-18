@@ -125,9 +125,11 @@ class ShareExceptions(unittest.TestCase):
                 return [c for c in G.gate_lang(d, lang, "full")["checks"] if c["check"].startswith("phone synthetic")][0]
         self.assertTrue(gate("en", 292)["pass"])  # 97% synthetic, 292 <= 300
         self.assertFalse(gate("en", 301)["pass"])  # above the floor
-        # es phone: no floor exemption, but fill-to-bar (2026-10-17) allows 300 - 8 real = 292 synthetic
+        # es phone: no floor exemption, but fill-to-bar (2026-10-17) allows 300 - 8 real = 292 synthetic, plus the
+        # slack that lets the row reaching the bar fit (census_common.FILL_OVERSHOOT)
         self.assertTrue(gate("es", 100)["pass"])
-        self.assertFalse(gate("es", 293)["pass"])
+        self.assertTrue(gate("es", 292 + G.FILL_OVERSHOOT)["pass"])
+        self.assertFalse(gate("es", 293 + G.FILL_OVERSHOOT)["pass"])
         self.assertTrue(gate("es", 8)["pass"])
 
     def test_es_fr_frac_amp_may_be_mostly_synthetic_up_to_the_floor(self):
