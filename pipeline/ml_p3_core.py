@@ -1,5 +1,6 @@
 """Pure (no Modal, no torch) parts of retrain-4 P3: row building from a reading decision, quiet-edge flag, stats."""
 
+import os
 import re
 import unicodedata
 from collections import Counter, defaultdict
@@ -227,6 +228,9 @@ def make_row(row: dict, r: dict, x=None, ext: str | None = None) -> dict:
     spans = [{"text": d["text"], "kind": d["kind"], "reading": d["cands"][d["pick"]], "canonical": d["cands"][0],
               "margin": d["margin"], "n_cands": len(d["cands"]), "by": d.get("by", "ctc")}
              | ({"undecided": True} if d.get("salvage") else {}) for d in ds]
+    # the letter+digit policy rewrites the label AFTER the checks above (they compare the spoken letter names with the
+    # CTC greedy / external transcripts)
+    label, offs, spans, _ = apply_alnum_letters(label, offs, spans, row["lang"])
     nr = {"audio_filepath": row["audio_filepath"], "duration": row["duration"], "text": label, "lang": row["lang"],
           "src": row["src"], "id": row["id"], "origin": row["origin"], "caption": cap, "cer_ctc": round(c, 3),
           "spans": spans, "num_chars": offs}
@@ -235,6 +239,79 @@ def make_row(row: dict, r: dict, x=None, ext: str | None = None) -> dict:
     if x is not None:
         nr["edge_quiet"] = edge_quiet(x)
     return {"row": nr}
+
+
+# ---------------------------------------------------------------- letter + digit label policy (2026-10-18)
+# A code of capital letters and a number ("G20", "CO2", "Q4", "5G") is labelled with the LETTERS AS WRITTEN and the
+# number as spoken words: "G zwanzig", "CO zwei", "Q vier", "fünf G" -- never letter names ("ge zwanzig", "ce o zwei",
+# whose spellings vary: de "ce" / "ze", nl "se" / "cee") and never digits. The CTC still decides between the
+# letter-name readings (it hears names, not letters); make_row rewrites the label after its checks. Wave-1 languages
+# (ml_cands.LETTERS); a word code ("COVID-19", form W) already keeps its word. Kill switch: ML_LABEL_OFF=alnum_letters.
+ALNUM_LETTERS = "alnum_letters" not in set(filter(None, os.environ.get("ML_LABEL_OFF", "").split(",")))
+_ALNUM_LN = re.compile(r"(?P<l>[A-Z]{1,3})(?P<n>\d{1,3})")  # ml_cands.ALNUM_L ("G20", "CO2")
+_ALNUM_ND = re.compile(r"(?P<n>\d{1,2})(?P<l>[DGK])")  # ml_cands.ALNUM_D ("5G", "3D")
+
+
+def _letter_forms(lang: str, letters_: str) -> list[list[str]]:
+    """Every spoken letter-name sequence of `letters_` (lower-case word lists, longest first), plus the letters said
+    as one word ("COP")."""
+    outs = [[]]
+    for c in letters_.lower():
+        outs = [o + a.lower().split() for o in outs for a in M.LETTERS[lang].get(c, [c])]
+    return sorted(outs + [[letters_.lower()]], key=len, reverse=True)
+
+
+def alnum_split(reading: str, written: str, lang: str) -> tuple | None:
+    """(policy reading, letter-name word count, letters first) for one letter+digit span, or None (not such a code,
+    or a reading that does not start / end with the letters' names)."""
+    if lang not in M.LETTERS:
+        return None
+    ws = reading.split()
+    low = [w.lower() for w in ws]
+    m = _ALNUM_LN.fullmatch(written.strip())
+    if m:
+        for f in _letter_forms(lang, m["l"]):
+            if len(low) > len(f) and low[:len(f)] == f:
+                return " ".join([m["l"]] + ws[len(f):]), len(f), True
+        return None
+    m = _ALNUM_ND.fullmatch(written.strip())
+    if m:
+        for f in _letter_forms(lang, m["l"]):
+            if len(low) > len(f) and low[-len(f):] == f:
+                return " ".join(ws[:-len(f)] + [m["l"]]), len(f), False
+    return None
+
+
+def apply_alnum_letters(label: str, offs: list, spans: list, lang: str) -> tuple:
+    """The letter+digit policy over a built row: label, num_chars offsets and span dicts ("text", "kind", "reading")
+    -> (label, offsets, spans, token_map). token_map[i] = the new whitespace-token index of old token i (the letter
+    names of one code merge into one token); None when nothing changed."""
+    if not ALNUM_LETTERS or not offs:
+        return label, offs, spans, None
+    out, new_offs, new_sp, pos, merges = [], [], [], 0, []
+    for (a, b), s in zip(offs, spans):
+        res = alnum_split(label[a:b], s.get("text", ""), lang) if s.get("kind") == "alnum" else None
+        out.append(label[pos:a])
+        start = len("".join(out))
+        piece = res[0] if res else label[a:b]
+        out.append(piece)
+        pos = b
+        new_offs.append([start, start + len(piece)])
+        new_sp.append(dict(s, reading=piece) if res else s)
+        if res:
+            first = len(label[:a].split()) - (a > 0 and not label[a - 1].isspace())  # "(ge zwanzig": one token
+            n_tok = len(label[a:b].split())
+            k = res[1]
+            merges.append(range(first, first + k) if res[2] else range(first + n_tok - k, first + n_tok))
+    if not merges:
+        return label, offs, spans, None
+    out.append(label[pos:])
+    drop = {i for r in merges for i in list(r)[1:]}
+    tmap, j = [], -1
+    for i in range(len(label.split())):
+        j += i not in drop
+        tmap.append(j)
+    return "".join(out), new_offs, new_sp, tmap
 
 
 # ---------------------------------------------------------------- external-transcript row edges (2026-10-16)
