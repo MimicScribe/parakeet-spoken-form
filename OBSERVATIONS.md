@@ -7,6 +7,17 @@ Models referred to:
 - **v10pt**: an earlier fine-tune, pinned for testing, never released.
 - **B**: retrain-3 `w3soup_a0.5` (`MimicScribe/parakeet-ultra-spoken-coreml@5edfc817`), the model for the next release. Decoder + joint trained, encoder frozen, KL to stock, L2-SP to the init.
 
+## 0a. 2026-10-18: why decoder-only spoken form garbles numbers (root cause)
+
+Nine arms over three rounds (de / nl / it compound numbers split into separate number words, digit fallback allowed, binding L2-SP, suffix anchoring, stock vs B init, 1,000-3,000 steps). None reached the damage gate. Measured with forced-alignment log-probs and decode variants on labelled rows.
+
+- **German / Dutch: the spoken order crosses the frozen encoder's digit layout.** "sieben und dreißig" (37) is spoken units-first; stock emits nothing on "sieben" and writes "3" and "7" on the frames of "dreißig". The units word's best frame sits about 6-7 frames after it is spoken. A decoder-only fine-tune must emit "sieben" from frames that don't carry it: its forced log-prob is about -2.7 vs -0.14 for other number words, improving only slowly with steps. Spans with such a pair are 58-68% wrong when written as words (9-12% without) and are half of all de / nl errors, on training rows as much as held-out ones. Decoder-only spoken form is not feasible for de / nl with a frozen encoder; next test: unfreeze the top encoder layers.
+- **Italian:** stock already writes fused number words in about 12% of spans; split targets compete with that prior and produce blends. Pick one target form that agrees with the base.
+- **Spanish / French / Portuguese:** close to workable (2-3% real garbles); the rest are drops where the decoder writes the base's written-form punctuation (",", ".", "%", ":") at number positions.
+- **Starting from B (English spoken form) makes English number words leak into other languages; starting from stock removes it** (13-14 → 0-1 of 180 sentences).
+- **Ruled out:** the prediction net acting as a weak LM (internal-LM subtraction doubles garbles), TDT frame skipping (decoding every frame triples them), a generalisation gap, the synthetic audio (TTS rows fit like real ones), label inconsistency (0.07-0.20 bits per value in wave 1), more steps past ~1,000, interpolation toward the base (scales conversion and damage together).
+- **Measurement lessons:** compare decoders before any downstream digit verbalizer, or the comparison measures the verbalizer; "converted" must require the right value, or garbled words count as conversion; on the long-number bed most of the base's wrong reads are wrong at every window offset, so the seam merge is a minor lever there (being re-checked against the TTS's own reading of the digits).
+
 ## 0. 2026-10-17: seam breaks, conversion and label agreement
 
 Short version of what the multilingual data phase taught; details and numbers in [docs/CONCEPTS.md](docs/CONCEPTS.md), the step-by-step in [docs/RECIPE.md](docs/RECIPE.md).
