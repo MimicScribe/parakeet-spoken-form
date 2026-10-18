@@ -1155,7 +1155,7 @@ EN_WIN_PARTS = [("d1/en4_ok/win_en.jsonl", 0, "span"), ("d1/en4_ok/seam_en.jsonl
 # each gated per language by the no-damage rule vs stock (a language failing it stays on stock digits at deploy time)
 NEXT_LANGS = ("ru", "pl", "ro")
 MODERATE_LANGS = ("uk", "sv", "cs", "hu", "fi", "sk", "bg", "hr")  # tiers as census_common.TIER_LANGS
-RUN2_LANGS = WAVE1 + NEXT_LANGS + MODERATE_LANGS
+RUN2_LANGS = WAVE1 + ("ru", "uk", "pl", "ro") + MODERATE_LANGS[1:]  # order kept as built (seeds, recipes)
 WIN_REPEAT = 2  # run 2: windows + seam pairs listed 2x -> ~18% of batches, ~3.5 h seen per wave-1
 # language at 1,500 steps (3x gave 24% / ~5 h and halved the English share of batches)
 EN_PLAIN_H = 91.0  # run 2: all of LibriSpeech's 90.9 number-free hours (B: 40)
