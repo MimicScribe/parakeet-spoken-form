@@ -69,6 +69,12 @@ Counts alone are not enough; check the spread of values. Many repeated failures 
 
 Do not canonicalise how a number is read. People say phone numbers in pairs, in triples or digit by digit; "nineteen ninety" and "one thousand nine hundred ninety"; "thirteen hundred" and "one thousand three hundred". A label that forces one convention teaches the model to ignore what was said, and reintroduces the guessing that spoken form was meant to remove. Take the reading the evidence supports, keep several readings per value in the grammar table, and census the forms rather than normalising them.
 
+## 7. Fill to the bar, and hold one voice out
+
+Synthetic speech is a gap filler, not a bulk source. A class short of its census bar may be filled with synthetic spans up to the bar, and a thin value up to its per-value floor; a class that real speech already fills keeps the share caps. Real rows always count first and are never displaced. One rule serves the build and the gate, so they cannot disagree.
+
+Synthetic dev sets leak if the voice is shared with training. One TTS persona per language never trains; its rows are that language's synthetic held-out set, and the same persona is held out in every locale of the language.
+
 ## Glossary
 
 - **Wave 1 / run 2:** wave 1 is the first six languages (de, es, fr, it, nl, pt). Run 2 is the data phase for 17 languages plus English, with long numbers across window seams.
@@ -81,3 +87,6 @@ Do not canonicalise how a number is read. People say phone numbers in pairs, in 
 - **seam_long:** seam pairs restricted to cuts inside readings of 3 or more words (`seam_crops --min-words 3`).
 - **Anchor:** FLEURS digit rows of the languages a run does not train, listed `--anchor18` times and held at stock behaviour (KL to stock), so those languages keep writing digits.
 - **Census:** the per-language, per-class count of spans and value spread in a mix, checked before any run (`data_gate.py`).
+- **Fill-to-bar:** the synthetic rule: synthetic spans may fill a class up to its census bar and thin values up to their floors (`census_common.syn_allowed`); rich classes keep the share caps.
+- **Held-out voice:** the one TTS persona per language that never trains; its rows form the synthetic held-out set `tts_dev_<lang>` (`HELDOUT_VOICES`).
+- **Grammar reject list:** `grammar_reject_ids*.txt`, ids of synthetic rows whose reading has a known grammar slip (`grammar_scan.py`); the build keeps them out, append-only.

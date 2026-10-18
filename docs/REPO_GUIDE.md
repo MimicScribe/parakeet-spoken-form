@@ -30,10 +30,11 @@ Stock Parakeet Ultra (NeMo checkpoint; see the README for the pinned download) -
 
 **Synthetic speech**
 - `ml_tts.py`, `ml_tts_templates.py`, `ml_tts_uk.py`, `ml_tts_ru.py`, `ml_tts_cloud.py`, `ml_tts_fill.py`, `ml_tts_multi.py`: planning (code-built readings for most languages), carrier text, cloud voicing and top-up. No synthetic audio is distributed.
+- `grammar_rules.py`, `grammar_scan.py`: deterministic grammar checks for synthetic readings, and the scan that writes the append-only `grammar_reject_ids*.txt` lists the build excludes (RECIPE section 8).
 - `phonefmt.py`: phone-number layout in digit-labelled rows.
 
 **Mix, training, export**
-- `mix_build.py`, `mix_report.py`: mix builders (`build3`, `build4`) and the coverage report.
+- `mix_build.py`, `mix_report.py`: mix builders (`build3`, `build4`) and the coverage report. `census_common.py` holds the census classes, bars and the shared synthetic rule (fill-to-bar); `mix_build.py` holds the held-out voices and the final post-build check (RECIPE sections 9, 11).
 - `ft_train.py`, `ft_eval.py`: training (decoder and joint only, KL anchors) and decoding for evaluation.
 - `swap_weights.py`: writes the trained decoder and joint into a CoreML bundle (byte-exact patch; `--check` round-trips stock tensors).
 
@@ -48,7 +49,7 @@ Census, held-out, judge and seam scorers; see its [README](../eval/quality/READM
 
 ## Tests
 
-About 40 test files next to the code. Conventions and dependencies are in [REQUIREMENTS.md](REQUIREMENTS.md).
+About 40 test files next to the code. Recent ones: `test_fill_review.py` (fill-to-bar, rare-class floor), `test_grammar_fix.py` and `test_grammar_review.py` (grammar rules, reject lists, held-out voices), `test_syn_seam.py` (synthetic seam pairs), `test_ro_gender.py`. Conventions and dependencies are in [REQUIREMENTS.md](REQUIREMENTS.md).
 
 ## Not in this repo
 

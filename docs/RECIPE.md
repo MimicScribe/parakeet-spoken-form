@@ -69,19 +69,31 @@ Two routes, by language:
 - **Code-built readings** (en, de, es, fr, it, nl, pt, ru, uk): the spoken form comes from the grammar table and the language's reading rules, which can be unit-tested for gender, case and cents. The phone, date and long-number sets use these. Generators: `ml_tts.py`, `ml_tts_cloud.py`, `ml_tts_fill.py`, `gen.py`.
 - **LLM-written readings** (the 16 languages of `ml_multi`): `ml_tts_multi.py` has an LLM (Gemini Flash-Lite, public text only) adapt a real caption sentence to carry a number fragment and write its spoken form with the right case and gender. The same models propose candidate readings when labelling real speech (`ml_multi_ctc.py`) and draft the numeral lexicon (`ml_multi_lexgen.py`). An LLM reading is only used if it parses back to the written value and the rest of the sentence is unchanged; it is then voiced, transcribed and judged like any other row.
 
-Each clip is verified (CTC reader or second transcript), then judged. The clips are voiced with Kokoro, Piper or Google Cloud TTS (Chirp 3 HD); see the README credits. Use normal speaking rates, never one clean voice for years, and keep synthetic within the caps in step 11. No synthetic audio is distributed with this repo.
+Long numbers have their own sets (big numbers, prices with cents, phones, placed mid or late in the sentence), plus year sets for the next and moderate tiers (several years per sentence), small-count sets for pl / ro, and top-off sets for the thinnest long-number cells. A held-out-voice set per language (step 9) is generated the same way. Planned sets target the census gaps by value, not a flat quota; `mix_build.TTS_SETS` lists the tags.
+
+**Grammar checks.** `pipeline/grammar_rules.py` holds deterministic checks for known generator slips in synthetic readings (feminine clock hours and ordinal dates, the "et" in French clock times, hour nouns in the wrong number, a cents word that belongs to another currency, unit-less German / Dutch prices, Polish genitive and clock-minute forms, Romanian linker and gender, and others). The generators call them and reject what they find. `pipeline/grammar_scan.py` runs the same checks over existing synthetic rows and writes the ids of bad rows to `ml/p3v2/<lang>/grammar_reject_ids.txt`; a later scan adds a new `grammar_reject_ids_<n>.txt` (a list is never rewritten) and `build4` reads every list. The audio speaks the wrong form, so such rows are excluded, never relabelled, and replaced by regenerated sets. The Romanian gender repair applies to synthetic readings only; labels of real speech stay as spoken ("doi mii").
+
+Each clip is verified (CTC reader or second transcript), then judged. The clips are voiced with Kokoro, Piper or Google Cloud TTS (Chirp 3 HD); see the README credits. Use normal speaking rates, never one clean voice for years, and keep synthetic within the rule in step 11. No synthetic audio is distributed with this repo.
 
 ## 9. Held-out sets
 
 `eval/quality/carve_heldout.py` carves rare-class held-out lists from labelled real rows, whole sessions or videos at a time. Validation-only passes (`val_*`) never enter training.
 
+**Held-out voice (2026-10-17).** Each trained language has one cloud TTS persona that never trains (`HELDOUT_VOICES`, `is_heldout_voice`, `check_heldout_voices` in `mix_build.py`). The persona is matched across the language's locales (es-ES and es-US, fr-FR and fr-CA, nl-NL and nl-BE). Its rows form the language's synthetic held-out set, written by the build as `tts_dev_<lang>.jsonl`; other voices' dev rows go to `tts_dev_other_<lang>.jsonl`. The build refuses a language that has neither a persona nor an exemption (en has its own held-out route; bg stays at stock).
+
 ## 10. Windows and seam pairs
 
 Build window crops and seam pairs (`ml_p3.windows2`, `seam_crops`; English: `en_win.py`). Seam pairs are cut inside long numbers and labelled only with what each side heard, under the 0.9 number-word edge rule.
 
+The synthetic long-number and year sets also yield seam pairs (and optionally windows) from their train rows only (`ml_p3.py::syn_seam_crops`; a set must carry its judge marker, and the held-out voice and dev rows never enter). The build keeps a synthetic pair only when all its parent rows were chosen under the synthetic rule in step 11. Top-up seam files (`seam_long_*`) add more long-number pairs of real speech.
+
 ## 11. Mix
 
-`modal_app.py::build_mix4` calls `mix_build.build4`. Always on: one row per id, held-out and rejected rows out, the second-recognizer share cap per class, the per-value year cap (3%), the synthetic share caps (30% per class; 50% for clock, price, phone, date; 50% for any class in en / es / fr) with fill-to-bar for a class or value short of its bar (`census_common.syn_allowed`; not bg), one voice per language kept out of training (`HELDOUT_VOICES`), and 60% of synthetic degraded (75% for the long-number sets).
+`modal_app.py::build_mix4` calls `mix_build.build4`. Always on: one row per id, held-out and rejected rows out, the second-recognizer share cap per class, the per-value year cap (3%), the synthetic rule below, one voice per language kept out of training (`HELDOUT_VOICES`), and 60% of synthetic degraded (75% for the long-number sets, `TTS_AUG_FRAC_LONG`).
+
+**Synthetic rule (fill-to-bar, 2026-10-17; `census_common.syn_allowed`).** Synthetic share caps are 30% per class, 50% for clock, price, phone, date, and 50% for every class in en / es / fr. A class short of its census bar may be filled with synthetic spans up to the bar (allowance = the larger of the share cap and bar minus real spans). Thin values (each year, each 0-100 count, the hundreds, distinct big numbers) may be filled up to their per-value floors on top of that; where real speech already meets the class bar, the class's synthetic share stays at or under 50% (`VALUE_FILL_MAX_SHARE`) or its share cap, whichever is larger. Real rows always count first and are never displaced: when synthetic is over the rule, synthetic rows are trimmed. bg keeps the plain caps. A class with no bar and almost no real speech (19 real spans or fewer) may hold up to 0.15 h of synthetic rows (`rare_floor_ok`). The build (`syn_room`) and `eval/quality/data_gate.py` call the same functions, so a build that passes its own check passes the gate.
+
+The final build runs `post_build_check` (the gate's cap checks, recomputed on the built language) and fails on any failure except two documented exceptions: rows over the template cap and videos over the group cap (rare-class and thin-value rows that `balance_caps` keeps).
 
 Off unless asked for:
 
@@ -102,7 +114,7 @@ Run-2 order: `ml_p3.py::label2` -> judge (step 6) -> `ml_p3.py::windows2` and `s
 
 ## 12. Census, then gate
 
-`python3 eval/quality/data_gate.py <mix dir> --langs ... [--tier ...]` (reads `p3_<lang>.jsonl`, `tts_<lang>`, `win_<lang>`, `heldout_<lang>` from that directory) checks counts and value spread per language and class: years by value (every 1990-2030 value, forward years 2031-2060), 0-100, clock, price, phone, decimals, long classes, plus the caps above. Map each failure to the source that could fix it.
+`python3 eval/quality/data_gate.py <mix dir> --langs ... [--tier ...]` (reads `p3_<lang>.jsonl`, `tts_<lang>`, `win_<lang>`, `heldout_<lang>` from that directory) checks counts and value spread per language and class: years by value (every 1990-2030 value, forward years 2031-2060), 0-100, clock, price, phone, decimals, long classes, plus the caps above. In de and nl a sentence-final cardinal that looks like an ordinal ("Punkt 10." read "zehn") is counted by its value, not as an ordinal; counts only, the label is untouched. Map each failure to the source that could fix it.
 
 English is not censused by this repo: `data_gate.py` needs a `p3_en.jsonl`, and the English parts live under `d1/en4_ok/` on the volume (listed in `mix_build.EN_REAL_PARTS`), assembled by a step that is not included. Census English with your own assembly of those parts, or treat it as not covered.
 

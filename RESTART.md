@@ -12,11 +12,11 @@ Cliff notes for picking up spoken-form Parakeet training. They cover where thing
 
 ## 0. Current data phase (run 2, 2026-10-17)
 
-The state above (section 1) is the model-B state. Since then the work is data only: spoken-form rows for 17 languages plus English, with long numbers cut across window seams. No training run starts before the census passes its bar and that run has been explicitly approved. Order, all `modal run` commands from `pipeline/` (details in [`docs/RECIPE.md`](docs/RECIPE.md)):
+The state above (section 1) is the model-B state. Since then the work is data only: spoken-form rows for 17 languages plus English, with long numbers cut across window seams. Rules added 2026-10-17: synthetic speech fills a thin class up to its census bar and thin values up to their floors, rich classes keep the share caps, real rows are never displaced (build and gate share one rule); one TTS persona per language never trains and forms its synthetic held-out set; synthetic readings pass grammar checks, and rows with a known slip are excluded through append-only reject lists; the final build check fails the build, except the template and group caps. No training run starts before the census passes its bar and that run has been explicitly approved. Order, all `modal run` commands from `pipeline/` (details in [`docs/RECIPE.md`](docs/RECIPE.md)):
 
 1. `ml_p3.py::label2` per language: label real speech with the heard reading.
 2. Judge each pass against the second transcript (`eval/quality/judge_reject.py`, `judge_plro.py`), then write the `judged_<pass>.json` marker and merge the rejects (manual unless `judge_plro.py --upload`).
-3. `ml_p3.py::windows2` and `ml_p3.py::seam_crops` (`--min-words 3` for the long-number set `seam_long`).
+3. `ml_p3.py::windows2` and `ml_p3.py::seam_crops` (`--min-words 3` for the long-number set `seam_long`); `ml_p3.py::syn_seam_crops` for long-number seam pairs from the synthetic sets.
 4. `modal_app.py::build_mix4` with the run-2 flags (RECIPE section 11).
 5. `eval/quality/data_gate.py <mix dir>` (census; English needs a `p3_en.jsonl` that this repo does not build).
 6. If it passes and the run is approved: `modal_app.py::retrain3 --mix v4 --mix-dir <dir> ...`.
