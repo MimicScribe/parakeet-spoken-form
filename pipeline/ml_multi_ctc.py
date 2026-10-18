@@ -212,6 +212,10 @@ def expand_cands(written: str, readings: list, lang: str, after: str = "", befor
 
     def add(rd):
         rd = rd.strip()
+        if lang == "ro":  # "doi mii" / "ora doisprezece" are never right: swap the masculine for the feminine
+            import ro_gender
+
+            rd = ro_gender.repair(rd, before, after)
         if rd and rd not in seen and len(out) < MAX_CANDS and not re.search(r"\d", rd):
             seen.add(rd)
             if reading_ok(written, rd, lang, after, before):
