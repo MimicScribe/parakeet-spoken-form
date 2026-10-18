@@ -7,6 +7,25 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import value_agree as V
 
 
+class ShortYear(unittest.TestCase):
+    # red-on-base: a century-dropped label ("2052" read "zweiundfünfzig") agreed with a transcript that heard the label
+    def test_two_digit_reading_never_a_year(self):
+        sp = [{"text": "2052", "reading": "zweiundfünfzig"}]
+        self.assertEqual(V.agree("Das Gesetz trat zweiundfünfzig in Kraft", "das gesetz trat 52 in kraft", "de",
+                                 spans=sp), (False, "short_year"))
+        self.assertFalse(V.rescued("Das Gesetz trat zweiundfünfzig in Kraft", "Das Gesetz trat zweiundfünfzig in Kraft",
+                                   "de", spans=sp))
+        self.assertFalse(V.agree("nel quarantasei", "nel 46", "it", spans=[{"text": "2046", "reading": "quarantasei"}])[0])
+
+    def test_full_and_paired_years_pass(self):
+        for lab, tr, w, rd in (("trat zweitausendzweiundfünfzig in Kraft", "trat 2052 in kraft", "2052",
+                                "zweitausendzweiundfünfzig"),
+                               ("gegründet zwanzig sechzig", "gegründet 2060", "2060", "zwanzig sechzig")):
+            self.assertTrue(V.agree(lab, tr, "de", spans=[{"text": w, "reading": rd}])[0], lab)
+        self.assertIsNone(V.short_year([{"text": "1901", "reading": "negentien nul één"}], "nl"))
+        self.assertIsNone(V.short_year([{"text": "52", "reading": "zweiundfünfzig"}], "de"))  # not a year
+
+
 class Agree(unittest.TestCase):
     def test_digits_for_words(self):
         self.assertTrue(V.agree("We spreken om half zeven af", "we spreken om half 7 af", "nl")[0])

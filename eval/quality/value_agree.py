@@ -116,8 +116,29 @@ def digit_run(label: str, transcript: str, lang: str) -> bool:
     return "".join(str(int(min(x.vals))) for x in ref) == "".join(t)
 
 
-def agree(label: str, transcript: str, lang: str) -> tuple:
-    """(True, "") when the transcript says the label; else (False, why) with why = "words" or "numbers"."""
+_YEAR = re.compile(r"1\d{3}|20\d{2}")
+
+
+def short_year(spans, lang: str):
+    """The written text of the first span that is a four-digit year (1000-2099) whose reading says ONE number below 100
+    ("2052" read "zweiundfünfzig", "2046" read "quarantasei": the century dropped, the label's value is not the year),
+    or None. Paired / digit readings ("zwanzig sechzig", "negentien nul één") say several numbers and pass."""
+    for sp in spans or []:
+        w = str(sp.get("text", "")).strip()
+        if not _YEAR.fullmatch(w) or not sp.get("reading") or lang not in N._LEX:
+            continue
+        xs = N.extract_numbers(sp["reading"], lang, keep_weak=True)
+        if len(xs) == 1 and all(v < 100 for v in xs[0].vals):
+            return w
+    return None
+
+
+def agree(label: str, transcript: str, lang: str, spans=None) -> tuple:
+    """(True, "") when the transcript says the label; else (False, why) with why = "words", "numbers" or "short_year"
+    (spans: the row's spans; a two-digit reading never stands for a four-digit year, short_year: the transcript
+    agreeing with a century-dropped label proves the audio says the label, not the year)."""
+    if short_year(spans, lang):
+        return False, "short_year"
     if skeleton(label, lang) != skeleton(transcript, lang):
         return False, "words"
     outs = N.number_outcomes(label, expand_small_ints(transcript, lang), lang)
@@ -131,7 +152,9 @@ def letters(text: str) -> str:
     return re.sub(r"[^\w]|\d|_", "", unicodedata.normalize("NFKC", text).lower())
 
 
-def rescued(label: str, transcript: str, lang: str) -> bool:
+def rescued(label: str, transcript: str, lang: str, spans=None) -> bool:
     """A row whose CTC check failed is kept when the verbatim second transcript says the label: the same letters (the
     old rule), or, where the transcript writes digits for number words, `agree`."""
+    if short_year(spans, lang):
+        return False
     return letters(transcript or "") == letters(label) or bool(transcript) and agree(label, transcript, lang)[0]

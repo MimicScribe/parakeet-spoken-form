@@ -311,7 +311,7 @@ for l in open(W / f"{name}.jsonl"):
             ok = alt_ok(s_, et_d, en_d, scaled_values(en_d, et_d, s_.get("text", "")), phone, syn, groups)
         if not ok:
             bad = s_.get("text"); break
-    if bad is not None and lang in N._LEX and VA.agree(r["text"], et, lang)[0]:
+    if bad is not None and lang in N._LEX and VA.agree(r["text"], et, lang, spans=spans)[0]:
         bad = None  # the transcript says the label: same non-number words, every number of the label right (value_agree)
     if bad is not None:
         rej.append(r["id"]); reasons["span_missing"] += 1; rows_out.append({"id": r["id"], "reason": "span_missing", "span": bad}); continue
