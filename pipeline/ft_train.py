@@ -1229,14 +1229,18 @@ class L2SP(pl.Callback):
     from the v10pt FILE (also on resume: init_from is skipped then). The written-form output rows of the joint's last
     layer are exempt (N2: they must stay free to keep non-English digits at stock strength)."""
 
-    def __init__(self, anchor_path: str, c: float, exempt_rows: list[int], extra_anchor: dict | None = None):
+    def __init__(self, anchor_path: str, c: float, exempt_rows: list[int], extra_anchor: dict | None = None,
+                 enc_c: float | None = None):
         """extra_anchor: more anchor tensors by parameter name (unfreeze_top: the stock encoder blocks), for trainable
-        parameters the anchor file does not hold."""
+        parameters the anchor file does not hold. enc_c: the pull strength c of the encoder parameters ("encoder."
+        names); None = the same c as everything else (unchanged). Each parameter is pulled with the learning rate of
+        its own optimizer parameter group (one group: every parameter has the group's lr, as before)."""
         self.path, self.c, self.exempt, self.extra = anchor_path, c, exempt_rows, extra_anchor
+        self.enc_c = c if enc_c is None else enc_c
         self.anchor = None
 
     def on_train_batch_end(self, trainer, m, outputs, batch, batch_idx):
-        if not self.c or (batch_idx + 1) % trainer.accumulate_grad_batches:
+        if not (self.c or self.enc_c) or (batch_idx + 1) % trainer.accumulate_grad_batches:
             return  # once per OPTIMIZER step (gradient accumulation: several batches per step)
         if self.anchor is None:
             sd = torch.load(self.path, map_location="cpu")
@@ -1250,10 +1254,15 @@ class L2SP(pl.Callback):
                 print(f"L2SP c={self.c}: + {len(more)} encoder tensors anchored to stock "
                       f"({sum(v.numel() for v in more.values()):,} params); trainable tensors without an anchor: "
                       f"{len(free)} {free[:4]}", flush=True)
-        lr = trainer.optimizers[0].param_groups[0]["lr"]
+            if self.enc_c != self.c:
+                print(f"L2SP per-group: encoder tensors c={self.enc_c}, all others c={self.c}", flush=True)
+        groups = trainer.optimizers[0].param_groups
+        lr0 = groups[0]["lr"]
+        lr_of = {id(p): g["lr"] for g in groups for p in g.get("params", ())}  # each parameter: its own group's lr
         last = "joint.joint_net." + str(len(m.joint.joint_net) - 1)
         with torch.no_grad():
             drift = 0.0
+            drift_enc = 0.0
             for n, p in m.named_parameters():
                 a = self.anchor.get(n)
                 if a is None:
@@ -1261,10 +1270,15 @@ class L2SP(pl.Callback):
                 d = p.data - a
                 if n.startswith(last) and self.exempt:
                     d[self.exempt] = 0
-                p.data.sub_(d, alpha=lr * self.c)
-                drift += float((d.float() ** 2).sum())
+                is_enc = n.startswith("encoder.")
+                c = self.enc_c if is_enc else self.c
+                if c:
+                    p.data.sub_(d, alpha=lr_of.get(id(p), lr0) * c)
+                sq = float((d.float() ** 2).sum())
+                drift += sq
+                drift_enc += sq if is_enc else 0.0
         if (batch_idx + 1) % (50 * trainer.accumulate_grad_batches) == 0:
-            print(f"l2sp drift {drift ** 0.5:.4f}", flush=True)
+            print(f"l2sp drift {drift ** 0.5:.4f}" + (f" (encoder {drift_enc ** 0.5:.4f})" if drift_enc else ""), flush=True)
 
 
 MERGED_KL = True  # one joint pass for all KL terms (2026-10-13 speed fix)
@@ -1389,13 +1403,19 @@ def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_text
 
 
 def trainable_state(m) -> dict:
-    """Decoder + joint, plus the encoder blocks unfreeze_top_layers made trainable (parameters and buffers)."""
+    """Decoder + joint, plus the encoder blocks unfreeze_top_layers made trainable (parameters and buffers). With LoRA
+    adapters (add_lora) the adapters are MERGED into the base weights and no adapter tensor is written: the checkpoint
+    has the same keys and shapes as a full top-block fine-tune, so every reader and the int8 patch path are unchanged."""
     keep = getattr(m, "_enc_unfrozen", ())
-    return {k: v.detach().cpu() for k, v in m.state_dict().items()
-            if not (k.startswith("encoder.") or k.startswith("preprocessor.")) or k.startswith(keep)}
+    sd = {k: v.detach().cpu() for k, v in m.state_dict().items()
+          if (not (k.startswith("encoder.") or k.startswith("preprocessor.")) or k.startswith(keep))
+          and not (getattr(m, "_lora", None) and ".lora_" in k)}
+    if getattr(m, "_lora", None):
+        sd.update(lora_merged_weights(m))
+    return sd
 
 
-def unfreeze_top_layers(m, n: int) -> dict:
+def unfreeze_top_layers(m, n: int, train_base: bool = True) -> dict:
     """Make the last `n` conformer blocks of the frozen encoder trainable: every parameter under encoder.layers.<L-n> ..
     encoder.layers.<L-1> (both feed-forward modules, self-attention, the convolution module with its BatchNorm affine,
     and the block's layer norms). pre_encode (subsampling), the positional encoding and blocks 0 .. L-n-1 stay frozen.
@@ -1405,6 +1425,8 @@ def unfreeze_top_layers(m, n: int) -> dict:
     Side effects on `m`: `_enc_unfrozen` (the blocks' state-dict prefixes, kept by trainable_state), `_enc_stock_top`
     (their stock tensors, an attribute so neither saved nor trained: the KL teacher's top blocks in add_r3_losses), and
     a forward hook that keeps the training pass's encoder input and output (`_enc_main`) for add_r3_losses.
+    train_base False (LoRA, add_lora): the blocks' own parameters stay frozen; everything else here is unchanged (the
+    teacher, the hook, the saved prefixes) and the adapters are the only trainable encoder tensors.
     Returns the stock tensors ("encoder.layers.<i>.<name>" -> CPU clone, parameters and buffers): the L2-SP anchor."""
     layers = m.encoder.layers
     n_layers = len(layers)
@@ -1413,7 +1435,7 @@ def unfreeze_top_layers(m, n: int) -> dict:
     prefixes = tuple(f"encoder.layers.{i}." for i in idx)
     for i in idx:
         for p in layers[i].parameters():
-            p.requires_grad_(True)
+            p.requires_grad_(train_base)
     stock = {k: v.detach().cpu().clone() for k, v in m.state_dict().items() if k.startswith(prefixes)}
     m._enc_unfrozen = prefixes
     m._enc_stock_top = stock
@@ -1427,10 +1449,104 @@ def unfreeze_top_layers(m, n: int) -> dict:
     n_par = sum(p.numel() for i in idx for p in layers[i].parameters())
     n_ten = sum(1 for i in idx for _ in layers[i].parameters())
     subs = sorted({k[len(f"encoder.layers.{idx[0]}."):].split(".")[0] for k in stock if k.startswith(prefixes[0])})
-    print(f"unfreeze_top {n}: encoder.layers.{idx[0]}..{idx[-1]} of {n_layers} trainable, {n_par:,} params in {n_ten} "
+    print(f"unfreeze_top {n}: encoder.layers.{idx[0]}..{idx[-1]} of {n_layers} {'trainable' if train_base else 'FROZEN (LoRA)'}"
+          f", {n_par:,} params in {n_ten} "
           f"tensors (per block: {', '.join(subs)}); pre_encode + layers 0..{idx[0] - 1} frozen; encoder kept in eval mode "
           f"(dropout off, BatchNorm running stats fixed)", flush=True)
     return stock
+
+
+# --- LoRA adapters on the top encoder blocks (S-encC) -------------------------------------------------------------
+# The adapter is a forward hook on the target nn.Linear (out = W x + b + scale * B(A x)); the base weight keeps its name,
+# shape and value, so the teacher's functional_call over the stock tensors and the checkpoint keys do not change. The
+# adapters live on the Linear as parameters `lora_A` [r, in] and `lora_B` [out, r] (B = 0 at the start: the student
+# equals stock). They are merged into `weight` when a checkpoint is written (trainable_state) and never saved as such.
+LORA_TARGET = re.compile(r"^(self_attn\.linear_(q|k|v|out)|feed_forward[12]\.linear[12])$")
+
+
+def add_lora(m, n_top: int, rank: int, alpha: float) -> dict:
+    """LoRA of rank `rank` on the attention q/k/v/out and both feed-forward linears (not linear_pos, not the convolution
+    module) of the last `n_top` conformer blocks. Returns the bookkeeping stored on `m._lora`."""
+    assert rank > 0 and n_top > 0
+    layers = m.encoder.layers
+    n_layers = len(layers)
+    state = {"on": True}
+    targets = []
+    for i in range(n_layers - n_top, n_layers):
+        for name, mod in layers[i].named_modules():
+            if LORA_TARGET.match(name) and isinstance(mod, torch.nn.Linear):
+                targets.append((f"encoder.layers.{i}.{name}", mod))
+    assert len(targets) == 8 * n_top, f"LoRA: {len(targets)} target linears in the top {n_top} blocks (expected {8 * n_top})"
+    scale = alpha / rank
+    n_par = 0
+    for full, mod in targets:
+        mod.register_parameter("lora_A", torch.nn.Parameter(torch.empty(rank, mod.in_features)))
+        mod.register_parameter("lora_B", torch.nn.Parameter(torch.zeros(mod.out_features, rank)))
+        torch.nn.init.kaiming_uniform_(mod.lora_A, a=5 ** 0.5)  # the nn.Linear / PEFT init; B = 0
+        n_par += mod.lora_A.numel() + mod.lora_B.numel()
+
+        def hook(mod, args, out, state=state, scale=scale):
+            if not state["on"]:
+                return None
+            x = args[0]
+            return out + torch.nn.functional.linear(torch.nn.functional.linear(x, mod.lora_A), mod.lora_B) * scale
+
+        mod.register_forward_hook(hook)
+    m._lora = {"state": state, "targets": targets, "scale": scale, "rank": rank}
+    print(f"LoRA rank {rank} alpha {alpha} (scale {scale}): {len(targets)} linears in encoder.layers."
+          f"{n_layers - n_top}..{n_layers - 1} (attention q/k/v/out + both feed-forwards), {n_par:,} adapter params "
+          f"(base weights frozen, B = 0 at the start); merged into the weights at every checkpoint", flush=True)
+    return m._lora
+
+
+class lora_disabled:
+    """Context manager: the adapters contribute nothing inside it (the stock-encoder teacher pass)."""
+
+    def __init__(self, m):
+        self.state = getattr(m, "_lora", None) and m._lora["state"]
+
+    def __enter__(self):
+        if self.state:
+            self.prev, self.state["on"] = self.state["on"], False
+
+    def __exit__(self, *exc):
+        if self.state:
+            self.state["on"] = self.prev
+
+
+def lora_merged_weights(m) -> dict:
+    """{"encoder.layers.<i>.<name>.weight": W + scale * B @ A} (fp32, CPU) for every adapted linear."""
+    out = {}
+    scale = m._lora["scale"]
+    for full, mod in m._lora["targets"]:
+        w = mod.weight.detach().float().cpu()
+        out[f"{full}.weight"] = w + scale * (mod.lora_B.detach().float().cpu() @ mod.lora_A.detach().float().cpu())
+    return out
+
+
+def encoder_param_groups(m, lr: float, enc_lr_scale: float) -> list[dict]:
+    """Two optimizer parameter groups: the trainable encoder tensors at lr * enc_lr_scale, everything else (decoder, joint,
+    the frozen encoder tensors, which never get a gradient) at lr. NeMo's scheduler gives every group its own base lr; its
+    min_lr (lr / 10) is shared, so the encoder group decays from lr * enc_lr_scale to that same floor."""
+    enc = [p for n, p in m.named_parameters() if n.startswith("encoder.") and p.requires_grad]
+    ids = {id(p) for p in enc}
+    assert enc, "enc_lr_scale needs trainable encoder tensors (unfreeze_top)"
+    assert enc_lr_scale >= 0.1, "enc_lr_scale < 0.1: the group's peak would sit below the shared cosine floor (lr / 10)"
+    return [{"params": [p for p in m.parameters() if id(p) not in ids], "lr": lr},
+            {"params": enc, "lr": lr * enc_lr_scale}]
+
+
+class ParamGroupLog(pl.Callback):
+    """Print the optimizer's real parameter groups at the start of training (the optimizer is rebuilt by Lightning).
+    Counts the trainable tensors only (group 0 also holds the frozen ones, which never get a gradient)."""
+
+    def on_train_start(self, trainer, m):
+        enc_ids = {id(p) for n, p in m.named_parameters() if n.startswith("encoder.")}
+        for i, g in enumerate(trainer.optimizers[0].param_groups):
+            ps = [p for p in g["params"] if p.requires_grad]
+            print(f"param group {i}: {len(ps)} trainable tensors ({sum(p.numel() for p in ps):,} params, "
+                  f"{sum(1 for p in ps if id(p) in enc_ids)} encoder tensors) peak lr {g.get('initial_lr', g['lr']):.3g}",
+                  flush=True)
 
 
 def stock_top_encoder(m, feats, feats_len):
@@ -1440,7 +1556,7 @@ def stock_top_encoder(m, feats, feats_len):
     if cache is None or next(iter(cache.values())).device != dev:
         cache = {k[len("encoder."):]: v.to(dev) for k, v in m._enc_stock_top.items()}
         m._enc_stock_dev = cache
-    with torch.no_grad():
+    with torch.no_grad(), lora_disabled(m):  # the stock values: no adapter contribution either
         return torch.func.functional_call(m.encoder, cache, args=(), kwargs=dict(audio_signal=feats, length=feats_len))
 
 
@@ -1456,7 +1572,8 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           cons_pairs: str = "", cons_per_batch: int = 1, en_set: str = "whole", r3_sub_batch: int = 2,
           comma_weight: float = 0.0, wf_en_weight: float = 1.0, unfreeze_top: int = 0, kl_mask_space: bool = False,
           l2sp_exempt_num: bool = False, en_teacher: str = "", en_teacher_num: str = "anchor", en_kl_scale: float = 1.0,
-          wf_pen_digits_only: bool = False):
+          wf_pen_digits_only: bool = False, enc_lr_scale: float = 1.0, enc_l2sp_c: float | None = None,
+          lora_rank: int = 0, lora_alpha: float = 16.0):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
     entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists.
@@ -1473,7 +1590,13 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     en_teacher (r3) = "<run>@<step>": the English KL rows (anchor / anchor_num / span) take that decoder + joint checkpoint
     as their KL teacher, every other row keeps stock; en_teacher_num "anchor" | "mask": their number cells anchored to it
     or masked as with stock; "" = stock everywhere, unchanged. en_kl_scale (r3): the English KL rows' KL terms x this
-    (0 = no KL on English, non-English unchanged); 1 = unchanged. add_r3_losses' EN_TEACHER block comment has the masks."""
+    (0 = no KL on English, non-English unchanged); 1 = unchanged. add_r3_losses' EN_TEACHER block comment has the masks.
+    Gentler encoder training (unfreeze_top only; all off by default, nothing changes when off): enc_lr_scale != 1: the
+    trainable encoder tensors form their own optimizer parameter group at lr * enc_lr_scale (encoder_param_groups; the
+    L2-SP pull uses each parameter's own group lr). enc_l2sp_c: the L2-SP strength c of the encoder tensors (None = l2sp_c;
+    the decoder and joint keep l2sp_c). lora_rank > 0: the top blocks' own weights stay frozen and LoRA adapters of that
+    rank (scale lora_alpha / lora_rank) on the attention q/k/v/out and feed-forward linears train instead (add_lora); the
+    checkpoints hold the adapters merged into the weights."""
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
@@ -1536,7 +1659,12 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         # the r3 step is the one that reads the training pass's encoder output; SpecAugment would hand the teacher masked
         # input; consistency_term encodes its pairs without a gradient
         assert r3 and not spec_augment and not cons_weight, "unfreeze_top needs r3, SpecAugment off and no consistency term"
-        enc_stock = unfreeze_top_layers(m, unfreeze_top)
+        enc_stock = unfreeze_top_layers(m, unfreeze_top, train_base=not lora_rank)
+        if lora_rank:
+            add_lora(m, unfreeze_top, lora_rank, lora_alpha)
+    assert unfreeze_top or not (lora_rank or enc_lr_scale != 1.0 or enc_l2sp_c is not None), \
+        "enc_lr_scale / enc_l2sp_c / lora_rank need unfreeze_top"
+    assert not (lora_rank and enc_l2sp_c is not None), "enc_l2sp_c: the LoRA base weights are frozen (no encoder pull)"
     if "blankspan" in kl_terms:
         assert kl_replay_only, "blankspan only works with kl_replay_only (span rows are matched by label)"
     assert r3 or (not en_teacher and en_kl_scale == 1.0), "en_teacher / en_kl_scale need r3"
@@ -1593,7 +1721,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
                       en_set=en_set, sub_batch=r3_sub_batch, comma_weight=comma_weight,
                       wf_en_weight=wf_en_weight, kl_mask_space=kl_mask_space, en_teacher_state=en_state,
                       en_teacher_num=en_teacher_num, en_kl_scale=en_kl_scale, wf_pen_digits_only=wf_pen_digits_only)
-        if l2sp_c:
+        if l2sp_c or enc_l2sp_c:
             last_layer = m.joint.joint_net[-1].weight.shape[0]
             exempt = [i for i in wf_piece_ids(m.tokenizer.tokenizer) if i < last_layer]
             if l2sp_exempt_num:
@@ -1608,9 +1736,12 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
                 print(f"l2sp_exempt_num: {len(num_ids)} number pieces + '▁' {space} exempt from {len(lf)} nonen_span "
                       f"labels ({nmis} word-split mismatches): {[spm.id_to_piece(i) for i in num_ids]}; below the share "
                       f"cut (not exempt): {[spm.id_to_piece(i) for i in near]}", flush=True)
-            extra_cb.append(L2SP(l2sp_anchor, l2sp_c, exempt, extra_anchor=enc_stock))
+            extra_cb.append(L2SP(l2sp_anchor, l2sp_c, exempt, extra_anchor=None if lora_rank else enc_stock,
+                                 enc_c=enc_l2sp_c))
             weight_decay = 0.0
-            print(f"L2SP toward {l2sp_anchor} c={l2sp_c}, {len(exempt)} written-form rows exempt; AdamW decay 0")
+            print(f"L2SP toward {l2sp_anchor} c={l2sp_c}"
+                  + (f" (encoder c={enc_l2sp_c})" if enc_l2sp_c is not None else "")
+                  + f", {len(exempt)} written-form rows exempt; AdamW decay 0")
     elif kl_weight or kl_punct:
         add_blank_duration_kl(m, kl_weight, only_texts=replay_texts if kl_replay_only else None, terms=kl_terms,
                               blank_scale=kl_blank_scale, punct_weight=kl_punct, punct_rows=kl_punct_rows,
@@ -1636,12 +1767,22 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
             groups[k] = groups.get(k, 0) + p.numel()
     print(f"trainable params: {sum(groups.values()):,} {groups}")
 
+    if enc_lr_scale != 1.0:
+        # NeMo calls setup_optimizer_param_groups on every (re)build of the optimizer, Lightning's included
+        def split_groups():
+            m._optimizer_param_groups = encoder_param_groups(m, lr, enc_lr_scale)
+
+        m.setup_optimizer_param_groups = split_groups
+        print(f"enc_lr_scale {enc_lr_scale}: encoder tensors at lr {lr * enc_lr_scale:g}, decoder + joint at lr {lr:g}",
+              flush=True)
+
     trainer = pl.Trainer(devices=1, accelerator="gpu", precision="bf16-mixed", max_steps=max_steps,
                          limit_train_batches=max_steps * accumulate, limit_val_batches=0, num_sanity_val_steps=0,
                          use_distributed_sampler=False, gradient_clip_val=1.0, logger=False,
                          accumulate_grad_batches=accumulate,
                          enable_checkpointing=False, enable_progress_bar=False,
                          callbacks=[KeepEncoderFrozen(), StepLog(mem=bool(unfreeze_top))] + extra + extra_cb
+                         + ([ParamGroupLog()] if enc_lr_scale != 1.0 else [])
                          + ([SaveEvery(exp, save_every, on_save, last)] if save_every else []))
     m.set_trainer(trainer)
     m.setup_optimization(OmegaConf.create({

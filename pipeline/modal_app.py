@@ -1683,6 +1683,22 @@ R3_ARMS.update({
     "R8-s-m5x": dict(_R8, lr=5e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True, l2sp_exempt_num=True),
     "R8-s-m5k": dict(_R8, lr=5e-4, l2sp_c=0.0, recipe=_R8S_RECIPE, kl_mask_space=True),
 })
+# Gentler top-2 encoder training (2026-10-18). Plain --unfreeze-top 2 adds number-word conversion but damages other
+# languages more than the frozen-encoder control (the encoder's gradient norm is ~20x the decoder's and encoder L2-SP at
+# c 10 barely binds in 500 steps). Each arm = R8-s + --unfreeze-top 2 (no kl_mask_space) + ONE encoder change:
+#   R8-s-encA = the encoder tensors in their own optimizer group at lr x 0.2 (2e-5; decoder + joint stay at 1e-4); the L2-SP
+#               pull uses each parameter's own group lr; the cosine floor (lr / 10 = 1e-5) is shared by both groups
+#   R8-s-encB = encoder L2-SP c 100 (decoder + joint stay at c 10)
+#   R8-s-encC = LoRA rank 8 (alpha 16) on the top-2 blocks' attention q/k/v/out and both feed-forward linears, base encoder
+#               frozen, decoder + joint as usual; adapters are merged into the weights in every checkpoint
+#   modal run --detach modal_app.py::retrain3_80 --run <run> --arm <R8-s-encA | R8-s-encB | R8-s-encC> --mix v4 \
+#     --mix-dir mix4final8 --langs <the 17 languages> --init-from ultra --anchor-init --dur-weight 0 --warmup 20 \
+#     --max-steps 500 --save-every 250 --r3-sub-batch 1 --unfreeze-top 2
+R3_ARMS.update({
+    "R8-s-encA": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, enc_lr_scale=0.2),
+    "R8-s-encB": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, enc_l2sp_c=100.0),
+    "R8-s-encC": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, lora_rank=8, lora_alpha=16.0),
+})
 # English KL arms (2026-10-18), one change each against R8-s (stock start, lr 1e-4, c 10). Stock-init arms never
 # relearned the English spoken form B writes (en_wf 70-99 vs B 11) while the English rows were KL-anchored to stock, a
 # digit writer; the anchors-off diagnostic did. ft_train.add_r3_losses, EN_TEACHER block comment:
@@ -1768,6 +1784,10 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     cfg.setdefault("en_teacher", "")
     cfg.setdefault("en_teacher_num", "anchor")
     cfg.setdefault("en_kl_scale", 1.0)
+    cfg.setdefault("enc_lr_scale", 1.0)
+    cfg.setdefault("enc_l2sp_c", None)
+    cfg.setdefault("lora_rank", 0)
+    cfg.setdefault("lora_alpha", 16.0)
     given = dict(mix=mix, init_from=init_from, anchor_init=anchor_init, dur_weight=dur_weight, warmup=warmup,
                  langs=",".join(_langs(langs)))
     bad = {k: (given[k], v) for k, v in cfg.pop("recipe", {}).items() if given[k] != v}
@@ -1825,7 +1845,8 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
                    wf_en_weight=cfg["wf_en_weight"], unfreeze_top=unfreeze_top, kl_mask_space=cfg["kl_mask_space"],
                    l2sp_exempt_num=cfg["l2sp_exempt_num"], wf_pen_digits_only=cfg["wf_pen_digits_only"], en_teacher=cfg["en_teacher"],
                    en_teacher_num=cfg["en_teacher_num"], en_kl_scale=cfg["en_kl_scale"],
-                   **r4)
+                   enc_lr_scale=cfg["enc_lr_scale"], enc_l2sp_c=cfg["enc_l2sp_c"], lora_rank=cfg["lora_rank"],
+                   lora_alpha=cfg["lora_alpha"], **r4)
     vol.commit()
 
 
