@@ -238,14 +238,21 @@ def eval_cached(vol: str, m, run: str, sets: list, cache_dir: str = "enc", fresh
     is not stock (unfreeze_top); the stock cache is only read for its rows, never for its encoder outputs."""
     out_dir = f"{vol}/hyps/{run}"
     os.makedirs(f"{out_dir}/sealed", exist_ok=True)
+    loaded = []
     for _man, name, _limit in sets:
         p = f"{vol}/{cache_dir}/{name.replace('/', '__')}.pt"
         if not os.path.exists(p):
             print(f"skip {name}: no cache")
             continue
         c = torch.load(p)
-        if fresh_encoder:
-            c["enc"] = encode_rows(m, c["rows"])
+        if fresh_encoder:  # every set is encoded before any decode: interleaving encoder passes with the greedy TDT
+            with torch.inference_mode():  # decoder crashed with an illegal memory access on the 5th set (2026-10-18)
+                c["enc"] = encode_rows(m, c["rows"])
+        loaded.append((name, c))
+    if fresh_encoder:
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+    for name, c in loaded:
         hyps = decode_encoded(m, c["enc"])
         n_digit = 0
         with open(f"{out_dir}/{name}.jsonl", "w") as f:
