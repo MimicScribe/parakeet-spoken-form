@@ -1698,6 +1698,8 @@ R3_ARMS.update({
     "R8-s-ent": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, en_teacher="w3soup_a0.5@0"),
     # R9 bounded set (2026-10-18, pre-registered bars): S1 = stock init + kl_mask_space + B as the English KL teacher;
     # S2 = S1 without the written-form penalty (does wf_pen push digit mass onto wrong words?); S3 = S1 from B (init only)
+    # bisect of R9-S1's all-language damage (2026-10-18): one change each against R8-s
+    "R8-s-msk": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True),
     "R9-S1": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0"),
     "R9-S2": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0",
                   wf_weight=0.0),
