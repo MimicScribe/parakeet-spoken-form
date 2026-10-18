@@ -10,6 +10,7 @@ Data-quality and scoring tools. Python 3, stdlib only for the tests (the number-
 | `number_outcomes.py` | number reader and scorer (CORE block identical to `pipeline/score_retrain.py`) |
 | `judge_reject.py`, `judge_plro.py` | row judges against a second transcript |
 | `wordfix_ext.py` | interior word repair from agreeing sources |
+| `seam_gate.py` | seam veto vs a baseline: offset score over decoder dumps (fails on a missing scope, language or slot); proxy gate and lost-word rate are report-only |
 | `offset_score.py`, `score_values.py` | seam scorers over decoder dumps (see CONCEPTS.md) |
 
 ## Tests

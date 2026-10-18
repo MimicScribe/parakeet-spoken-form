@@ -28,6 +28,11 @@ import volume_io as V  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))
 import ml_cands as M  # noqa: E402
 import ml_decide as D  # noqa: E402
+import census_common as CC  # noqa: E402
+
+FULL_TIER = tuple(CC.TIER_LANGS["full"].split())  # en de es fr it nl pt: the tier every language of which must convert
+LONG_CLASSES = ("phone", "int_big", "price", "date")
+MIN_SPANS = 100  # a language with fewer scored spans is report-only in the no-damage rule (the CI is too wide to gate)
 
 PIPE = Path(__file__).resolve().parents[2] / "pipeline"
 VOLUME = "parakeet-spoken-form"
@@ -135,7 +140,22 @@ def span_form(outcome: str, region: str, lang: str) -> str:
     return "digits_left" if f == "other" and outcome == "DIGITS_RIGHT_VALUE" else f
 
 
-def score_spans(rows: list, lang: str, caps: dict, per_span: list = None, forms: dict = None) -> tuple[dict, list]:
+def long_class(kind: str, text: str) -> str:
+    """The long class of a caption span, else "": phone, price (cur), date, int_big (a plain integer >= 1000 that is not
+    a bare year 1800-2099)."""
+    if kind in ("phone", "date"):
+        return kind
+    if kind == "cur":
+        return "price"
+    digits = re.sub(r"[\s.,'\u00a0\u202f]", "", text)
+    if kind in ("int", "code") and digits.isdigit() and int(digits) >= 1000 and not (
+            len(digits) == 4 and 1800 <= int(digits) <= 2099):
+        return "int_big"
+    return ""
+
+
+def score_spans(rows: list, lang: str, caps: dict, per_span: list = None, forms: dict = None,
+                forms_by_class: dict = None) -> tuple[dict, list]:
     """Primary mode POSITIONAL: each caption span is scored on the
     hypothesis words that stand where its label words stand (`_region`, +-1 word), never on the whole hypothesis.
     WORDS_RIGHT_VALUE: the region holds ANY candidate reading of the span as whole words (a valid variant is not a
@@ -188,6 +208,11 @@ def score_spans(rows: list, lang: str, caps: dict, per_span: list = None, forms:
                 fc = span_form(o, reg, lang)
                 forms[fc] = forms.get(fc, 0) + 1
                 forms["n"] = forms.get("n", 0) + 1
+                lc = long_class(sp.kind, sp.text)
+                if forms_by_class is not None and lc:  # converted share on the long classes, per class
+                    fb = forms_by_class.setdefault(lc, {})
+                    fb[fc] = fb.get(fc, 0) + 1
+                    fb["n"] = fb.get("n", 0) + 1
             if per_span is not None:  # paired comparisons (bootstrap / McNemar between two runs on the same spans)
                 per_span.append((r["id"], sp.text, sp.kind, o))
             if o in ("WRONG_VALUE", "DROPPED"):
@@ -289,25 +314,107 @@ def no_damage(run: dict, base: dict, pp: float = NO_DAMAGE_PP, langs=None) -> di
 
         vr, wd, n = pct(r)
         bvr, bwd, _ = pct(b)
-        out[lang] = {"pass": vr >= bvr - pp and wd <= bwd + pp, "spans": n,
+        out[lang] = {"pass": vr >= bvr - pp and wd <= bwd + pp, "spans": n, "report_only": n < MIN_SPANS,
                      "value_right": [round(vr, 1), round(bvr, 1)], "wrong_dropped": [round(wd, 1), round(bwd, 1)]}
     return out
 
 
-def pick_most_converted(out: dict, base: str) -> dict:
+BOOT_N, BOOT_ALPHA = 2000, 0.05
+
+
+def _span_keys(ps: list) -> dict:
+    """{(row id, span text, occurrence): (kind, outcome)} from a per_span list; the occurrence index keeps repeated
+    texts of one row apart."""
+    seen, out = collections.Counter(), {}
+    for rid, text, kind, o in ps:
+        k = (rid, text, seen[(rid, text)])
+        seen[(rid, text)] += 1
+        out[k] = (kind, o)
+    return out
+
+
+def paired_bootstrap(run_ps: list, base_ps: list, pp: float = NO_DAMAGE_PP, seed: int = 0) -> dict:
+    """Paired bootstrap (rows resampled whole) of run - baseline over the spans both scored, in percentage points, for
+    words-right, digits-right and value-right (their sum). `harm` = the 95% CI of value-right lies entirely below
+    -pp: the only case that fails (a point estimate under -pp inside a wide CI does not). Words-right and digits-right
+    are reported; converting trades digits for words, so only their sum gates."""
+    import random
+    r, b = _span_keys(run_ps), _span_keys(base_ps)
+    keys = sorted(set(r) & set(b))
+    if not keys:
+        return {"n_paired": 0, "harm": False}
+    by = collections.defaultdict(lambda: [0, 0, 0, 0])  # row id -> spans, dwords, ddigits, dvalue
+    for k in keys:
+        x = by[k[0]]
+        x[0] += 1
+        rw, bw = r[k][1] == "WORDS_RIGHT_VALUE", b[k][1] == "WORDS_RIGHT_VALUE"
+        rd, bd = r[k][1] == "DIGITS_RIGHT_VALUE", b[k][1] == "DIGITS_RIGHT_VALUE"
+        x[1] += rw - bw
+        x[2] += rd - bd
+        x[3] += (rw or rd) - (bw or bd)
+    rows = list(by.values())
+    n = len(keys)
+    rng = random.Random(seed)
+    draws = []
+    for _ in range(BOOT_N):
+        t = [0, 0, 0, 0]
+        for _ in rows:
+            for i, v in enumerate(rng.choice(rows)):
+                t[i] += v
+        draws.append(t)
+    out = {"n_paired": n, "n_rows": len(rows)}
+    for i, name in ((1, "words_right"), (2, "digits_right"), (3, "value_right")):
+        ds = sorted(100 * d[i] / d[0] for d in draws if d[0])
+        lo, hi = ds[int(BOOT_ALPHA / 2 * len(ds))], ds[int((1 - BOOT_ALPHA / 2) * len(ds)) - 1]
+        out[name] = {"diff_pp": round(100 * sum(x[i] for x in rows) / n, 2), "ci95": [round(lo, 2), round(hi, 2)]}
+    out["harm"] = out["value_right"]["ci95"][1] < -pp
+    out["report_only"] = n < MIN_SPANS
+    return out
+
+
+def min_long_converted(res: dict) -> tuple | None:
+    """(min converted% over the full-tier languages scored, the worst language, how many were counted) on the long
+    classes (LONG_CLASSES) pooled per language; None when no full-tier language has long-class spans."""
+    vals = {}
+    for l in FULL_TIER:
+        fb = (res.get(l) or {}).get("forms_by_class") or {}
+        n = sum(fb.get(c, {}).get("n", 0) for c in LONG_CLASSES)
+        if n:
+            vals[l] = round(100 * sum(fb.get(c, {}).get("converted", 0) for c in LONG_CLASSES) / n, 1)
+    if not vals:
+        return None
+    worst = min(vals, key=lambda l: (vals[l], l))
+    return vals[worst], worst, len(vals)
+
+
+def pick_most_converted(out: dict, base: str, honour_report_only: bool = False, rule: str = "point") -> dict:
     """Pick rule : among runs that PASS the per-language no-damage gate (`no_damage`
     vs `base`) in EVERY language they were scored on, take the one whose numbers are most fully converted (highest
     mean converted share; ties: lower mixed + digits-left). Half-converted candidates (words for some numbers, digits
     left for others) are what a downstream digit-to-words step turns into two different readings of one audio, so converted
     share beats raw words-right at equal damage. Returns {"pick", "ranked": [(run, converted%, digits_left%, mixed%)],
-    "per_language": {lang: {run: {converted, digits_left, mixed, other, pass}}}, "failed": {run: [langs]}}."""
+    "per_language": {lang: {run: {converted, digits_left, mixed, other, pass}}}, "failed": {run: [langs]},
+    "ranked_min_long": [(run, min converted% over the full-tier languages on the long classes pooled, worst language,
+    languages counted)], "pick_min": best of that ranking}. The min ranking is an addition printed beside the mean one
+    (one weak language cannot hide in a mean). honour_report_only: a language under MIN_SPANS spans cannot fail the
+    no-damage rule. rule "ci": the paired-bootstrap harm verdict (out[run]["_no_damage_ci"]) replaces the point rule."""
     langs = sorted({l for r in out.values() for l in r if not l.startswith("_")})
-    per, failed, ranked = {}, {}, []
+    per, failed, ranked, ranked_min = {}, {}, [], []
     for run, res in out.items():
         if run == base:
             continue
         nd = res.get("_no_damage") or no_damage(res, out[base], langs=langs)
-        bad = [l for l in langs if not (nd.get(l) or {}).get("pass")]  # not scored = not passed
+        ci = res.get("_no_damage_ci") or {}
+
+        def ok(l):
+            v = nd.get(l) or {}
+            if "missing" in v:
+                return False
+            if honour_report_only and v.get("report_only"):
+                return True
+            return not (ci.get(l) or {}).get("harm") if rule == "ci" and l in ci else bool(v.get("pass"))
+
+        bad = [l for l in langs if not ok(l)]  # not scored = not passed
         failed[run] = bad
         sh = {l: N.form_shares(res[l].get("forms") or {}) for l in langs if l in res and res[l].get("forms")}
         for l, s in sh.items():
@@ -315,8 +422,13 @@ def pick_most_converted(out: dict, base: str) -> dict:
         if sh and not bad:
             mean = lambda k: round(sum(s[k] or 0 for s in sh.values()) / len(sh), 1)  # noqa: E731
             ranked.append((run, mean("converted"), mean("digits_left"), mean("mixed")))
+            lm = min_long_converted(res)
+            if lm:
+                ranked_min.append((run, *lm))
     ranked.sort(key=lambda t: (-t[1], t[2] + t[3]))
-    return {"pick": ranked[0][0] if ranked else None, "ranked": ranked, "per_language": per, "failed": failed}
+    ranked_min.sort(key=lambda t: (-t[1], t[0]))
+    return {"pick": ranked[0][0] if ranked else None, "ranked": ranked, "per_language": per, "failed": failed,
+            "ranked_min_long": ranked_min, "pick_min": ranked_min[0][0] if ranked_min else None}
 
 
 def main(argv=None):
@@ -333,6 +445,11 @@ def main(argv=None):
     ap.add_argument("--mix-dir", default="mix4", help="the build the probe decoded (probe_heldout --mix-dir)")
     ap.add_argument("--no-damage-vs", default="",
                     help="baseline run (B or ultra): per-language no-damage rule for every other run (next / moderate tiers)")
+    ap.add_argument("--no-damage-rule", default="point", choices=["point", "ci"],
+                    help="point = the 2 pp point rule (default); ci = fail only when the paired-bootstrap CI95 of "
+                         "value-right lies entirely beyond -2 pp")
+    ap.add_argument("--small-n-report-only", action="store_true",
+                    help=f"a language with under {MIN_SPANS} scored spans cannot fail the no-damage rule (still printed)")
     a = ap.parse_args(argv)
     if a.no_damage_vs and a.set == "dec18":
         ap.error("--no-damage-vs needs span scores: not available for --set dec18")
@@ -361,12 +478,12 @@ def main(argv=None):
                 print(f"{run:24s} {lang:4s}  (no hyps)")
                 continue
             caps = _captions(lang, Path(a.work), a.set, a.mix_dir)
-            fm = {}
-            sc, check = score_spans(rows, lang, caps, forms=fm)
+            fm, fbc, ps = {}, {}, []
+            sc, check = score_spans(rows, lang, caps, per_span=ps, forms=fm, forms_by_class=fbc)
             c, wrong = score(rows, lang)
             di = drops_inserts(rows, lang, caps)
             out[run][lang] = {"spans": sc, "check": check, "four_outcomes": c, "wrong": wrong, "drops_inserts": di,
-                              "forms": fm}
+                              "forms": fm, "forms_by_class": fbc, "per_span": ps}
             al = sc.get("all", {})
             n = sum(al.values()) or 1
             print(f"{run:24s} {lang:4s} {n:5d} {100 * al.get('WORDS_RIGHT_VALUE', 0) / n:7.1f} "
@@ -380,18 +497,34 @@ def main(argv=None):
             if run == a.no_damage_vs:
                 continue
             nd = out[run]["_no_damage"] = no_damage(out[run], out[a.no_damage_vs], langs=a.langs.split(","))
+            ci = out[run]["_no_damage_ci"] = {
+                l: paired_bootstrap(out[run][l]["per_span"], out[a.no_damage_vs][l]["per_span"])
+                for l in nd if "missing" not in nd[l]}
             for lang, v in nd.items():
                 if "missing" in v:
                     print(f"NO-DAMAGE {run} {lang}: FAIL (no scores: {v['missing']})")
                     continue
-                print(f"NO-DAMAGE {run} {lang}: {'PASS' if v['pass'] else 'FAIL (stays on stock digits)'} "
+                ro = f" REPORT-ONLY (n < {MIN_SPANS})" if v["report_only"] else ""
+                print(f"NO-DAMAGE {run} {lang}: {'PASS' if v['pass'] else 'FAIL (stays on stock digits)'}{ro} "
                       f"value-right {v['value_right'][0]}% vs {v['value_right'][1]}%, wrong+dropped "
                       f"{v['wrong_dropped'][0]}% vs {v['wrong_dropped'][1]}% (n={v['spans']})")
+                c = ci[lang]
+                if c.get("n_paired"):
+                    print(f"{'':12s} paired CI95 vs {a.no_damage_vs} (n={c['n_paired']} spans, {c['n_rows']} rows): "
+                          + ", ".join(f"{k.replace('_', '-')} {c[k]['diff_pp']:+.1f} pp {c[k]['ci95']}"
+                                      for k in ("words_right", "digits_right", "value_right"))
+                          + f" -> {'HARM beyond ' + str(NO_DAMAGE_PP) + ' pp' if c['harm'] else 'no proven harm'}"
+                          + (" (report-only)" if c["report_only"] else ""))
     if a.no_damage_vs:
-        pk = out["_pick_most_converted"] = pick_most_converted({k: v for k, v in out.items() if not k.startswith("_")}, a.no_damage_vs)
+        pk = out["_pick_most_converted"] = pick_most_converted({k: v for k, v in out.items() if not k.startswith("_")}, a.no_damage_vs,
+                                                      honour_report_only=a.small_n_report_only, rule=a.no_damage_rule)
         print(f"PICK (most converted among no-damage passers): {pk['pick']}")
         for run, cv, dl, mx in pk["ranked"]:
             print(f"  {run:40s} converted {cv}% digits-left {dl}% mixed {mx}%")
+        print(f"PICK by MIN converted over full-tier languages ({','.join(FULL_TIER)}), long classes "
+              f"({','.join(LONG_CLASSES)}) pooled: {pk['pick_min']}")
+        for run, mn, worst, k in pk["ranked_min_long"]:
+            print(f"  {run:40s} min converted {mn}% ({worst}; {k} full-tier languages counted)")
         for run, bad in pk["failed"].items():
             if bad:
                 print(f"  {run:40s} fails no-damage in {','.join(bad)}")

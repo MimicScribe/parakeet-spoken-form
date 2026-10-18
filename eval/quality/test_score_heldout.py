@@ -33,6 +33,81 @@ class NoDamage(unittest.TestCase):
         self.assertEqual(pk["failed"]["partial"], ["ro"])
 
 
+class SmallNAndCI(unittest.TestCase):
+    def test_report_only_under_min_spans(self):
+        # n is reported per language; under MIN_SPANS spans the language is report-only
+        nd = S.no_damage({"pl": sc(60, 10, 20, 10), "de": sc(600, 100, 200, 100)},
+                         {"pl": sc(80, 10, 5, 5), "de": sc(800, 100, 50, 50)})
+        self.assertEqual((nd["pl"]["spans"], nd["pl"]["report_only"]), (100, False))
+        nd = S.no_damage({"pl": sc(30, 5, 10, 5)}, {"pl": sc(40, 5, 3, 2)})
+        self.assertTrue(nd["pl"]["report_only"])
+        self.assertFalse(nd["pl"]["pass"])  # the point verdict is still computed
+        out = {"B": {"pl": sc(40, 5, 3, 2)}, "x": {"pl": sc(30, 5, 10, 5)}}
+        self.assertIsNone(S.pick_most_converted(out, "B")["pick"])  # legacy: fails
+        self.assertEqual(S.pick_most_converted(out, "B", honour_report_only=True)["failed"]["x"], [])
+
+    @staticmethod
+    def ps(n, right_words, right_digits, rows=40):
+        """n spans over `rows` rows: the first right_words WORDS_RIGHT, then right_digits DIGITS_RIGHT, rest WRONG."""
+        out = []
+        for i in range(n):
+            o = ("WORDS_RIGHT_VALUE" if i < right_words else "DIGITS_RIGHT_VALUE" if i < right_words + right_digits
+                 else "WRONG_VALUE")
+            out.append((f"r{i % rows}", f"t{i}", "int", o))
+        return out
+
+    def test_paired_bootstrap_harm_needs_the_whole_ci_beyond_2pp(self):
+        base = self.ps(400, 0, 360)  # 90% value-right
+        clear = S.paired_bootstrap(self.ps(400, 0, 280), base)  # 70%: -20 pp
+        self.assertTrue(clear["harm"])
+        self.assertEqual(clear["digits_right"]["diff_pp"], -20.0)
+        noisy = S.paired_bootstrap(self.ps(400, 0, 350), base)  # -2.5 pp point, CI reaches above -2
+        self.assertLess(noisy["value_right"]["diff_pp"], -2)
+        self.assertFalse(noisy["harm"])  # the point rule would fail this language; the CI does not
+        conv = S.paired_bootstrap(self.ps(400, 360, 0), base)  # digits traded for words: value-right unchanged
+        self.assertFalse(conv["harm"])
+        self.assertEqual(conv["words_right"]["diff_pp"], 90.0)
+        self.assertTrue(S.paired_bootstrap(self.ps(60, 0, 20), self.ps(60, 0, 55))["report_only"])
+        self.assertEqual(S.paired_bootstrap([], base)["n_paired"], 0)
+
+    def test_pick_rule_ci(self):
+        sp = lambda w, d, x, dr, extra: {**sc(w, d, x, dr), **extra}  # noqa: E731
+        out = {"B": {"pl": sc(360, 0, 20, 20)},
+               "x": sp(350, 0, 25, 25, {"_no_damage_ci": {}})}
+        # point rule fails (-2.5 pp); ci rule with a non-harm verdict passes
+        out["x"] = {"pl": sc(350, 0, 25, 25), "_no_damage_ci": {"pl": {"harm": False}}}
+        self.assertEqual(S.pick_most_converted(out, "B")["failed"]["x"], ["pl"])
+        self.assertEqual(S.pick_most_converted(out, "B", rule="ci")["failed"]["x"], [])
+
+
+class MinConversion(unittest.TestCase):
+    def test_long_class(self):
+        self.assertEqual(S.long_class("phone", "555 1234"), "phone")
+        self.assertEqual(S.long_class("cur", "12,50 €"), "price")
+        self.assertEqual(S.long_class("date", "8. 8. 1997"), "date")
+        self.assertEqual(S.long_class("int", "330.000"), "int_big")
+        self.assertEqual(S.long_class("int", "1997"), "")  # a bare year
+        self.assertEqual(S.long_class("int", "25"), "")
+        self.assertEqual(S.long_class("pct", "10 %"), "")
+
+    def test_min_ranking_differs_from_mean(self):
+        def lang(conv, n=100):
+            return {**sc(80, 10, 5, 5), "forms_by_class": {"phone": {"converted": conv, "n": n}}}
+        full = {l: lang(90) for l in S.FULL_TIER}
+        spread = {l: lang(100) for l in S.FULL_TIER}
+        spread["pt"] = lang(40)  # higher mean (94 vs 90), one weak language
+        out = {"B": {l: sc(80, 10, 5, 5) for l in S.FULL_TIER}, "even": full, "weak": spread}
+        for l in S.FULL_TIER:
+            for r in ("even", "weak"):
+                cv = out[r][l]["forms_by_class"]["phone"]["converted"]
+                out[r][l]["forms"] = {"converted": cv, "digits_left": 100 - cv, "n": 100}
+        pk = S.pick_most_converted(out, "B")
+        self.assertEqual(pk["pick"], "weak")  # mean ranking (existing behaviour)
+        self.assertEqual(pk["pick_min"], "even")  # min over the full tier
+        self.assertEqual(pk["ranked_min_long"][-1][:3], ("weak", 40.0, "pt"))
+        self.assertEqual(S.FULL_TIER, ("en", "de", "es", "fr", "it", "nl", "pt"))
+
+
 class References(unittest.TestCase):
     def test_mix_dir_and_dec18(self):
         # red-on-base: the references were hard-coded to mix4/
