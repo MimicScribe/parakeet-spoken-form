@@ -461,8 +461,16 @@ def span_mask(spm, pairs, batch, width, device):
 WF_CHARS = re.compile(r"[0-9$€£¥¢₹₩₽%#/+°⁇²³¹½¼¾⅓⅔]")
 EN_NUM_WORDS = ("two three four five seven eight eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen "
                 "nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand first third").split()
-# no "one" (pl "they"), "second" (fr), six, ten (pl/cs/sk/nl), nine. Only whole-word pieces count (en_num_piece_ids); the multi-piece ones
-# are guarded by the token KL to stock on non-English rows, not by en_pen (retrain-3 reviews).
+# no "one" (pl "they"), "second" (fr), six, ten (pl/cs/sk/nl), nine. en_set "whole" (the default): only whole-word
+# pieces count (en_num_piece_ids). The tokenizer splits most of these words, so only "two" and "first" survive there.
+# The token KL does not guard the multi-piece ones on nonen_span number positions either (it skips those columns).
+# en_set "first" (en_num_first_piece_ids): the first piece of each word in EN_NUM_WORDS_FIRST. The data decides which
+# pieces are shared with other languages, so the list can be wider: a piece common as a word start in the
+# non-English labels ("▁six", "▁sette", "▁mil", "▁zero", ...) is dropped there, whatever word it came from.
+EN_NUM_WORDS_FIRST = tuple(EN_NUM_WORDS) + tuple(
+    "zero one six nine ten million billion point percent second fourth fifth twelfth hundredth thousandth".split())
+EN_FIRST_MIN_LETTERS = 3  # letters after "▁": shorter first pieces ("▁t" of thousand, "▁se") start too many words
+EN_FIRST_MAX_NONEN = 20  # a first piece seen this often as a word start in non-English labels is shared: not penalised
 
 
 TWENTY_PAIR = re.compile(r"\btwenty (?:ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|"
@@ -477,6 +485,53 @@ def wf_piece_ids(spm) -> list[int]:
 def en_num_piece_ids(spm) -> list[int]:
     want = {"▁" + w for w in EN_NUM_WORDS}
     return [i for i in range(spm.get_piece_size()) if spm.id_to_piece(i) in want]
+
+
+def word_start_counts(spm, labels, only=None) -> collections.Counter:
+    """How often each word-initial piece ("▁...") occurs over `labels` (token-id sequences), counting only ids in
+    `only` when given."""
+    c = collections.Counter()
+    for ids in labels:
+        for i in ids:
+            if (only is None or i in only) and spm.id_to_piece(int(i)).startswith("▁"):
+                c[int(i)] += 1
+    return c
+
+
+def en_num_first_piece_ids(spm, encode, nonen_labels, words=EN_NUM_WORDS_FIRST, min_letters=EN_FIRST_MIN_LETTERS,
+                           max_nonen=EN_FIRST_MAX_NONEN) -> tuple[list[int], dict]:
+    """en_set "first": per English number word, the first piece of its tokenization (`encode(word)`: the word-initial
+    form, as mid-sentence); kept when it starts with "▁", has >= min_letters letters after it, and occurs fewer than
+    max_nonen times as a word start over `nonen_labels` (the distinct non-English label token sequences). Returns
+    (kept ids, report): report = {"kept": {piece: [words]}, "excluded": {piece: (count, [words])},
+    "short": {word: piece}, "covered": n words with a kept piece, "words": n words}."""
+    first = {}
+    for w in words:
+        ids = encode(w)
+        if ids:
+            first.setdefault(int(ids[0]), []).append(w)
+    counts = word_start_counts(spm, nonen_labels, only=set(first))
+    kept, rep = [], {"kept": {}, "excluded": {}, "short": {}, "words": len(words)}
+    for i, ws in first.items():
+        p = spm.id_to_piece(i)
+        if not p.startswith("▁") or sum(ch.isalpha() for ch in p[1:]) < min_letters:
+            rep["short"].update({w: p for w in ws})
+        elif counts[i] >= max_nonen:
+            rep["excluded"][p] = (counts[i], ws)
+        else:
+            kept.append(i)
+            rep["kept"][p] = ws
+    rep["covered"] = sum(len(ws) for ws in rep["kept"].values())
+    return sorted(kept), rep
+
+
+def en_pen_cols(klu, nonen, nspan, en_set: str):
+    """Label columns where en_pen applies, per row: "whole" = every column (rows: nonen + nonen_span); "first" = every
+    column of nonen rows, and on nonen_span rows only the number columns (klu False: where the token KL to stock is
+    off), so one English word inside a number is not diluted by the rest of the row."""
+    if en_set == "whole":
+        return None
+    return nonen[:, None] | (nspan[:, None] & ~klu)
 
 
 def numberish(word: str) -> bool:
@@ -760,12 +815,16 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                   wf_weight: float = 1.0, en_weight: float = 1.0, sub_batch: int = 2, emit_p: float = 0.1,
                   dur_weight: float = 0.0, span_prefix: dict | None = None, suffix_anchor: bool = False,
                   anchor_after: int = 1, nspan_pos: dict | None = None, gate: float = 0.9, gate_human: float = 0.0,
-                  synthetic: set | None = None, cons_weight: float = 0.0, pair_bank: "PairBank | None" = None):
+                  synthetic: set | None = None, cons_weight: float = 0.0, pair_bank: "PairBank | None" = None,
+                  en_set: str = "whole"):
     """R3 losses (table above). R4 options, all off by default: suffix_anchor (arm b: anchor every non-number position of
     span / anchor_num rows, and of nonen_span rows via nspan_pos {label ids: anchor_positions}), gate_human (arm b: the
     blank-KL teacher gate on human-verified rows, `gate` elsewhere), cons_weight + pair_bank (arm c: cross-window
-    consistency, consistency_term)."""
+    consistency, consistency_term). en_set: the en_pen piece set and columns ("whole" | "first"; EN_NUM_WORDS_FIRST,
+    en_pen_cols)."""
     import copy
+
+    assert en_set in ("whole", "first"), en_set
 
     teacher_dec, teacher_joint = copy.deepcopy(m.decoder).eval(), copy.deepcopy(m.joint).eval()
     for p in list(teacher_dec.parameters()) + list(teacher_joint.parameters()):
@@ -774,11 +833,19 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
     spm = m.tokenizer.tokenizer
     term_t = torch.tensor([i for i in range(spm.get_piece_size())
                            if spm.id_to_piece(i).lstrip("▁") in {".", "?", "!", "...", "…"}])
-    wf_t, en_t = torch.tensor(wf_piece_ids(spm)), torch.tensor(en_num_piece_ids(spm))
+    if en_set == "first":
+        nonen_labels = [k for k, tg in row_tags.items() if tg in ("nonen", "nonen_span")]
+        en_ids, rep = en_num_first_piece_ids(spm, lambda w: m.tokenizer.text_to_ids(w), nonen_labels)
+        print(f"en_set first: kept {len(rep['kept'])} pieces covering {rep['covered']}/{rep['words']} English number "
+              f"words {rep['kept']}; excluded (>= {EN_FIRST_MAX_NONEN} word starts in {len(nonen_labels)} non-English "
+              f"labels) {rep['excluded']}; too short {rep['short']}", flush=True)
+    else:
+        en_ids = en_num_piece_ids(spm)
+    wf_t, en_t = torch.tensor(wf_piece_ids(spm)), torch.tensor(en_ids, dtype=torch.long)
     th_first = int(m.tokenizer.text_to_ids("thousand")[0])
     th_t = torch.tensor([th_first])
     print(f"R3 losses: wf pieces {len(wf_t)} e.g. {[spm.id_to_piece(int(i)) for i in wf_t[:12]]}; "
-          f"en_num pieces {[spm.id_to_piece(int(i)) for i in en_t]}; thousand first piece {spm.id_to_piece(th_first)!r}; tags {dict(collections.Counter(row_tags.values()))}",
+          f"en_num pieces ({en_set}) {[spm.id_to_piece(int(i)) for i in en_t]}; thousand first piece {spm.id_to_piece(th_first)!r}; tags {dict(collections.Counter(row_tags.values()))}",
           flush=True)
     print(f"R4 options: suffix_anchor {suffix_anchor} (after {anchor_after} word, nonen_span rows with positions "
           f"{len(nspan_pos or {})}) gate {gate} gate_human {gate_human or '-'} (synthetic labels {len(synthetic or ())}) "
@@ -884,7 +951,8 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                 return per_row, rows_sl.float()  # per row: 0 off rows_sl (no emitting cell counted there)
 
             wf_s, wf_n = pen(wf, ~nonen_sl)
-            en_s, en_n = pen(en, nonen_sl | nspan_sl) if len(en) else (torch.zeros_like(nonen_sl, dtype=torch.float),) * 2
+            en_s, en_n = (pen(en, nonen_sl | nspan_sl, en_pen_cols(klu_sl, nonen_sl, nspan_sl, en_set)) if len(en)
+                          else (torch.zeros_like(nonen_sl, dtype=torch.float),) * 2)
             th_s, th_n = pen(th, yr_sl, yrcol_sl)
             # per-row sums (summed over the batch below; per tag for the r3tag log line)
             return ((kl_blank * bmask).sum((1, 2)), bmask.sum((1, 2)).float(), (kl_p * kmask).sum((1, 2)),
@@ -1110,12 +1178,14 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           r3: bool = False, wf_weight: float = 1.0, en_weight: float = 1.0, l2sp_c: float = 0.0,
           l2sp_anchor: str = "", accumulate: int = 1, dur_weight: float = 0.0, suffix_anchor: bool = False,
           anchor_after: int = 1, gate: float = 0.9, gate_human: float = 0.0, cons_weight: float = 0.0,
-          cons_pairs: str = "", cons_per_batch: int = 1):
+          cons_pairs: str = "", cons_per_batch: int = 1, en_set: str = "whole", r3_sub_batch: int = 2):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
     entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists.
     R4 (r3 only, all off by default): suffix_anchor / anchor_after / gate / gate_human (arm b), cons_weight + cons_pairs
-    (comma-separated volume-relative pair lists; missing files are skipped) + cons_per_batch (arm c)."""
+    (comma-separated volume-relative pair lists; missing files are skipped) + cons_per_batch (arm c).
+    en_set (r3): the en_pen piece set ("whole" | "first", add_r3_losses). r3_sub_batch: rows per auxiliary joint pass
+    (add_r3_losses sub_batch): 1 halves that pass's peak memory, same batch and loss values, slower step."""
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
@@ -1217,7 +1287,8 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         add_r3_losses(m, row_tags, kl_weight=kl_weight, punct_weight=kl_punct, tok_weight=kl_tok,
                       wf_weight=wf_weight, en_weight=en_weight, dur_weight=dur_weight, span_prefix=span_prefix,
                       suffix_anchor=suffix_anchor, anchor_after=anchor_after, nspan_pos=nspan_pos, gate=gate,
-                      gate_human=gate_human, synthetic=synthetic, cons_weight=cons_weight, pair_bank=bank)
+                      gate_human=gate_human, synthetic=synthetic, cons_weight=cons_weight, pair_bank=bank,
+                      en_set=en_set, sub_batch=r3_sub_batch)
         if l2sp_c:
             last_layer = m.joint.joint_net[-1].weight.shape[0]
             exempt = [i for i in wf_piece_ids(m.tokenizer.tokenizer) if i < last_layer]

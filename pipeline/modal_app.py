@@ -1549,6 +1549,21 @@ R3_ARMS.update({
     "R8-a": dict(_R8, lr=3e-5, l2sp_c=10.0),
     "R8-b": dict(_R8, lr=1e-4, l2sp_c=30.0),
 })
+# R8 try 2 (2026-10-18), one change each against try 1:
+#   R8-e = R8-b + the English number-word penalty that reaches multi-piece words (en_set "first": first pieces not
+#          common in the non-English labels; on nonen_span rows only at the number columns), weight 3.
+#   R8-s = stock Ultra start (--init-from ultra --anchor-init: no fine-tuned checkpoint loaded, L2-SP anchored to stock;
+#          the KL teacher is stock in every arm), lr 1e-4, c 10.
+#   Control = R8-a on the unsplit mix (--mix-dir mix4final4); its longer labels ran out of GPU memory in the auxiliary
+#          joint pass, so it runs with --r3-sub-batch 1 (same batch and losses, one row per pass, slower step).
+#   modal run --detach modal_app.py::retrain3 --run <run> --arm R8-s --mix v4 --mix-dir <dir> --langs <RUN2_LANGS> \
+#     --init-from ultra --anchor-init --dur-weight 0 --warmup 20 --max-steps 1500 --save-every 250
+#   (R8-e and the control: --init-from w3soup_a0.5@0 --anchor-init; the control adds --r3-sub-batch 1)
+_R8S_RECIPE = dict(_R7_RECIPE, init_from="ultra")
+R3_ARMS.update({
+    "R8-e": dict(_R8, lr=1e-4, l2sp_c=30.0, en_set="first", en_weight=3.0),
+    "R8-s": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE),
+})
 R3_ARMS.update({
     "R4-a": dict(wf_weight=3.0, l2sp_c=1.0, lr=3e-5, recipe=_R4_RECIPE),
     "R4-b": dict(wf_weight=3.0, l2sp_c=1.0, lr=3e-5, recipe=_R4_RECIPE, suffix_anchor=True, anchor_after=1,
@@ -1561,14 +1576,19 @@ R3_ARMS.update({
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-40GB", cpu=8, memory=32768, timeout=24 * 3600,
               retries=modal.Retries(max_retries=2, initial_delay=30.0))
 def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, save_every: int = 250,
-             en_weight: float = 1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
+             en_weight: float = -1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
              dur_weight: float = 1.0, init_from: str = "v10pt@1500", lr: float = 0.0, mix: str = "mix3",
-             anchor_init: bool = False, cons_weight: float = -1.0, langs: str = "", mix_dir: str = "mix4"):
+             anchor_init: bool = False, cons_weight: float = -1.0, langs: str = "", mix_dir: str = "mix4",
+             r3_sub_batch: int = 2):
     """One retrain-3 run (R3.13): r3 losses, decoupled L2-SP to v10pt@1500, 200 s x 2 accumulated batches.
     Rehearsal (E2) = a small max_steps. Resumes from exp/<run>/last.ckpt after a preemption.
     cons_weight >= 0 overrides the arm's cross-window consistency weight (R4-c tuning knob).
     langs (mix v4): the trained languages ("" = wave 1); must be the language set the mix4 build on the volume was built
-    for (check_build_langs), and an arm whose recipe names langs must be given exactly those."""
+    for (check_build_langs), and an arm whose recipe names langs must be given exactly those.
+    init_from "ultra": start from stock Ultra (no checkpoint loaded); with anchor_init the L2-SP anchor is stock too.
+    en_weight < 0: the arm's (default 1). r3_sub_batch: rows per auxiliary joint pass (default 2); 1 roughly halves
+    that pass's peak GPU memory (the place the unsplit control ran out) at the cost of a slower step; the batch
+    (200 s x 2 accumulated), the losses and their values are unchanged."""
     import json
     import os
 
@@ -1581,6 +1601,10 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     cfg = dict(R3_ARMS[arm])
     if lr:  # R3.31 warm start: a lower peak LR than the arm's
         cfg["lr"] = lr
+    if en_weight < 0:
+        en_weight = cfg.get("en_weight", 1.0)
+    cfg["en_weight"] = en_weight
+    cfg.setdefault("en_set", "whole")
     given = dict(mix=mix, init_from=init_from, anchor_init=anchor_init, dur_weight=dur_weight, warmup=warmup,
                  langs=",".join(_langs(langs)))
     bad = {k: (given[k], v) for k, v in cfg.pop("recipe", {}).items() if given[k] != v}
@@ -1603,8 +1627,13 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
         print("BUILD", mix_dir, json.dumps(check_build_langs(langs, mix_dir).get("langs_without_rows", [])))
     # a warm start anchors L2-SP to its own init, not v10pt (the prior being trained away)
     i_run, _, i_step = init_from.partition("@")
-    anchor = f"{VOL}/exp/{i_run}/step{i_step}.pt" if anchor_init else f"{VOL}/exp/v10pt/step1500.pt"
-    print("L2SP ANCHOR", anchor)
+    if not anchor_init:
+        anchor = f"{VOL}/exp/v10pt/step1500.pt"
+    elif init_from == "ultra":  # stock: the decoder + joint tensors of the .nemo, NeMo names as in exp checkpoints
+        anchor = ultra_state()
+    else:
+        anchor = f"{VOL}/exp/{i_run}/step{i_step}.pt"
+    print("L2SP ANCHOR", anchor, "INIT", init_from, "SUB_BATCH", r3_sub_batch)
     share = mix_build.mix_share(VOL, mix)
     import shutil
 
@@ -1619,10 +1648,11 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
         print("SHARE total", share["share"], "english part", en["share"])
         assert 0.35 <= en["share"] <= 0.40, f"English number share {en['share']} outside 35-40%"
     ft_train.train(VOL, ultra_path(), run, mix=mix, max_steps=max_steps, lr=cfg["lr"], warmup=warmup, seed=seed,
-                   init_from=init_from, batch_duration=200, accumulate=2, spec_augment=False, kl_weight=10.0,
-                   kl_punct=30.0, kl_tok=1.0, save_every=save_every, on_save=vol.commit, stage_dir="/tmp/stage",
-                   r3=True, wf_weight=cfg["wf_weight"], en_weight=en_weight, l2sp_c=cfg["l2sp_c"],
-                   l2sp_anchor=anchor, dur_weight=dur_weight, **r4)
+                   init_from="" if init_from == "ultra" else init_from, batch_duration=200, accumulate=2,
+                   spec_augment=False, kl_weight=10.0, kl_punct=30.0, kl_tok=1.0, save_every=save_every,
+                   on_save=vol.commit, stage_dir="/tmp/stage", r3=True, wf_weight=cfg["wf_weight"],
+                   en_weight=en_weight, l2sp_c=cfg["l2sp_c"], l2sp_anchor=anchor, dur_weight=dur_weight,
+                   en_set=cfg["en_set"], r3_sub_batch=r3_sub_batch, **r4)
     vol.commit()
 
 

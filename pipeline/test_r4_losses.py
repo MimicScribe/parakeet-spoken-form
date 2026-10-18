@@ -432,3 +432,96 @@ def test_training_step_smoke_arms(tmp_path, capsys):
             assert m._r3_parts["cons"].item() > 0 and "pairs 2" in log
         else:
             assert m._r3_parts["cons"].item() == 0
+
+
+# ---------------------------------------------------------------- en_pen piece set (en_set "first") + its columns
+def test_en_first_pieces_kept_excluded_short(spm):
+    # FakeSPM: "▁" + the first 5 letters is the word-initial piece
+    nonen = [spm.encode("il a six ans")] * 20 + [spm.encode("nous avons sept chats")] * 19
+    words = ("nineteen", "six", "seven", "sept", "to", "twelve")
+    kept, rep = F.en_num_first_piece_ids(spm, spm.encode, nonen, words=words)
+    pieces = {spm.id_to_piece(i) for i in kept}
+    assert pieces == {"▁ninet", "▁seven", "▁sept", "▁twelv"}  # "▁sept": 19 word starts, under the bar of 20
+    assert rep["excluded"] == {"▁six": (20, ["six"])}  # 20 word starts in the non-English labels
+    assert rep["short"] == {"to": "▁to"}  # 2 letters after "▁"
+    assert rep["covered"] == 4 and rep["words"] == 6
+    # a non-initial occurrence does not count as a word start
+    assert F.word_start_counts(spm, [spm.encode("sixsix six")])[spm.encode("six")[0]] == 1
+
+
+def test_en_first_default_list_extends_whole_list():
+    assert set(F.EN_NUM_WORDS) < set(F.EN_NUM_WORDS_FIRST)
+    assert {"zero", "one", "six", "nine", "ten", "million", "point", "percent", "second"} <= set(F.EN_NUM_WORDS_FIRST)
+
+
+def test_en_pen_cols():
+    klu = torch.tensor([[True, False, False, True], [True, False, False, True], [True, True, True, True]])
+    nonen, nspan = torch.tensor([False, True, False]), torch.tensor([True, False, False])
+    assert F.en_pen_cols(klu, nonen, nspan, "whole") is None  # the default: every column, as before
+    cols = F.en_pen_cols(klu, nonen, nspan, "first")
+    assert cols.tolist() == [[False, True, True, False],  # nonen_span: number columns only (klu False)
+                             [True, True, True, True],  # nonen: every column
+                             [False, False, False, False]]  # other rows: none (and rows_sl excludes them)
+
+
+def en_part(texts_tags, en_set, span_prefix, monkeypatch=None):
+    m = FakeModel()
+    batch, ids = fake_batch(m, [t for t, _ in texts_tags])
+    tags = {tuple(i): tg for i, (_, tg) in zip(ids, texts_tags)}
+    F.add_r3_losses(m, tags, span_prefix={tuple(ids[0]): span_prefix(len(ids[0]))}, en_set=en_set)
+    out = m.training_step(batch, 0)
+    assert torch.isfinite(out["loss"])
+    return m._r3_parts["en"].item()
+
+
+def test_en_first_column_restriction(monkeypatch, capsys):
+    """Same piece set in both modes (the whole-word one), so only the columns differ: on a nonen_span row with no number
+    column "first" adds nothing; with every column a number column it equals "whole"."""
+    monkeypatch.setattr(F, "en_num_first_piece_ids",
+                        lambda spm, enc, labels: (F.en_num_piece_ids(spm), {"kept": {}, "excluded": {}, "short": {},
+                                                                            "covered": 0, "words": 0}))
+    rows = [("nous avons payé two twenty euros hier", "nonen_span")]
+    whole = en_part(rows, "whole", lambda n: 0)
+    assert whole > 0
+    assert en_part(rows, "first", lambda n: n + 1) == 0.0  # klu all True: no number column
+    assert en_part(rows, "first", lambda n: 0) == pytest.approx(whole, rel=1e-6)  # klu all False: every column
+    mid = en_part(rows, "first", lambda n: 3)
+    assert 0 < mid and mid != pytest.approx(whole)
+    assert "en_set first: kept" in capsys.readouterr().out
+
+
+def test_en_whole_default_unchanged(capsys):
+    """The default en_set reproduces the explicit "whole" run bit for bit (piece set and loss)."""
+    rows = [("nous avons payé two twenty euros hier", "nonen_span"), ("so in the year twenty nineteen we grew", "span"),
+            ("wir haben two Hunde", "nonen")]
+    m1, m2 = FakeModel(), FakeModel()
+    b1, ids = fake_batch(m1, [t for t, _ in rows])
+    b2, _ = fake_batch(m2, [t for t, _ in rows])
+    tags = {tuple(i): tg for i, (_, tg) in zip(ids, rows)}
+    F.add_r3_losses(m1, tags, span_prefix={tuple(ids[0]): 3})
+    F.add_r3_losses(m2, tags, span_prefix={tuple(ids[0]): 3}, en_set="whole")
+    l1, l2 = m1.training_step(b1, 0)["loss"], m2.training_step(b2, 0)["loss"]
+    assert torch.equal(l1, l2) and m1._r3_parts["en"].item() > 0
+    log = capsys.readouterr().out
+    assert "en_num pieces (whole) ['▁twenty', '▁thousand', '▁two']" in log and "en_set first" not in log
+
+
+def test_en_first_smoke_real_pieces(capsys):
+    """en_set "first" with the default word list on the fake tokenizer: runs, prints its report, penalises."""
+    rows = [("nous avons payé nineteen euros hier", "nonen_span"), ("wir haben twelve Hunde", "nonen")]
+    v = en_part(rows, "first", lambda n: 3)
+    log = capsys.readouterr().out
+    assert "▁ninet" in log and "▁twelv" in log and v > 0
+
+
+def test_sub_batch_same_loss():
+    rows = [("nous avons payé two twenty euros hier", "nonen_span"), ("so in the year twenty nineteen we grew", "span"),
+            ("wir haben two Hunde", "nonen")]
+    losses = []
+    for sb in (1, 2, 3):
+        m = FakeModel()
+        b, ids = fake_batch(m, [t for t, _ in rows])
+        F.add_r3_losses(m, {tuple(i): tg for i, (_, tg) in zip(ids, rows)}, span_prefix={tuple(ids[0]): 3},
+                        sub_batch=sb, en_set="first")
+        losses.append(m.training_step(b, 0)["loss"].item())
+    assert losses[0] == pytest.approx(losses[1], rel=1e-5) == pytest.approx(losses[2], rel=1e-5)
