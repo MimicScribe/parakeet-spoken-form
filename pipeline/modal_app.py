@@ -1038,7 +1038,8 @@ mix_image = (
     .apt_install("ffmpeg")
     .uv_pip_install("numpy", "scipy", "soundfile", "librosa")
     .add_local_python_source("common", "mix_build", "census_common", "ml_cands", "ml_balance", "ml_p3_core",
-                             "score_retrain", "labeller", "readings")  # score_retrain: en_balance's number reader
+                             "score_retrain", "labeller", "readings",  # score_retrain: en_balance's number reader
+                             "compound_split")  # build4 split_langs
     .add_local_file("ml_grammar_table.json", "/root/ml_grammar_table.json")  # build4's number-word lexicon
 )
 
@@ -1241,13 +1242,16 @@ def check_build_langs(langs, mix_dir: str = "mix4") -> dict:
 def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(WAVE1), allow_no_judge: bool = False,
                dedupe: bool = False, seam_h: float = 0.0, plain_share: float = 0.0, balance: bool = False,
                en_bal: bool = False, repeat: int = 1, win_repeat: int = 0, anchor18: int = 0, en_plain_h: float = 0.0,
-               en_win_repeat: int = 1, mix_dir: str = "mix4", seam_long_h: float = 0.0, seam_long_repeat: int = 0, en_free_repeat: int = 1, final: bool = False):
+               en_win_repeat: int = 1, mix_dir: str = "mix4", seam_long_h: float = 0.0, seam_long_repeat: int = 0, en_free_repeat: int = 1, final: bool = False,
+               split_compounds: str = ""):
     """Greek ς restore (idempotent) + mix_build.build4 + the number share of the v4 mix (total and English-only).
     Run 2 (2026-10-17): balance = build4 template / session caps; en_bal = mix_build.en_balance on the English real
     parts (writes their _bcap copies: caps, then the YouTube top-up trim into the 35-40% band); repeat / win_repeat /
     anchor18 = the arm's listing, so the share report is the share retrain3 will assert. Run-2 build:
       modal run modal_app.py::build_mix4 --langs <RUN2_LANGS> --dedupe --seam-h 5 --plain-share 0.6 --balance --en-bal \
-        --win-repeat 2 --anchor18 2"""
+        --win-repeat 2 --anchor18 2
+    split_compounds (2026-10-18): "de,nl,it" = those languages' parts spell compound number words as separate
+    morphemes (mix_build.build4 split_langs; compound_split)."""
     import json
 
     import mix_build
@@ -1257,7 +1261,8 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
     out = {"unk": mix_build.restore_unk_nonen(VOL),
            "build4": mix_build.build4(VOL, ls, rows_h=rows_h, win_h=win_h, allow_no_judge=allow_no_judge,
                                       dedupe=dedupe, seam_h=seam_h, plain_share=plain_share, balance=balance,
-                                      mix_dir=mix_dir, seam_long_h=seam_long_h)}
+                                      mix_dir=mix_dir, seam_long_h=seam_long_h,
+                                      split_langs=tuple(l for l in split_compounds.split(",") if l))}
     dry = mix_dir != "mix4" and not final  # final: a candidate mix in its own dir, English copies under it
     kw = dict(repeat=repeat, anchor18=anchor18, win_repeat=win_repeat, en_plain_h=en_plain_h, en_win_repeat=en_win_repeat,
               seam_long_repeat=seam_long_repeat, mix_dir=mix_dir, en_free_repeat=en_free_repeat)

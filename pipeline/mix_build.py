@@ -1962,7 +1962,8 @@ def build_d2_phonefmt(vol: str, langs=None, mix_dir: str = "mix4", accept=None) 
 def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed: int = 41, allow_no_judge: bool = False,
            dedupe: bool = False, seam_h: float = 0.0, plain_share: float = 0.0,
            plain_glob: str = "ml/plain/{lang}/plain*.jsonl", protected_globs: tuple = (), balance: bool = False,
-           seam_files: tuple = SEAM_FILES, mix_dir: str = "mix4", seam_long_h: float = 0.0) -> dict:
+           seam_files: tuple = SEAM_FILES, mix_dir: str = "mix4", seam_long_h: float = 0.0,
+           split_langs: tuple = ()) -> dict:
     """mix4/ manifests for the wave-1 run (all CPU, idempotent):
     - mix4/d2.jsonl: mix3/d2 (Greek restore applied) WITHOUT wave-1 languages: their digit rows were relabelled by P3
       (origin d2) and would otherwise teach digits through the stock token KL;
@@ -1994,11 +1995,28 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
     built) leaves the mix; a language in `langs` with
     no labelled rows keeps its mix4/d2 digit rows (it gets no spoken-form rows to replace them).
     - plain_share > 0: mix4/plain_<lang>.jsonl, number-free real rows (plain_glob, stock labels) up to number-free /
-      (number-free + number) = plain_share per language, look-alike controls first (ml_balance.pick_plain)."""
+      (number-free + number) = plain_share per language, look-alike controls first (ml_balance.pick_plain).
+    - split_langs (2026-10-18): for these languages (de / nl / it) every written part of the language (p3, tts, win,
+      seam, seam_long, plain, pairs, heldout, tts_dev, tts_dev_other) spells compound number words as separate
+      morphemes (compound_split: "zweihundertsiebzig" -> "zwei hundert siebzig"). Applied at WRITE time only: every
+      selection, cap, dedupe and pair choice above runs on the unsplit text, so the rows are the ones the same build
+      without the flag writes; the anchor parts (d2, d2p, fleurs_train_multi) keep their stock labels."""
+    import compound_split as CS
     import ml_balance as B
 
     stats = {"langs": {}}
     os.makedirs(f"{vol}/{mix_dir}", exist_ok=True)
+    unsplit_targets = set()  # the unsplit texts of split target rows (the anchor-collision check below)
+
+    def S(rows_, lang_, part, pairs=False):
+        """rows_ as written: split (a copy) when lang_ is a split language, else unchanged."""
+        if lang_ not in split_langs:
+            return rows_
+        out_, st_ = CS.split_rows(rows_, lang_, pairs=pairs)
+        stats.setdefault("split_compounds", {}).setdefault(lang_, {})[part] = st_
+        if part in ("p3", "win", "tts", "seam", "seam_long"):
+            unsplit_targets.update(x["text"] for x in rows_)
+        return out_
     # a language's D2 digit rows leave only when it has labelled spoken-form rows (rows*.jsonl) to replace them
     no_rows = tuple(l for l in langs if not glob.glob(f"{vol}/ml/p3v2/{l}/rows*.jsonl"))
     stats["langs_without_rows"] = list(no_rows)
@@ -2183,8 +2201,9 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         # only, judge rejects out; a training voice's dev rows go to tts_dev_other (never trained, never that set)
         dev = [x for x in tts if x.get("split") == "dev" and x["id"] not in rej]
         dev_ho = [x for x in dev if is_heldout_voice(lang, x.get("voice"))]
-        _write(f"{vol}/{mix_dir}/tts_dev_{lang}.jsonl", dev_ho)
-        _write(f"{vol}/{mix_dir}/tts_dev_other_{lang}.jsonl", [x for x in dev if not is_heldout_voice(lang, x.get("voice"))])
+        _write(f"{vol}/{mix_dir}/tts_dev_{lang}.jsonl", S(dev_ho, lang, "tts_dev"))
+        _write(f"{vol}/{mix_dir}/tts_dev_other_{lang}.jsonl",
+               S([x for x in dev if not is_heldout_voice(lang, x.get("voice"))], lang, "tts_dev_other"))
         stats.setdefault("tts_dev", {})[lang] = {"heldout_voice": len(dev_ho), "other_voices": len(dev) - len(dev_ho),
                                                  "rejected": sum(1 for x in tts if x.get("split") == "dev" and x["id"] in rej)}
         tts = [x for x in tts if x.get("split", "train") == "train" and x["id"] not in rej]  # judged like real rows
@@ -2270,7 +2289,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         for x in took:
             x.pop("_targeted", None)
             x.pop("_set", None)
-        _write(f"{vol}/{mix_dir}/tts_{lang}.jsonl", took)
+        _write(f"{vol}/{mix_dir}/tts_{lang}.jsonl", S(took, lang, "tts"))
         seam = []
         for k, on in (("seam", seam_h > 0), ("plain", plain_share > 0)):  # a part this build does not make must not
             if not on and os.path.exists(f"{vol}/{mix_dir}/{k}_{lang}.jsonl"):  # survive from an earlier build (the v4 mix
@@ -2288,7 +2307,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
                 seam, srep = B.dedupe(seam, protect[lang], within=False, part_of=lambda x: "seam")
                 stats["dedupe"][lang]["seam"] = srep["counts"]
             seam = B.take_seam(seam, seam_h, rng)
-            _write(f"{vol}/{mix_dir}/seam_{lang}.jsonl", seam)
+            _write(f"{vol}/{mix_dir}/seam_{lang}.jsonl", S(seam, lang, "seam"))
             NUMBER_PART[f"mix4/seam_{lang}.jsonl"] = round(_h([x for x in seam if any(x["num_tokens"])]) / max(_h(seam), 1e-9), 3)
             pc = {}
             for x in seam:
@@ -2330,7 +2349,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
                 "real_taken_h": round(_h(seam_long) - _h(sl_syn), 3)}
             if n_sl0 and not sl_syn:
                 print(f"WARNING {lang}: synthetic long seam pairs on disk but none kept: {stats['seam_long_synthetic'][lang]}")
-            _write(f"{vol}/{mix_dir}/seam_long_{lang}.jsonl", seam_long)
+            _write(f"{vol}/{mix_dir}/seam_long_{lang}.jsonl", S(seam_long, lang, "seam_long"))
         if plain_share > 0:
             pool = _rows(f"{vol}/{plain_glob.format(lang=lang)}")
             units = {B.held_unit(i) for i in held} - {None}
@@ -2342,16 +2361,17 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
             number_h = _h(tr) + _h(win) + _h(took) + _h(seam) + _h(seam_long)
             need = B.plain_target_h(number_h, plain_share, anchor_h.get(lang, 0.0))
             plain, pst = B.pick_plain(pool, lang, need, rng)
-            _write(f"{vol}/{mix_dir}/plain_{lang}.jsonl", plain)
+            _write(f"{vol}/{mix_dir}/plain_{lang}.jsonl", S(plain, lang, "plain"))
             free_h = anchor_h.get(lang, 0.0) + _h(plain)
             plain_st = {"plain_rows": len(plain), "plain_h": round(_h(plain), 2), "plain_pool_rows": len(pool),
                         "plain_pool_h": round(_h(pool), 2), "number_h": round(number_h, 2),
                         "anchor_free_h": round(anchor_h.get(lang, 0.0), 2), "plain_need_h": round(need, 2),
                         "number_free_share": round(free_h / max(free_h + number_h, 1e-9), 3), "plain_pick": pst}
-        _write(f"{vol}/{mix_dir}/pairs_{lang}.jsonl", consistency_pairs(tr + took, win, lang, rng))
-        _write(f"{vol}/{mix_dir}/p3_{lang}.jsonl", tr)
-        _write(f"{vol}/{mix_dir}/win_{lang}.jsonl", win)
-        _write(f"{vol}/{mix_dir}/heldout_{lang}.jsonl", ho)
+        _write(f"{vol}/{mix_dir}/pairs_{lang}.jsonl",
+               S(consistency_pairs(tr + took, win, lang, rng), lang, "pairs", pairs=True))
+        _write(f"{vol}/{mix_dir}/p3_{lang}.jsonl", S(tr, lang, "p3"))
+        _write(f"{vol}/{mix_dir}/win_{lang}.jsonl", S(win, lang, "win"))
+        _write(f"{vol}/{mix_dir}/heldout_{lang}.jsonl", S(ho, lang, "heldout"))
         stats.setdefault("cap_out_dropped", {})[lang] = cap_drop
         # the data gate's checks that the build's caps decide, on what this build wrote (report; data_gate is the gate)
         chk = post_build_check(tr, took, lang, before)
@@ -2398,7 +2418,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
     # stock-anchored part (ft_train asserts it); drop such rows from the anchor parts instead of crashing at launch
     targets = {x["text"] for lang in langs for k in ("p3", "win", "tts") + (("seam",) if seam_h > 0 else ())
                + (("seam_long",) if seam_long_h > 0 else ())
-               for x in _rows(f"{vol}/{mix_dir}/{k}_{lang}.jsonl")}
+               for x in _rows(f"{vol}/{mix_dir}/{k}_{lang}.jsonl")} | unsplit_targets  # + the same rows unsplit
     for part in ("d2p.jsonl", "fleurs_train_multi.jsonl", "d2.jsonl") + tuple(f"plain_{l}.jsonl" for l in langs if plain_share > 0):
         pth = f"{vol}/{mix_dir}/{part}"
         if os.path.exists(pth):
