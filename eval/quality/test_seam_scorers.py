@@ -29,7 +29,7 @@ class OffsetScore(unittest.TestCase):
         rows = [case("en_s1", {"N": "5"})] * 3 + [case("en_s2", {"N": "9"})] * 3
         r = run_offset(rows, ["5", "5", "7", "1", "2", "3"], "--offsets", "3")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("a seam=1 always=3 of 6 slot readings", r.stdout)
+        self.assertIn("a total=4 seam=1 always=3 of 6 slot readings", r.stdout)
 
     def test_missing_parse_is_an_error(self):
         # red-on-base: a row without its "<k>:long" parse counted as a wrong reading
@@ -50,8 +50,73 @@ class OffsetScore(unittest.TestCase):
         rows = [case("en_s1", {"N": "5"})] * 5 + [case("et_s1", {"N": "9"}, "et")] * 5
         r = run_offset(rows, ["5"] * 5 + ["1"] * 5)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("a seam=0 always=5 of 10 slot readings", r.stdout)
-        self.assertIn("et  seam", r.stdout)
+        self.assertIn("a total=5 seam=0 always=5 of 10 slot readings", r.stdout)
+        self.assertIn("et  total", r.stdout)
+
+
+def write_arm(d, name, rows, got):
+    (d / f"cases_{name}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    (d / f"parse_out_{name}.jsonl").write_text("".join(json.dumps({"key": f"{k}:long", "values": [g]}) + "\n" for k, g in enumerate(got)))
+
+
+def offs(sid, values, lang="en", fname="f", **kw):
+    return [dict(case(sid, values, lang), file=f"{fname}_o{o}", **kw) for o in ("0.0", "1.9", "3.8", "5.7", "7.6")]
+
+
+class Paired(unittest.TestCase):
+    def test_total_wrong_headline_and_transitions(self):
+        # red-on-base: seam and always were reported apart, so a run turning 1-of-5 breaks into 5-of-5 failures read
+        # as a seam IMPROVEMENT; total wrong (seam + always), paired by slot, shows it 2 -> 5 worse
+        import offset_score as O
+        rows = offs("en_s1", {"N": "5"}) + offs("en_s2", {"N": "9"})
+        base = ["5", "5", "5", "5", "1"] + ["9", "9", "9", "9", "1"]   # 1 wrong of 5 in each slot: seam 2
+        run = ["1"] * 5 + ["9"] * 5                                      # s1 wrong everywhere, s2 right
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            write_arm(d, "b", rows, base); write_arm(d, "r", rows, run)
+            tb = O.slot_table(*O.load_arm(str(d), "b")); tr = O.slot_table(*O.load_arm(str(d), "r"))
+            p = O.paired(tb, tr)
+            self.assertEqual((p["seam_base"], p["seam_run"]), (2, 0))
+            self.assertEqual((p["total_base"], p["total_run"], p["diff"]), (2, 5, 3))
+            self.assertEqual(p["transitions"], {"4->0": 1, "4->5": 1})
+            self.assertEqual((p["worse"], p["better"]), (1, 1))
+            self.assertEqual(p["seam_both_base"], 1)  # only s2 is right at least once in both arms
+            out = subprocess.run([sys.executable, str(HERE / "offset_score.py"), str(d), "b", "r"], capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn("TOTAL WRONG 2 -> 5", out.stdout)
+
+    def test_bootstrap_and_sign(self):
+        import offset_score as O
+        self.assertAlmostEqual(O.sign_p(10, 0), 2 / 1024)
+        self.assertEqual(O.sign_p(0, 0), 1.0)
+        lo, hi = O.boot_ci({f"f{k}": 1 for k in range(20)})
+        self.assertEqual((lo, hi), (20, 20))
+        lo, hi = O.boot_ci({"f0": 12, **{f"f{k}": 0 for k in range(1, 12)}})  # one file holds every move
+        self.assertEqual(lo, 0)
+
+    def test_boundary_guard(self):
+        # red-on-base: no guard. edge_num [start, end] flags the first / last slot of that sentence reading
+        import offset_score as O
+        rows = offs("en_s1", {"A": "1", "B": "2"}, edge_num=[False, False])
+        rows[2]["edge_num"] = [False, True]  # B's number word sat at the sentence end cut at offset 3.8
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            write_arm(d, "b", rows, ["1"] * 5)
+            t = O.slot_table(*O.load_arm(str(d), "b"))
+            self.assertEqual(O.guarded_keys([t]), {("en_s1", "A")})
+
+    def test_near_interior(self):
+        import offset_score as O
+        rows = offs("en_s1", {"N": "5"}, num_t=[10.0], file_gaps=[30.0])
+        rows[0]["file_gaps"] = [10.5]  # a merge point 0.5 s from the number at offset 0.0 only
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            write_arm(d, "b", rows, ["1", "5", "5", "5", "5"])
+            t = O.slot_table(*O.load_arm(str(d), "b"))
+            ni = O.near_interior([t])[0]
+            self.assertEqual(ni["near"], [1, 1])
+            self.assertEqual(ni["interior"], [0, 4])
+            self.assertEqual(ni["within_slot_near"], [1, 1])
 
 
 class SlotOk(unittest.TestCase):
@@ -82,6 +147,39 @@ class SlotOk(unittest.TestCase):
     def test_plain(self):
         self.assertTrue(self.ok("N", "2.5", ["2.5", "x"]))
         self.assertFalse(self.ok("N", "25", ["2.5"]))
+
+    def test_positional(self):
+        # red-on-base: PH was a substring of every parsed digit joined, T / P parts anywhere in the list, and one
+        # parsed number could serve two slots
+        import score_values as S
+        self.assertFalse(self.ok("PH", "5551234", ["555", "12345"]))   # digits must be EQUAL, not contained
+        self.assertFalse(self.ok("PH", "5551234", ["15551234"]))
+        self.assertTrue(self.ok("PH", "5551234", ["7", "555", "1234"]))  # a run of consecutive parsed numbers
+        self.assertFalse(self.ok("PH", "5551234", ["555", "7", "1234"]))
+        self.assertFalse(self.ok("T", "9:05", ["9", "3", "5"]))          # hour and minute next to each other
+        self.assertFalse(self.ok("P", "12.50", ["12", "7", "50"]))       # whole and cents next to each other
+        self.assertEqual(S.match_reading({"N": "5", "N2": "5"}, ["5"]), {"N": True, "N2": False})
+        self.assertEqual(S.match_reading({"N": "5", "N2": "5"}, ["5", "7", "5"]), {"N": True, "N2": True})
+        self.assertEqual(S.match_reading({"P": "12.50", "N": "50"}, ["12", "50"]), {"P": True, "N": False})
+        self.assertEqual(S.match_reading({"A": "3", "B": "2"}, ["2", "3"]), {"A": True, "B": False})  # in order
+
+    def test_lenient(self):
+        # red-on-base: lenient took any n x 10^k for L, any prefix / suffix for D, the hour alone for any T and
+        # concatenated values that stood apart in the text
+        import score_values as S
+        R = S.Reading
+        mil = R(["3.2"], [[0, 2]], ["three", "point", "two", "million"])
+        self.assertTrue(S.slot_ok("L", 3200000, mil, lenient=True))
+        self.assertFalse(S.slot_ok("L", 3200000, mil))  # strict: never
+        self.assertFalse(S.slot_ok("L", 3200000, R(["3.2"], [[0, 2]], ["three", "point", "two", "messages"]), lenient=True))
+        pair = R(["3", "2"], [[0, 0], [1, 1]], ["three", "two", "million"])
+        self.assertTrue(S.slot_ok("L", 3200000, pair, lenient=True))  # mantissa pair next to each other + scale word
+        self.assertFalse(S.slot_ok("D", 1.7, R(["1.71"], [[0, 2]], ["a", "b", "c"]), lenient=True))
+        self.assertFalse(S.slot_ok("T", "9:30", R(["9"], [[0, 0]], ["nine"]), lenient=True))
+        self.assertTrue(S.slot_ok("T", "9:00", R(["9"], [[0, 0]], ["nine"]), lenient=True))
+        self.assertTrue(S.slot_ok("Y", 1997, R(["19", "97"], [[0, 0], [1, 1]], ["nineteen", "ninety", "seven"]), lenient=True))
+        self.assertFalse(S.slot_ok("Y", 1997, R(["19", "97"], [[0, 0], [2, 2]], ["nineteen", "and", "ninety"]), lenient=True))
+        self.assertFalse(S.slot_ok("Y", 1997, ["19", "97"], lenient=True))  # no spans: never concatenated
 
 
 if __name__ == "__main__":
