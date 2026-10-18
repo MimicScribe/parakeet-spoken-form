@@ -135,6 +135,11 @@ def build_lang(lang: str, tag: str, mix_dir: str = "mix4final8", plain_h: float 
     def clean(rows, kind):
         """The shared exclusions; returns (kept rows with caption, counts)."""
         c = {"in": len(rows)}
+        # FLEURS ids repeat across speakers and the harvest wrote one wav per id (the last recording survives):
+        # keep the last row of an id, whose label was decoded from the surviving audio
+        last = {r["id"]: i for i, r in enumerate(rows)}
+        rows = [r for i, r in enumerate(rows) if last[r["id"]] == i]
+        c["one_per_id"] = len(rows)
         rows = [r for r in rows if r["id"] not in mix_ids and r["text"] not in mix_text]
         c["not_in_mix"] = len(rows)
         rows = [r for r in rows if r["id"] not in held and unit_of(r["id"]) not in units]
