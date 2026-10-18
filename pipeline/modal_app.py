@@ -1280,7 +1280,9 @@ def mix_add_tts(base_dir: str, new_dir: str, add: str, langs: str, aug_frac: flo
     assert os.path.isdir(src) and not os.path.exists(dst), (src, dst)
     shutil.copytree(src, dst, ignore=shutil.ignore_patterns("tts_aug"))
     deg, rng = mix_build.Degrader(f"{VOL}/slr28/RIRS_NOISES", seed), random.Random(seed)
-    split, rep = {l for l in split_compounds.split(",") if l}, {}
+    # "it+" / "it-": Italian split with the elided forms split / kept whole (build4's split_langs modes)
+    it_mode = {"it+": True, "it-": False}.get(next((l for l in split_compounds.split(",") if l in ("it+", "it-")), ""))
+    split, rep = {("it" if l in ("it+", "it-") else l) for l in split_compounds.split(",") if l}, {}
     for l in _langs(langs):
         p = f"{VOL}/{add.format(lang=l)}"
         if not os.path.exists(p):
@@ -1302,7 +1304,7 @@ def mix_add_tts(base_dir: str, new_dir: str, add: str, langs: str, aug_frac: flo
             out.append(x)
         st = None
         if l in split:
-            out, st = CS.split_rows(out, l)
+            out, st = CS.split_rows(out, l, it_elided=it_mode if l == "it" else None)
         with open(f"{dst}/tts_{l}.jsonl", "a") as f:
             for x in out:
                 f.write(json.dumps(x, ensure_ascii=False) + "\n")
