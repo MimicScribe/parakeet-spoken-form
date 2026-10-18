@@ -60,6 +60,30 @@ class Replacing(unittest.TestCase):
         self.assertTrue(CS.IT_SPLIT_ELIDED)  # default: always split
 
 
+class EdgeFix(unittest.TestCase):
+    def test_fixed_before_selection(self):
+        # red-on-base: the fix was applied at write time, after the caps and fills had counted the unfixed spans
+        import edge_fix as EF
+
+        vol = _fixture(n_win=0)
+        rows = rj(f"{vol}/ml/p3v2/de/rows.jsonl")
+        r = rows[2] = dict(rows[2], text="Es waren fünfzig Prozent heute da.", num_chars=[[9, 24]])
+        wj(vol, "ml/p3v2/de/rows.jsonl", rows)
+        rec = EF.plan_row(r, "es waren fünfzig", "fünfzig prozent heute", 5.0)
+        self.assertEqual(rec["sides"]["end"], {"act": "trim", "k": 1})
+        wj(vol, "ml/ef/de/fixes_0.jsonl", [rec])
+        seen = []
+        sel = MB.select_synthetic
+        self.addCleanup(setattr, MB, "select_synthetic", sel)
+        MB.select_synthetic = lambda tts, real, *a, **kw: seen.append([x["text"] for x in real]) or sel(tts, real, *a, **kw)
+        st = MB.build4(vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True, edge_fix_dir="ml/ef")
+        p3 = {x["id"]: x for x in rj(f"{vol}/mix4/p3_de.jsonl")}
+        self.assertEqual(p3[r["id"]]["text"], "Es waren fünfzig Prozent heute")
+        self.assertEqual(p3[r["id"]]["num_chars"], [[9, 24]])
+        self.assertIn("Es waren fünfzig Prozent heute", seen[0])  # the selection saw the fixed label
+        self.assertEqual((st["edge_fix"]["de"]["fixed"], st["edge_fix"]["de"]["trim"]), (1, 1))
+
+
 class Inputs(unittest.TestCase):
     """extra_passes (judged, read with the language's passes), relabel_rows (source rows replaced by id), relabel_parts_dir
     (written windows replaced by id) and relabel_tts (letter+digit policy on the chosen synthetic rows)."""

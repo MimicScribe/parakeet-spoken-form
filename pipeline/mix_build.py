@@ -2042,8 +2042,10 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
       <= TTS_SHARE of that target, the year value spread kept (win15.select_for_build).
     - edge_fix_dir (2026-10-18): the real rows' clipped / missing edge words (edge_fix.py records,
       <edge_fix_dir>/<lang>/fixes_*.jsonl): the p3 part is written with those rows' labels trimmed or their edge word
-      masked (label + audio cut; edge_fix.apply_fixes, sha-gated, never a row dropped). Applied at WRITE time like the
-      split: every selection, cap, window parent and pair runs on the unfixed labels; consistency pairs skip fixed rows.
+      masked (label + audio cut; edge_fix.apply_fixes, sha-gated, never a row dropped). Applied to the source rows
+      before any selection, so the caps, fills and share checks count the fixed labels (a reading masked at an edge
+      is a span the fill can replace); win15 parents are checked against the unfixed labels they were cut from;
+      consistency pairs skip fixed rows.
     - extra_passes (2026-10-18): more labelling passes outside ml/p3v2 ("ml/l1conv/{lang}/rows_l1conv.jsonl"), read
       with the language's passes (_one_per_id) and judged like them (judged_<name>.json beside the file).
     - relabel_rows / relabel_parts_dir / relabel_tts (2026-10-18, letter+digit policy, alnum_relabel.py): relabel_rows
@@ -2163,6 +2165,16 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
             rl = {x["id"]: x for x in _rows(f"{vol}/{relabel_rows.format(lang=lang)}")}
             stats.setdefault("relabel_rows", {})[lang] = {"file": len(rl), "replaced": sum(x["id"] in rl for x in rows)}
             rows = [rl.get(x["id"], x) for x in rows]
+        unfixed = {}  # id -> the row before its edge fix (win15 parents were cut from it)
+        if edge_fix_dir:  # before any selection: the caps, fills and share checks count the fixed labels
+            import edge_fix as EF
+
+            fx = {}
+            for p_ in sorted(glob.glob(f"{vol}/{edge_fix_dir}/{lang}/fixes_*.jsonl")):
+                fx.update(EF.load_fixes(p_))
+            by_id0 = {x["id"]: x for x in rows}
+            rows, stats.setdefault("edge_fix", {})[lang] = EF.apply_fixes(rows, fx)
+            unfixed = {x["id"]: by_id0[x["id"]] for x in rows if "edge_fix" in x}
         stats.setdefault("dup_ids", {})[lang] = dup
         sfx = lambda i: (re.search(r"_(\d{8}-\d{2}:\d{2}:\d{2}_\d+)$", str(i)) or [None, None])[1]  # noqa: E731
         held_sfx = {sfx(i) for i in held} - {None}
@@ -2466,7 +2478,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
             if dedupe:
                 w15, _ = B.dedupe(w15, protect[lang], within=False, part_of=lambda x: "win15")
             w15_h = win15_share * (_h(tr) + _h(took) + _h(win) + _h(seam) + _h(seam_long))
-            win15, w15st = W15.select_for_build(w15, {x["id"]: x for x in tr + took},
+            win15, w15st = W15.select_for_build(w15, {x["id"]: unfixed.get(x["id"], x) for x in tr + took},
                                                 held | rej | held_dup | ext_all | gram_rej, w15_h,
                                                 random.Random(f"{seed}-win15-{lang}"), lang=lang)
             for x in win15:
@@ -2490,14 +2502,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
                         "plain_pool_h": round(_h(pool), 2), "number_h": round(number_h, 2),
                         "anchor_free_h": round(anchor_h.get(lang, 0.0), 2), "plain_need_h": round(need, 2),
                         "number_free_share": round(free_h / max(free_h + number_h, 1e-9), 3), "plain_pick": pst}
-        tr_w = tr
-        if edge_fix_dir:
-            import edge_fix as EF
-
-            fx = {}
-            for p_ in sorted(glob.glob(f"{vol}/{edge_fix_dir}/{lang}/fixes_*.jsonl")):
-                fx.update(EF.load_fixes(p_))
-            tr_w, stats.setdefault("edge_fix", {})[lang] = EF.apply_fixes(tr, fx)
+        tr_w = tr  # (edge fixes applied to the source rows above)
         fixed_ids = {x["id"] for x in tr_w if "edge_fix" in x}
         _write(f"{vol}/{mix_dir}/pairs_{lang}.jsonl",
                S(consistency_pairs([x for x in tr if x["id"] not in fixed_ids] + took, win, lang, rng), lang, "pairs",
@@ -2509,8 +2514,6 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         # the data gate's checks that the build's caps decide, on what this build wrote (report; data_gate is the gate)
         chk = post_build_check(tr, took, lang, before)
         stats.setdefault("post_build_check", {})[lang] = chk
-        if edge_fix_dir:  # report only: the caps decided on the unfixed labels; data_gate judges what was written
-            stats.setdefault("post_build_check_edge_fixed", {})[lang] = post_build_check(tr_w, took, lang, before)
         # the build fails where the gate would, except the accepted waivers: rows over the template cap / videos over
         # the group cap (rare-class and thin-value rows balance_caps keeps; no caps at all without `balance`)
         fatal = [f for f in chk["fail"] if not f.startswith(POST_CHECK_WAIVED)]
