@@ -7,10 +7,21 @@ Strict rules (the headline):
   PH   a run of consecutive parsed numbers whose digits, joined, EQUAL the phone number;
   P    one number equal to the price, or whole and cents as two numbers next to each other in the parsed list (the cents
        as 25 or as 0.25: "78 euro en 25 cent" reads 78 and 0.25);
-  T    h.mm or hmm as one number, h and m next to each other in the parsed list, or the hour alone when m = 0; a parsed
+  T    h.mm or hmm as one number, h and m next to each other in the parsed list (h, 0, m for one-digit minutes read with a
+       zero word: "eleven zero five"), or the hour alone when m = 0; a parsed
        hour whose own words end in minutes the parser dropped ("negentien uur vijf" parsed as 19) counts when those
        words read as m;
+  A sum  (every slot but PH / P / T) 2-4 numbers next to each other in the parsed list, each pair split by one joining
+       word ("si", "y", "i", "и" ...), each smaller than the place of the one before, adding up to the value: the
+       no-joiner reading splits "cincizeci si cinci" into 50, 5 (so a range "55 si 76" is right as two slots, never
+       one number 131);
   else one number equal to the value.
+Readings: a slot is right when ANY reading of the same text has it right: the number grammar's greedy parse, its
+no-joiner parse, and the public reader (number_outcomes.extract_numbers on the text the parse was made from, the
+parse_in row of the same key; fr / it / es / pt noon and midnight words read as 12 / 0). The reader reading fixes
+grammar-parser artefacts identically for every arm: grouped phone digits summed into one number, fi / da / el
+decimal-word and "and" forms parsed as fractions, hu "ora" / nl "uur" minutes dropped, case-inflected counts and
+ordinal years. A missing reader is an error, never a silent no-credit.
 Lenient (a sensitivity row only: parser-limit forgiveness, never model errors; needs the parse's word spans):
   L    mantissa x 10^k when the scale word for 10^k follows the mantissa in the text; the mantissa is one number or a
        whole / fraction pair next to each other in the text ("three point two million" parsed 3.2, or 3 and 2);
@@ -21,6 +32,7 @@ Lenient (a sensitivity row only: parser-limit forgiveness, never model errors; n
 import collections
 import json
 import math
+import os
 import re
 import sys
 
@@ -84,6 +96,74 @@ def _digits(s):
 
 
 CLOCK_WORDS = {"uur": "nl"}  # hour word -> language of the minutes that follow it inside the parser's span
+_N = None
+
+
+def reader():
+    """The public number reader (number_outcomes.py next to this file), however this file was loaded (by path, from
+    another directory, as a copy). An import failure raises: no extra credit must never be silent."""
+    global _N
+    if _N is None:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import number_outcomes as N
+        _N = N
+    return _N
+
+
+# noon / midnight words of a clock time ("midi quinze" = 12:15), read as the hour number for the reader reading only
+NOON = {"fr": {"midi": "douze", "minuit": "zéro"}, "it": {"mezzogiorno": "dodici", "mezzanotte": "zero"},
+        "es": {"mediodía": "doce", "medianoche": "cero"}, "pt": {"meio-dia": "doze", "meia-noite": "zero"}}
+
+
+def reader_reading(text, lang):
+    """the public reader's numbers of a text as a Reading (no spans: the lenient rules never apply to it)"""
+    t = text or ""
+    for w, rep in NOON.get(lang, {}).items():
+        t = re.sub(rf"(?<![\w-]){re.escape(w)}(?![\w-])", rep, t, flags=re.IGNORECASE)
+    vals = []
+    for n in reader().extract_numbers(t, lang, keep_weak=True):
+        if n.vals:
+            v = min(n.vals)
+            vals.append(str(int(v)) if v == int(v) else str(v))
+    return Reading(vals)
+
+
+# joining words that stand between the parts of ONE number in some language ("cincizeci si cinci", "treinta y nueve",
+# "двадесет и пет"); the no-joiner reading splits there (same list as the grammar parse dump)
+JOINERS = {"and", "und", "et", "y", "e", "i", "en", "och", "og", "si", "și", "a", "és", "ja", "и", "і", "й", "та",
+           "ir", "in", "και", "ve"}
+
+
+def _place(x):
+    """10^k for the lowest non-zero digit place of a whole number (50 -> 10, 1000 -> 1000, 55 -> 1)"""
+    p = 1
+    while x and x % (p * 10) == 0:
+        p *= 10
+    return p
+
+
+def _joined_sum(r, i, fv):
+    """indices i..j (2-4 numbers) whose sum is fv, each pair split by exactly one joining word in the text and each
+    part below the place of the running sum ("50 si 5" = 55; "55 si 76" never sums), else None"""
+    if r.spans is None:
+        return None
+    n = r.nums
+    if n[i] is None or n[i] != int(n[i]) or n[i] <= 0:
+        return None
+    tot = int(n[i])
+    for j in range(i + 1, min(len(n), i + 4)):
+        x = n[j]
+        a, b = r.spans[j - 1][1], r.spans[j][0]
+        if x is None or x != int(x) or x <= 0 or b != a + 2 or r.words[a + 1].lower() not in JOINERS:
+            return None
+        if int(x) >= _place(tot):
+            return None
+        tot += int(x)
+        if abs(tot - fv) < 1e-6:
+            return list(range(i, j + 1))
+    return None
 
 
 def _clock_tail(r, i):
@@ -95,11 +175,7 @@ def _clock_tail(r, i):
     ws = [w.lower() for w in r.words[a:b + 1]]
     for k, w in enumerate(ws):
         if w in CLOCK_WORDS and 0 < k < len(ws) - 1:
-            try:
-                import number_outcomes as N
-                ns = N.extract_numbers(" ".join(ws[k + 1:]), CLOCK_WORDS[w], keep_weak=False)
-            except Exception:  # noqa: BLE001  (reader not importable: no extra credit)
-                return None
+            ns = reader().extract_numbers(" ".join(ws[k + 1:]), CLOCK_WORDS[w], keep_weak=False)
             if len(ns) == 1 and len(ns[0].vals) == 1:
                 return int(min(ns[0].vals)) if min(ns[0].vals) == int(min(ns[0].vals)) else None
     return None
@@ -132,12 +208,18 @@ def _strict(b, v, r, i):
         h, m = (int(x) for x in str(v).split(':'))
         if m and nxt is not None and _eq(n[i], h) and _eq(n[nxt], m):
             return [i, nxt]
+        # a zero word before one-digit minutes ("eleven zero five", "atten nul fem", "osem nič pet") = h, 0, m
+        if 0 < m < 10 and i + 2 < len(n) and _eq(n[i], h) and _eq(n[i + 1], 0) and _eq(n[i + 2], m) \
+                and r.vals[i + 1].strip("0") == "":
+            return [i, i + 1, i + 2]
         if _eq(n[i], h + m / 100) or _eq(n[i], h * 100 + m) or (m == 0 and _eq(n[i], h)):
             return [i]
         if m and _eq(n[i], h) and _clock_tail(r, i) == m:
             return [i]
         return None
-    return [i] if _eq(n[i], float(v)) else None
+    if _eq(n[i], float(v)):
+        return [i]
+    return _joined_sum(r, i, float(v))
 
 
 def _lenient(b, v, r, i):
@@ -195,7 +277,7 @@ def match_reading(values, r, lenient=False):
 
 
 def match_slots(values, readings, lenient=False):
-    """{slot key: right in ANY reading of the same text} (the greedy and the no-connector reading)"""
+    """{slot key: right in ANY reading of the same text} (greedy, no-connector and reader readings)"""
     res = {s: False for s in values}
     for r in readings:
         for s, ok in match_reading(values, r, lenient).items():
@@ -212,14 +294,32 @@ def slot_any(slot, v, readings, lenient=False):  # a slot value found in either 
     return any(slot_ok(slot, v, x, lenient) for x in readings)
 
 
-def load_parse(path):
-    """parse_out rows -> {key: (greedy Reading, no-connector Reading)}"""
+def load_parse(path, parse_in=None):
+    """parse_out rows -> {key: (greedy Reading, no-connector Reading[, reader Reading])}. The reader reading needs the
+    parse input (key, lang, text): parse_in, default the parse_in_<name> file next to parse_out_<name>; without one
+    the two grammar readings are returned and a warning is printed (old dumps / unit tests)."""
+    src = {}
+    pin = parse_in or os.path.join(os.path.dirname(path), os.path.basename(path).replace("parse_out_", "parse_in_", 1))
+    if os.path.basename(pin) != os.path.basename(path) and os.path.exists(pin):
+        with open(pin, encoding="utf-8") as f:
+            for l in f:
+                if l.strip():
+                    r = json.loads(l)
+                    src[r["key"]] = (r["lang"], r["text"])
+    elif parse_in:
+        raise FileNotFoundError(parse_in)
+    else:
+        print(f"score_values: no parse input next to {path}: grammar readings only (no reader reading)", file=sys.stderr)
     P = {}
     for l in open(path, encoding="utf-8"):
         if l.strip():
             r = json.loads(l)
             w = r.get('words')
-            P[r['key']] = (Reading(r['values'], r.get('spans'), w), Reading(r.get('alt', []), r.get('alt_spans'), w))
+            rd = (Reading(r['values'], r.get('spans'), w), Reading(r.get('alt', []), r.get('alt_spans'), w))
+            if src:
+                lang, text = src[r['key']]  # a parse row without its input is an error
+                rd += (reader_reading(text, lang),)
+            P[r['key']] = rd
     return P
 
 

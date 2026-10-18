@@ -200,5 +200,108 @@ class SlotOk(unittest.TestCase):
         self.assertTrue(S.slot_ok("T", "19:45", R(["19"], [[2, 6]], w2)))
 
 
+def parse_files(d, rows):
+    """rows: (lang, text, grammar-parse values, words) -> parse_in_x / parse_out_x in d (spans: one word per value, unused)"""
+    with open(d / "parse_in_x.jsonl", "w") as fi, open(d / "parse_out_x.jsonl", "w") as fo:
+        for k, (lang, text, vals, words) in enumerate(rows):
+            fi.write(json.dumps({"key": f"{k}:long", "lang": lang, "text": text}, ensure_ascii=False) + "\n")
+            fo.write(json.dumps({"key": f"{k}:long", "values": vals, "words": words, "alt": []}, ensure_ascii=False) + "\n")
+
+
+class ParserArtefacts(unittest.TestCase):
+    """Grammar parses (as dumped on a real bed) of readings that say the right value: the scorer must not call
+    them wrong, and must still call wrong readings wrong. The same readings apply to every arm."""
+
+    def test_reader_reading_fixes_parser_artefacts(self):
+        # red-on-base: load_parse returned the two grammar readings only; ranges joined by a number-internal "and" (ro 131),
+        # grouped phone digits summed (el 214, sv 967), fi / da clocks read as fractions (0.15), hu / nl minutes after
+        # the hour word dropped, fr "midi quinze" read as 15 were all scored wrong
+        import score_values as S
+        rows = [
+            ("ro", "Au venit între cincizeci și cinci și șaptezeci și șase de oameni.", ["131"], None, {"A": 55, "B": 76}),
+            ("el", "Ο αριθμός μου είναι μηδέν έξι, είκοσι επτά, σαράντα εννέα, δύο, τριάντα πέντε.", ["0", "119"], None,
+             {"PH": "062749235"}),
+            ("sv", "Mitt nummer är noll nio sextiosju sjuhundrasjuttioett åttioett trettionio.", ["0", "967"], None,
+             {"PH": "09677718139"}),
+            ("da", "Mødet starter klokken otte komma et fem og varer treogtyve minutter", ["8", "0.15", "23"], None,
+             {"T": "8:15", "M": 23}),
+            ("fi", "Kokous alkaa kello neljätoista pilkku yksi viisi ja kestää kolmekymmentäkuusi minuuttia.", ["0.15", "36"],
+             None, {"T": "14:15", "M": 36}),
+            ("hu", "A megbeszélés kezdete húsz óra öt perc, hossza hatvankettő perc.", ["20", "62"], None, {"T": "20:05", "M": 62}),
+            ("fr", "La réunion commence à midi quinze et dure trente minutes.", ["15", "30"], None, {"T": "12:15", "M": 30}),
+            ("fi", "Liikevaihto kasvoi kaksitoista pilkku viisi prosenttimerkki kaksitoistatuhatta euroon.", ["0.5", "12000"],
+             None, {"PCT": 12.5, "L": 12000}),
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            parse_files(d, [(l, t, v, w or t.lower().split()) for l, t, v, w, _ in rows])
+            P = S.load_parse(str(d / "parse_out_x.jsonl"))
+            for k, (lang, text, _, _, want) in enumerate(rows):
+                self.assertEqual(len(P[f"{k}:long"]), 3)
+                got = S.match_slots(want, P[f"{k}:long"])
+                self.assertTrue(all(got.values()), (lang, text, got))
+
+    def test_reader_reading_keeps_wrong_readings_wrong(self):
+        # red-on-base: control (these were wrong before and must stay wrong)
+        import score_values as S
+        rows = [
+            ("hu", "Összesen hetvenkétezerszáztizenkilenc ember jött el.", ["72119"], {"A": 72, "B": 119}),
+            ("el", "Ο αριθμός μου είναι μηδέν έξι, είκοσι οκτώ, σαράντα εννέα, δύο, τριάντα πέντε.", ["0", "120"],
+             {"PH": "062749235"}),
+            ("da", "Mødet starter klokken otte komma et seks og varer treogtyve minutter", ["8", "0.16", "23"],
+             {"T": "8:15", "M": 23}),
+            ("fr", "La réunion commence à midi vingt et dure trente minutes.", ["20", "30"], {"T": "12:15", "M": 30}),
+            ("ro", "Au venit între cincizeci și cinci și șaptezeci și șapte de oameni.", ["132"], {"A": 55, "B": 76}),
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            parse_files(d, [(l, t, v, t.lower().split()) for l, t, v, _ in rows])
+            P = S.load_parse(str(d / "parse_out_x.jsonl"))
+            for k, (lang, text, _, want) in enumerate(rows):
+                self.assertFalse(all(S.match_slots(want, P[f"{k}:long"]).values()), (lang, text))
+
+    def test_range_parts_split_at_the_joiner(self):
+        # red-on-base: the no-joiner reading splits "cincizeci si cinci" into 50, 5 and nothing re-added them
+        import score_values as S
+        R = S.Reading
+        w = "au venit între cincizeci și cinci și șaptezeci și șase de oameni".split()
+        alt = R(["50", "5", "70", "6"], [[3, 3], [5, 5], [7, 7], [9, 9]], w)
+        self.assertEqual(S.match_reading({"A": 55, "B": 76}, alt), {"A": True, "B": True})
+        self.assertEqual(S.match_reading({"A": 131}, alt), {"A": False})  # the two ends never sum
+        bg = "дойдоха между двайсет и девет и шейсет и три души".split()
+        self.assertEqual(S.match_reading({"A": 29, "B": 63}, R(["20", "9", "60", "3"], [[2, 2], [4, 4], [6, 6], [8, 8]], bg)),
+                         {"A": True, "B": True})
+        far = "cincizeci de oameni și cinci".split()  # not one joiner between the parts
+        self.assertFalse(S.slot_ok("A", 55, R(["50", "5"], [[0, 0], [4, 4]], far)))
+        self.assertFalse(S.slot_ok("A", 55, R(["5", "50"], [[0, 0], [2, 2]], ["cinci", "și", "cincizeci"])))  # place order
+        self.assertFalse(S.slot_ok("A", 55, ["50", "5"]))  # no spans: never summed
+
+    def test_clock_zero_minutes_word(self):
+        # red-on-base: "eleven zero five" (11, 0, 5) for 11:05 was wrong; only "eleven oh five" (11, 5) scored
+        import score_values as S
+        self.assertTrue(S.slot_ok("T", "11:05", ["11", "0", "5"]))
+        self.assertEqual(S.match_reading({"T": "18:05", "M": 51}, ["18", "0", "5", "51"]), {"T": True, "M": True})
+        self.assertFalse(S.slot_ok("T", "11:15", ["11", "0", "15"]))  # two-digit minutes never take the zero
+        self.assertFalse(S.slot_ok("T", "11:05", ["11", "1", "5"]))
+
+    def test_reader_found_however_loaded(self):
+        # red-on-base: the reader import inside _clock_tail failed silently (no credit) when score_values was loaded
+        # from another directory or as a copy without the reader next to it
+        prog = ("import importlib.util, sys\n"
+                f"spec = importlib.util.spec_from_file_location('sv', {str(HERE / 'score_values.py')!r})\n"
+                "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+                "w = 'de vergadering begint om negentien uur vijf en duurt acht minuten'.split()\n"
+                "print(m._clock_tail(m.Reading(['19', '8'], [[4, 6], [9, 9]], w), 0))\n")
+        with tempfile.TemporaryDirectory() as d:
+            r = subprocess.run([sys.executable, "-I", "-c", prog], capture_output=True, text=True, cwd=d)
+            self.assertEqual(r.stdout.strip(), "5", r.stderr)
+            # a copy WITHOUT the reader next to it must fail loudly, never score silently
+            (Path(d) / "score_values.py").write_text((HERE / "score_values.py").read_text())
+            prog2 = prog.replace(str(HERE / "score_values.py"), str(Path(d) / "score_values.py"))
+            r = subprocess.run([sys.executable, "-I", "-c", prog2], capture_output=True, text=True, cwd=d)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("number_outcomes", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
