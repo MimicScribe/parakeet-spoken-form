@@ -876,7 +876,7 @@ TTS_TARGETED = {"tts5y", "tts6uk", "tts7", "tts8", "tts9nl", "tts9ru", "tts9ru2"
                 "ttsFT1", "ttsFT2", "ttsFT3", "ttsFT4", "ttsFT5", "ttsFT5c", "ttsFT5d",
                 "ttsFT6c", "ttsFT6r", "ttsFT6rd", "ttsLNw", "ttsLNr", "ttsLNm", "ttsYRm", "ttsYRr"}
 TTS_AUG_FRAC = 0.6  # share of chosen synthetic rows given a degraded copy instead of the clean audio
-# the long-number top-up sets (owner 2026-10-17): up to 85% synthetic in their classes, so more of them are degraded
+# the long-number top-up sets (2026-10-17): mostly synthetic in their classes (fill-to-bar), so more of them are degraded
 TTS_LONG_SETS = {"ttsLNw", "ttsLNr", "ttsLNm"}
 TTS_AUG_FRAC_LONG = 0.75
 
@@ -891,7 +891,7 @@ TTS_ENOUGH_H = 0.25  # h of real speech in a class above which no synthetic rows
 # waiver) and post_build_check reports it as "waived_synthetic_floor"
 TTS_FLOOR_H = 0.15
 RARE_REAL_MAX = 19  # real spans at or under which a class has (almost) no real speech: under the gate's 20-span floor
-# one cloud voice per language kept entirely out of training (owner 2026-10-17): its rows are the language's held-out
+# one cloud voice per language kept entirely out of training (2026-10-17): its rows are the language's held-out
 # synthetic decision set (split "dev": tts_dev, seam_crops --heldout-tts); a train-split row in that voice never trains
 HELDOUT_VOICES = {
     "cs": "cs-CZ-Chirp3-HD-Achird", "de": "de-DE-Chirp3-HD-Algieba", "es": "es-US-Chirp3-HD-Erinome",

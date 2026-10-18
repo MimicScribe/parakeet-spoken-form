@@ -336,7 +336,7 @@ def syn_floor(lang, k, tier=None):
     return round(CLASS_MIN.get(k, SYN_FLOOR_SPANS.get(k, 0)) * TIER_FACTOR.get(tier or tier_of(lang), 1.0))
 
 
-# ---------------------------------------------------------------- fill-to-bar (owner 2026-10-17)
+# ---------------------------------------------------------------- fill-to-bar (2026-10-17)
 # Synthetic spans of a class may fill it up to its training bar: allowed synthetic = max(the share rule, bar - real
 # spans, the value floors' shortfall). Real rows always count first; where real speech already meets the bar the
 # share caps above still decide. Value-level bars (every year 1990-2030 / 2031-2060 / the key years, each 0-100 and

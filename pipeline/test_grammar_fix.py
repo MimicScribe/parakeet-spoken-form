@@ -240,7 +240,7 @@ class Build(unittest.TestCase):
 
 
 class FillToBar(unittest.TestCase):
-    """Owner rule 2026-10-17: synthetic may fill a thin class up to its bar; rich classes keep the share caps."""
+    """Rule (2026-10-17): synthetic may fill a thin class up to its bar; rich classes keep the share caps."""
 
     def test_thin_class_fills_to_bar(self):
         # red-on-base: nl range (real 60 of a 150 bar) stopped at 30% synthetic (25 spans)
