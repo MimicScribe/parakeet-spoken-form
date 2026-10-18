@@ -1638,6 +1638,8 @@ R3_ARMS.update({
 #     --save-every 250 --r3-sub-batch 1
 R3_ARMS.update({
     "R8-s-enk0": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, en_kl_scale=0.0),
+    # R8-s-enk0c0 = R8-s-enk0 with L2-SP off too: is the pull or the English KL the English throttle? (2026-10-18 review)
+    "R8-s-enk0c0": dict(_R8, lr=1e-4, l2sp_c=0.0, recipe=_R8S_RECIPE, en_kl_scale=0.0),
     "R8-s-ent": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, en_teacher="w3soup_a0.5@0"),
 })
 R3_ARMS.update({
