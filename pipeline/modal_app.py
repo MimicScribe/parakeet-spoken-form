@@ -267,6 +267,8 @@ def export_weights(run: str = "ultra", step: int = -1):
         run = f"{run}@{step}"
     else:
         sd = torch.load(f"{VOL}/exp/{run}/decoder_joint.pt", map_location="cpu")
+    enc = [k for k in sd if k.startswith("encoder.")]
+    assert not enc, f"{run}: {len(enc)} encoder tensors (unfreeze_top) that a decoder + joint export would drop"
     keep = {k: v.float().contiguous() for k, v in sd.items() if k.startswith(("decoder.", "joint."))}
     os.makedirs(f"{VOL}/export/{run}", exist_ok=True)
     save_file(keep, f"{VOL}/export/{run}/decoder_joint.safetensors")
@@ -289,6 +291,7 @@ def soup(src: str, alphas: str, name: str):
     base = torch.load(ultra_state(), map_location="cpu")
     trained = {k for k in ft if k.startswith(("decoder.", "joint."))}
     assert trained == set(base), (sorted(trained ^ set(base))[:5])
+    assert not [k for k in ft if k.startswith("encoder.")], "encoder tensors (unfreeze_top): the stock base holds none"
     os.makedirs(f"{VOL}/exp/{name}", exist_ok=True)
     for a in (float(x) for x in alphas.split(",")):
         sd = {k: (base[k].float() + a * (v.float() - base[k].float())).to(v.dtype) if k in base else v
@@ -1227,14 +1230,25 @@ def retrain3_mix_v4(langs=WAVE1, repeat: int = 1, anchor18: int = 0, win_repeat:
     return out
 
 
-def check_build_langs(langs, mix_dir: str = "mix4") -> dict:
+def check_build_langs(langs, mix_dir: str = "mix4", build_langs=None) -> dict:
     """The mix4 build on the volume must be the build for `langs` (training a language set build4 did not build would
-    keep digit rows of a trained language or miss its parts). Returns mix4/stats.json."""
+    keep digit rows of a trained language or miss its parts). Returns mix4/stats.json.
+    build_langs (an arm training a SUBSET of a build): the build must be the one for build_langs and `langs` a subset of
+    it. The build already took every built language's digit rows out, so no trained language keeps digit rows; the built
+    languages left untrained get no rows except their OTHER18 digit anchors."""
     import json
 
     st = json.load(open(f"{VOL}/{mix_dir}/stats.json"))
     built = set(st.get("langs", {})) | set(st.get("langs_without_rows", []))
-    assert built == set(_langs(langs)), f"mix4 was built for {sorted(built)}, training asks for {sorted(_langs(langs))}"
+    if build_langs is None:
+        assert built == set(_langs(langs)), f"mix4 was built for {sorted(built)}, training asks for {sorted(_langs(langs))}"
+        return st
+    assert built == set(_langs(build_langs)), f"{mix_dir} was built for {sorted(built)}, the arm expects {sorted(_langs(build_langs))}"
+    assert set(_langs(langs)) <= built, f"{sorted(set(_langs(langs)) - built)} not in the {mix_dir} build"
+    left = [l for l in _langs(build_langs) if l not in _langs(langs)]
+    print(f"SUBSET of the {mix_dir} build: training {','.join(_langs(langs))}; built but untrained (digit rows out, no "
+          f"spoken-form rows): {','.join(l for l in left if l not in OTHER18)}; anchored as OTHER18 digit rows: "
+          f"{','.join(l for l in left if l in OTHER18)}")
     return st
 
 
@@ -1473,6 +1487,8 @@ def soup3(run: str, steps: str = "3500,3750,4000", alphas: str = "1.0,0.85,0.7,0
     soup = {k: sum(sd[k].float() for sd in sds) / len(sds) for k in sds[0]}
     b_run, _, b_step = base.partition("@")
     b = torch.load(f"{VOL}/exp/{b_run}/step{b_step}.pt", map_location="cpu")
+    assert not [k for k in soup if k.startswith("encoder.") and k not in b], \
+        "encoder tensors (unfreeze_top) missing from the base would be kept unblended"
     import nemo.collections.asr as nemo_asr
 
     m = nemo_asr.models.ASRModel.restore_from(ultra_path(), map_location="cpu")
@@ -1574,6 +1590,16 @@ R3_ARMS.update({
 #   modal run --detach modal_app.py::retrain3 --run <run> --arm <R8-s | R8-s3e | R8-sc> --mix v4 --mix-dir <dir> \
 #     --langs <RUN2_LANGS> --init-from ultra --anchor-init --dur-weight 0 --warmup 20 --max-steps 3000 \
 #     --save-every 250 --r3-sub-batch 1
+# R8-s-denl (encoder spike, 2026-10-18): R8-s on the de + nl rows of a run-2 build only (a subset of the build, see
+# check_build_langs build_langs), the usual English parts / shared multilingual parts / OTHER18 digit anchors (x2),
+# with retrain3 --unfreeze-top N (the last N conformer blocks train; 0 = the frozen-encoder control on the same data):
+#   modal run --detach modal_app.py::retrain3_80 --run <run> --arm R8-s-denl --mix v4 --mix-dir <run-2 build> \
+#     --langs de,nl --init-from ultra --anchor-init --dur-weight 0 --warmup 20 --max-steps 500 --save-every 250 \
+#     --r3-sub-batch 1 --unfreeze-top 2
+_R8S_DENL_RECIPE = dict(_R8S_RECIPE, langs="de,nl")
+R3_ARMS.update({
+    "R8-s-denl": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_DENL_RECIPE, build_langs=",".join(RUN2_LANGS)),
+})
 R3_ARMS.update({
     "R8-s3e": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, wf_en_weight=3.0),
     "R8-sc": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, comma_weight=3 * _R8["wf_weight"]),
@@ -1593,7 +1619,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
              en_weight: float = -1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
              dur_weight: float = 1.0, init_from: str = "v10pt@1500", lr: float = 0.0, mix: str = "mix3",
              anchor_init: bool = False, cons_weight: float = -1.0, langs: str = "", mix_dir: str = "mix4",
-             r3_sub_batch: int = 2):
+             r3_sub_batch: int = 2, unfreeze_top: int = 0):
     """One retrain-3 run (R3.13): r3 losses, decoupled L2-SP to v10pt@1500, 200 s x 2 accumulated batches.
     Rehearsal (E2) = a small max_steps. Resumes from exp/<run>/last.ckpt after a preemption.
     cons_weight >= 0 overrides the arm's cross-window consistency weight (R4-c tuning knob).
@@ -1602,7 +1628,9 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     init_from "ultra": start from stock Ultra (no checkpoint loaded); with anchor_init the L2-SP anchor is stock too.
     en_weight < 0: the arm's (default 1). r3_sub_batch: rows per auxiliary joint pass (default 2); 1 roughly halves
     that pass's peak GPU memory (the place the unsplit control ran out) at the cost of a slower step; the batch
-    (200 s x 2 accumulated), the losses and their values are unchanged."""
+    (200 s x 2 accumulated), the losses and their values are unchanged.
+    unfreeze_top > 0: the last unfreeze_top conformer blocks of the encoder train too (ft_train.unfreeze_top_layers); step
+    checkpoints then hold those blocks, and every reader must load them (_load_runs, eval_multi re-encodes)."""
     import json
     import os
 
@@ -1629,6 +1657,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
                                   "cons_per_batch") if k in cfg}
     wave1_repeat = cfg.pop("wave1_repeat", 1)
     anchor18_repeat = cfg.pop("anchor18_repeat", 0)
+    build_langs = cfg.pop("build_langs", None)
     v4kw = {k: cfg.pop(k) for k in ("win_repeat", "en_bal", "en_plain_h", "en_win_repeat", "en_free_repeat")
             if k in cfg}  # run 2
     if cons_weight >= 0:
@@ -1640,7 +1669,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
                                          **v4kw)
            }.get(mix, retrain3_mix)()
     if any(m[0].startswith(("mix4/", mix_dir + "/")) for m in mix):
-        print("BUILD", mix_dir, json.dumps(check_build_langs(langs, mix_dir).get("langs_without_rows", [])))
+        print("BUILD", mix_dir, json.dumps(check_build_langs(langs, mix_dir, build_langs).get("langs_without_rows", [])))
     # a warm start anchors L2-SP to its own init, not v10pt (the prior being trained away)
     i_run, _, i_step = init_from.partition("@")
     if init_from == "ultra":  # a stock start anchored to v10pt would pull it toward a fine-tuned prior
@@ -1652,6 +1681,8 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     else:
         anchor = f"{VOL}/exp/{i_run}/step{i_step}.pt"
     print("L2SP ANCHOR", anchor, "INIT", init_from, "SUB_BATCH", r3_sub_batch)
+    if unfreeze_top:
+        print("UNFREEZE_TOP", unfreeze_top)
     share = mix_build.mix_share(VOL, mix)
     import shutil
 
@@ -1671,8 +1702,20 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
                    on_save=vol.commit, stage_dir="/tmp/stage", r3=True, wf_weight=cfg["wf_weight"],
                    en_weight=en_weight, l2sp_c=cfg["l2sp_c"], l2sp_anchor=anchor, dur_weight=dur_weight,
                    en_set=cfg["en_set"], r3_sub_batch=r3_sub_batch, comma_weight=cfg["comma_weight"],
-                   wf_en_weight=cfg["wf_en_weight"], **r4)
+                   wf_en_weight=cfg["wf_en_weight"], unfreeze_top=unfreeze_top, **r4)
     vol.commit()
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-80GB", cpu=8, memory=32768, timeout=24 * 3600,
+              retries=modal.Retries(max_retries=2, initial_delay=30.0))
+def retrain3_80(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, save_every: int = 250,
+                en_weight: float = -1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
+                dur_weight: float = 1.0, init_from: str = "v10pt@1500", lr: float = 0.0, mix: str = "mix3",
+                anchor_init: bool = False, cons_weight: float = -1.0, langs: str = "", mix_dir: str = "mix4",
+                r3_sub_batch: int = 2, unfreeze_top: int = 0):
+    """retrain3 on an 80 GB A100: the same code, arguments (signature kept equal by test_unfreeze_top) and batch;
+    more memory headroom (e.g. for --unfreeze-top)."""
+    return retrain3.local(**locals())
 
 
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-40GB", cpu=8, memory=32768, timeout=6 * 3600,
@@ -1769,31 +1812,36 @@ def eval_multi(runs: str, sealed: bool = False, tag: str = "", skip: str = ""):
     sets = [x for x in sets if x[1] not in skip.split(",")]  # screening: skip=e21_dev (report-only, 25 h of audio)
     for run in runs.split(","):
         if run == "ultra":
-            sd, name = stock, "ultra_rt"
+            sd, name = {}, "ultra_rt"
         elif run.endswith(".pt"):
             sd, name = torch.load(f"{VOL}/{run}", map_location="cpu"), os.path.basename(run)[:-3]
         else:
             r, _, step = run.partition("@")
             sd, name = torch.load(f"{VOL}/exp/{r}/step{step}.pt", map_location="cpu"), run
-        m.load_state_dict(stock, strict=False)
-        m.load_state_dict(sd, strict=False)
-        ft_eval.eval_cached(VOL, m, name + tag, sets)
+        n_enc = ft_eval.load_over_stock(m, stock, sd)
+        # a checkpoint with encoder blocks (unfreeze_top) cannot use the stock encoder cache: its rows are re-encoded
+        ft_eval.eval_cached(VOL, m, name + tag, sets, fresh_encoder=n_enc > 0)
         vol.commit()
 
 
-def _load_runs(m, stock, run: str):
-    """Load `run` ("ultra" = stock, "<run>@<step>", or "<path>.pt") over the stock decoder state."""
+def _load_runs(m, stock, run: str) -> int:
+    """Load `run` ("ultra" = stock, "<run>@<step>", or "<path>.pt") over the stock state (decoder + joint, and the
+    encoder blocks any earlier run replaced: ft_eval.load_over_stock). Returns the number of encoder tensors loaded
+    (> 0: an unfreeze_top checkpoint, whose encoder output differs from stock: a reader caching encoder outputs must
+    re-encode for it)."""
     import torch
 
-    m.load_state_dict(stock, strict=False)
+    import ft_eval
+
     if run == "ultra":
-        return
+        return ft_eval.load_over_stock(m, stock, {})
     r, _, step = run.partition("@")
     path = f"{VOL}/{run}" if run.endswith(".pt") else f"{VOL}/exp/{r}/step{step}.pt"
     sd = torch.load(path, map_location="cpu")
-    res = m.load_state_dict(sd, strict=False)
-    assert sd and not res.unexpected_keys, f"{run}: {len(res.unexpected_keys)} checkpoint keys not in the model"
-    print(f"{run}: loaded {len(sd)} tensors")
+    assert sd, f"{run}: empty checkpoint"
+    n_enc = ft_eval.load_over_stock(m, stock, sd)
+    print(f"{run}: loaded {len(sd)} tensors ({n_enc} encoder)")
+    return n_enc
 
 
 def _stock_model():

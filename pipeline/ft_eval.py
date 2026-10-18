@@ -20,6 +20,22 @@ def load_model(vol: str, run: str, ultra: str):
     return m.cuda().eval()
 
 
+def load_over_stock(m, stock: dict, sd: dict) -> int:
+    """Reset `m` to `stock` (name -> tensor; decoder + joint), then load checkpoint `sd` over it (strict=False). A
+    checkpoint tensor outside `stock` (the encoder blocks of an unfreeze_top run) gets its current, stock value added to
+    `stock` first, so the next reset restores it and a later run in the same model never inherits it. Returns the number
+    of encoder tensors in `sd`."""
+    current = m.state_dict()
+    for k in sd:
+        if k not in stock and k in current:
+            stock[k] = current[k].detach().clone()
+    m.load_state_dict(stock, strict=False)
+    if sd:
+        res = m.load_state_dict(sd, strict=False)
+        assert not res.unexpected_keys, f"{len(res.unexpected_keys)} checkpoint keys not in the model"
+    return sum(k.startswith("encoder.") for k in sd)
+
+
 def decode(m, paths, batch_size=32):
     hyps = m.transcribe(paths, batch_size=batch_size, return_hypotheses=True, verbose=False)
     if isinstance(hyps, tuple):
@@ -216,8 +232,10 @@ def cache_beds(vol: str, m, sets: list, cache_dir: str = "enc") -> dict:
     return st
 
 
-def eval_cached(vol: str, m, run: str, sets: list, cache_dir: str = "enc") -> None:
-    """Same hyps files as transcribe_loaded, decoded from the cached encoder outputs."""
+def eval_cached(vol: str, m, run: str, sets: list, cache_dir: str = "enc", fresh_encoder: bool = False) -> None:
+    """Same hyps files as transcribe_loaded, decoded from the cached encoder outputs. fresh_encoder: the cached rows are
+    re-encoded with `m`'s own encoder (the same batching and fp16 rounding as the cache), for a checkpoint whose encoder
+    is not stock (unfreeze_top); the stock cache is only read for its rows, never for its encoder outputs."""
     out_dir = f"{vol}/hyps/{run}"
     os.makedirs(f"{out_dir}/sealed", exist_ok=True)
     for _man, name, _limit in sets:
@@ -226,6 +244,8 @@ def eval_cached(vol: str, m, run: str, sets: list, cache_dir: str = "enc") -> No
             print(f"skip {name}: no cache")
             continue
         c = torch.load(p)
+        if fresh_encoder:
+            c["enc"] = encode_rows(m, c["rows"])
         hyps = decode_encoded(m, c["enc"])
         n_digit = 0
         with open(f"{out_dir}/{name}.jsonl", "w") as f:
@@ -233,4 +253,5 @@ def eval_cached(vol: str, m, run: str, sets: list, cache_dir: str = "enc") -> No
                 n_digit += bool(WRITTEN_FORM.search(h["text"]))
                 f.write(json.dumps({"id": r.get("id", os.path.basename(r["audio_filepath"])), "ref": r["text"],
                                     "hyp": h["text"], "ids": h["ids"]}) + "\n")
-        print(f"{run} {name}: {len(hyps)} decoded (cached encoder), {n_digit} with written-form characters")
+        print(f"{run} {name}: {len(hyps)} decoded ({'own encoder' if fresh_encoder else 'cached encoder'}), {n_digit} "
+              f"with written-form characters")

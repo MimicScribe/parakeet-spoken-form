@@ -1,6 +1,8 @@
-"""Fine-tune Parakeet Ultra's prediction network and joint with the encoder frozen.
+"""Fine-tune Parakeet Ultra's prediction network and joint with the encoder frozen (optionally its top conformer blocks
+trainable too: train(unfreeze_top=N)).
 
-Saves only the trainable weights (decoder + joint, ~18M params) to /vol/exp/<run>/decoder_joint.pt.
+Saves only the trainable weights (decoder + joint, ~18M params, + the unfrozen encoder blocks) to
+/vol/exp/<run>/decoder_joint.pt.
 """
 
 import collections
@@ -20,7 +22,7 @@ from common import number_span
 
 class KeepEncoderFrozen(pl.Callback):
     """Lightning calls model.train() at epoch start; keep the frozen encoder's BatchNorm and
-    dropout in eval mode."""
+    dropout in eval mode. With unfreeze_top the trainable top blocks stay in eval mode too (unfreeze_top_layers)."""
 
     def on_train_epoch_start(self, trainer, m):
         m.encoder.eval()
@@ -901,13 +903,31 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
         tdec, tjoint = m._kl_teacher
         tdec.to(signal.device), tjoint.to(signal.device)
         dev = signal.device
-        with torch.no_grad():
-            feats, feats_len = m.preprocessor(input_signal=signal, length=signal_len)
-            enc, enc_len = m.encoder(audio_signal=feats, length=feats_len)
-            t_g, _, _ = tdec(targets=tokens, target_length=tokens_len)
+        if getattr(m, "_enc_unfrozen", ()):
+            # unfreeze_top: the student side takes the training pass's own encoder output (with its graph, so these
+            # losses reach the unfrozen blocks); the teacher side = stock blocks on the same encoder input
+            feats, feats_len, enc_s, enc_s_len = m._enc_main
+            m._enc_main = None
+            enc, enc_len = stock_top_encoder(m, feats.detach(), feats_len)
+            assert enc.shape == enc_s.shape and torch.equal(enc_len, enc_s_len), (enc.shape, enc_s.shape)
+            if not getattr(m, "_enc_checked", False):
+                m._enc_checked = True
+                print(f"unfreeze_top check (first step): max |student - stock| encoder output "
+                      f"{(enc_s.detach().float() - enc.float()).abs().max().item():.3g}", flush=True)
+            with torch.no_grad():
+                t_g, _, _ = tdec(targets=tokens, target_length=tokens_len)
+            f_s = enc_s.transpose(1, 2)
+        else:
+            with torch.no_grad():
+                feats, feats_len = m.preprocessor(input_signal=signal, length=signal_len)
+                enc, enc_len = m.encoder(audio_signal=feats, length=feats_len)
+                t_g, _, _ = tdec(targets=tokens, target_length=tokens_len)
+            f_s = None
         with NoDropout(m.decoder):
             s_g, _, _ = m.decoder(targets=tokens, target_length=tokens_len)
         f = enc.transpose(1, 2)
+        if f_s is None:  # frozen encoder: student and teacher read the same features (the default, unchanged)
+            f_s = f
         B = f.shape[0]
         row_toks = [tokens[i, :int(tokens_len[i])].tolist() for i in range(B)]
         tags = [row_tags.get(tuple(t), "free") for t in row_toks]
@@ -939,9 +959,10 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
         # comma penalty: columns open to it (not a comma target of the row's own label); unused when comma_weight 0
         cm_ok = (~comma_target_cols(row_toks, cm_t.tolist(), W)).to(dev) if comma_weight else torch.ones_like(klu)
 
-        def chunk(f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, klu_sl, nonen_sl, nspan_sl, yr_sl, yrcol_sl, thr_sl, cmok_sl):
+        def chunk(fs_sl, f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, klu_sl, nonen_sl, nspan_sl, yr_sl, yrcol_sl, thr_sl,
+                  cmok_sl):
             with NoDropout(m.joint):
-                s_logits = m.joint.joint(f_sl, s_sl).float()
+                s_logits = m.joint.joint(fs_sl, s_sl).float()
             with torch.no_grad():
                 t_logits = tjoint.joint(f_sl, t_sl).float()
             T, U = s_logits.shape[1], s_logits.shape[2]
@@ -1013,7 +1034,7 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             u = int(tokens_len[sl].max()) + 1
             t = int(enc_len[sl].max())
             parts.append(torch.utils.checkpoint.checkpoint(
-                chunk, f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
+                chunk, f_s[sl, :t], f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
                 enc_len[sl], tokens_len[sl], klu[sl], is_nonen[sl], is_nspan[sl], is_yr[sl], yrcol[sl], thr[sl],
                 cm_ok[sl], use_reentrant=False))
         acc = [torch.cat(v) for v in zip(*parts)]  # 16 per-row vectors (B,)
@@ -1075,8 +1096,10 @@ class L2SP(pl.Callback):
     from the v10pt FILE (also on resume: init_from is skipped then). The written-form output rows of the joint's last
     layer are exempt (N2: they must stay free to keep non-English digits at stock strength)."""
 
-    def __init__(self, anchor_path: str, c: float, exempt_rows: list[int]):
-        self.path, self.c, self.exempt = anchor_path, c, exempt_rows
+    def __init__(self, anchor_path: str, c: float, exempt_rows: list[int], extra_anchor: dict | None = None):
+        """extra_anchor: more anchor tensors by parameter name (unfreeze_top: the stock encoder blocks), for trainable
+        parameters the anchor file does not hold."""
+        self.path, self.c, self.exempt, self.extra = anchor_path, c, exempt_rows, extra_anchor
         self.anchor = None
 
     def on_train_batch_end(self, trainer, m, outputs, batch, batch_idx):
@@ -1086,6 +1109,14 @@ class L2SP(pl.Callback):
             sd = torch.load(self.path, map_location="cpu")
             self.anchor = {n: sd[n].to(p.device, p.dtype) for n, p in m.named_parameters() if p.requires_grad and n in sd}
             print(f"L2SP c={self.c}: {len(self.anchor)} tensors anchored to {self.path}", flush=True)
+            if self.extra:
+                more = {n: self.extra[n].to(p.device, p.dtype) for n, p in m.named_parameters()
+                        if p.requires_grad and n in self.extra and n not in self.anchor}
+                self.anchor.update(more)
+                free = [n for n, p in m.named_parameters() if p.requires_grad and n not in self.anchor]
+                print(f"L2SP c={self.c}: + {len(more)} encoder tensors anchored to stock "
+                      f"({sum(v.numel() for v in more.values()):,} params); trainable tensors without an anchor: "
+                      f"{len(free)} {free[:4]}", flush=True)
         lr = trainer.optimizers[0].param_groups[0]["lr"]
         last = "joint.joint_net." + str(len(m.joint.joint_net) - 1)
         with torch.no_grad():
@@ -1108,9 +1139,10 @@ KL_EQ_CHECK = os.environ.get("KL_EQ_CHECK") == "1"  # first 3 batches: also run 
 
 
 class StepLog(pl.Callback):
-    def __init__(self):
+    def __init__(self, mem: bool = False):
         self.t0 = time.time()
         self.clipped = 0
+        self.mem = mem  # also print the peak GPU memory every 10 steps (unfreeze_top runs)
 
     def on_before_optimizer_step(self, trainer, m, optimizer):
         # Gradient norm before clipping (clip 1.0): a large KL term can scale the whole update down.
@@ -1119,11 +1151,18 @@ class StepLog(pl.Callback):
         self.clipped += int(norm > 1.0)
         if trainer.global_step % 10 == 0:
             print(f"grad_norm {norm.item():.3f} clipped {self.clipped}/{trainer.global_step + 1}", flush=True)
+            if self.mem:  # the unfrozen encoder blocks' share of it
+                enc = [p.grad.detach().float().norm() for n, p in m.named_parameters()
+                       if n.startswith("encoder.") and p.grad is not None]
+                enc_norm = torch.linalg.vector_norm(torch.stack(enc)).item() if enc else 0.0
+                print(f"grad_norm encoder {enc_norm:.3f} ({len(enc)} tensors with a gradient)", flush=True)
 
     def on_train_batch_end(self, trainer, m, outputs, batch, idx):
         if trainer.global_step % 10 == 0:
             loss = outputs["loss"].item() if isinstance(outputs, dict) else float(outputs)
             print(f"step {trainer.global_step} loss {loss:.4f} {time.time() - self.t0:.0f}s", flush=True)
+            if self.mem and torch.cuda.is_available():
+                print(f"gpu_mem peak {torch.cuda.max_memory_allocated() / 2 ** 30:.2f} GiB", flush=True)
 
 
 def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_texts=None,
@@ -1217,8 +1256,59 @@ def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_text
 
 
 def trainable_state(m) -> dict:
+    """Decoder + joint, plus the encoder blocks unfreeze_top_layers made trainable (parameters and buffers)."""
+    keep = getattr(m, "_enc_unfrozen", ())
     return {k: v.detach().cpu() for k, v in m.state_dict().items()
-            if not (k.startswith("encoder.") or k.startswith("preprocessor."))}
+            if not (k.startswith("encoder.") or k.startswith("preprocessor.")) or k.startswith(keep)}
+
+
+def unfreeze_top_layers(m, n: int) -> dict:
+    """Make the last `n` conformer blocks of the frozen encoder trainable: every parameter under encoder.layers.<L-n> ..
+    encoder.layers.<L-1> (both feed-forward modules, self-attention, the convolution module with its BatchNorm affine,
+    and the block's layer norms). pre_encode (subsampling), the positional encoding and blocks 0 .. L-n-1 stay frozen.
+    The whole encoder stays in eval mode (KeepEncoderFrozen): dropout off and BatchNorm on its stock running statistics,
+    which are not re-estimated (batches skewed to the trained languages would shift them for every language); the
+    student and the KL teacher then see the same deterministic blocks.
+    Side effects on `m`: `_enc_unfrozen` (the blocks' state-dict prefixes, kept by trainable_state), `_enc_stock_top`
+    (their stock tensors, an attribute so neither saved nor trained: the KL teacher's top blocks in add_r3_losses), and
+    a forward hook that keeps the training pass's encoder input and output (`_enc_main`) for add_r3_losses.
+    Returns the stock tensors ("encoder.layers.<i>.<name>" -> CPU clone, parameters and buffers): the L2-SP anchor."""
+    layers = m.encoder.layers
+    n_layers = len(layers)
+    assert 0 < n <= n_layers, f"unfreeze_top {n}: the encoder has {n_layers} blocks"
+    idx = list(range(n_layers - n, n_layers))
+    prefixes = tuple(f"encoder.layers.{i}." for i in idx)
+    for i in idx:
+        for p in layers[i].parameters():
+            p.requires_grad_(True)
+    stock = {k: v.detach().cpu().clone() for k, v in m.state_dict().items() if k.startswith(prefixes)}
+    m._enc_unfrozen = prefixes
+    m._enc_stock_top = stock
+    m._enc_main = None
+
+    def keep_main(mod, args, kwargs, out):
+        if torch.is_grad_enabled():  # the training pass only (the teacher and consistency passes run under no_grad)
+            m._enc_main = (kwargs["audio_signal"], kwargs["length"], out[0], out[1])
+
+    m.encoder.register_forward_hook(keep_main, with_kwargs=True)
+    n_par = sum(p.numel() for i in idx for p in layers[i].parameters())
+    n_ten = sum(1 for i in idx for _ in layers[i].parameters())
+    subs = sorted({k[len(f"encoder.layers.{idx[0]}."):].split(".")[0] for k in stock if k.startswith(prefixes[0])})
+    print(f"unfreeze_top {n}: encoder.layers.{idx[0]}..{idx[-1]} of {n_layers} trainable, {n_par:,} params in {n_ten} "
+          f"tensors (per block: {', '.join(subs)}); pre_encode + layers 0..{idx[0] - 1} frozen; encoder kept in eval mode "
+          f"(dropout off, BatchNorm running stats fixed)", flush=True)
+    return stock
+
+
+def stock_top_encoder(m, feats, feats_len):
+    """The encoder output with the stock values of the unfrozen top blocks (the KL teacher's encoder), no gradient."""
+    dev = feats.device
+    cache = getattr(m, "_enc_stock_dev", None)
+    if cache is None or next(iter(cache.values())).device != dev:
+        cache = {k[len("encoder."):]: v.to(dev) for k, v in m._enc_stock_top.items()}
+        m._enc_stock_dev = cache
+    with torch.no_grad():
+        return torch.func.functional_call(m.encoder, cache, args=(), kwargs=dict(audio_signal=feats, length=feats_len))
 
 
 def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_steps: int,
@@ -1231,7 +1321,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           l2sp_anchor: str = "", accumulate: int = 1, dur_weight: float = 0.0, suffix_anchor: bool = False,
           anchor_after: int = 1, gate: float = 0.9, gate_human: float = 0.0, cons_weight: float = 0.0,
           cons_pairs: str = "", cons_per_batch: int = 1, en_set: str = "whole", r3_sub_batch: int = 2,
-          comma_weight: float = 0.0, wf_en_weight: float = 1.0):
+          comma_weight: float = 0.0, wf_en_weight: float = 1.0, unfreeze_top: int = 0):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
     entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists.
@@ -1240,7 +1330,9 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     en_set (r3): the en_pen piece set ("whole" | "first", add_r3_losses). r3_sub_batch: rows per auxiliary joint pass
     (add_r3_losses sub_batch): 1 halves that pass's peak memory, same batch and loss values, slower step.
     comma_weight (r3): the decimal-comma penalty's weight (add_r3_losses; 0 = off). wf_en_weight (r3): wf_pen's factor
-    on English rows (add_r3_losses; 1 = off)."""
+    on English rows (add_r3_losses; 1 = off). unfreeze_top > 0 (r3 only): the last unfreeze_top conformer blocks of the
+    encoder train too (unfreeze_top_layers: eval mode, L2-SP to their stock values, saved in every step checkpoint; the r3
+    KL teacher keeps the stock blocks); 0 = the frozen encoder, unchanged."""
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
@@ -1298,6 +1390,12 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         m.spec_augmentation = None
         print("SpecAugment off")
     m.encoder.freeze()
+    enc_stock = None
+    if unfreeze_top:
+        # the r3 step is the one that reads the training pass's encoder output; SpecAugment would hand the teacher masked
+        # input; consistency_term encodes its pairs without a gradient
+        assert r3 and not spec_augment and not cons_weight, "unfreeze_top needs r3, SpecAugment off and no consistency term"
+        enc_stock = unfreeze_top_layers(m, unfreeze_top)
     if "blankspan" in kl_terms:
         assert kl_replay_only, "blankspan only works with kl_replay_only (span rows are matched by label)"
     extra_cb = []
@@ -1348,7 +1446,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         if l2sp_c:
             last_layer = m.joint.joint_net[-1].weight.shape[0]
             exempt = [i for i in wf_piece_ids(m.tokenizer.tokenizer) if i < last_layer]
-            extra_cb.append(L2SP(l2sp_anchor, l2sp_c, exempt))
+            extra_cb.append(L2SP(l2sp_anchor, l2sp_c, exempt, extra_anchor=enc_stock))
             weight_decay = 0.0
             print(f"L2SP toward {l2sp_anchor} c={l2sp_c}, {len(exempt)} written-form rows exempt; AdamW decay 0")
     elif kl_weight or kl_punct:
@@ -1381,13 +1479,20 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
                          use_distributed_sampler=False, gradient_clip_val=1.0, logger=False,
                          accumulate_grad_batches=accumulate,
                          enable_checkpointing=False, enable_progress_bar=False,
-                         callbacks=[KeepEncoderFrozen(), StepLog()] + extra + extra_cb
+                         callbacks=[KeepEncoderFrozen(), StepLog(mem=bool(unfreeze_top))] + extra + extra_cb
                          + ([SaveEvery(exp, save_every, on_save, last)] if save_every else []))
     m.set_trainer(trainer)
     m.setup_optimization(OmegaConf.create({
         "name": "adamw", "lr": lr, "betas": [0.9, 0.98], "weight_decay": weight_decay,
         "sched": {"name": "CosineAnnealing", "warmup_steps": warmup, "min_lr": lr / 10,
                   "max_steps": max_steps}}))
+    if unfreeze_top:  # every trainable tensor must reach the optimizer (NeMo builds its parameter groups here)
+        held = {id(p) for g in m._optimizer.param_groups for p in g["params"]}
+        trainable = [(n, p) for n, p in m.named_parameters() if p.requires_grad]
+        missing = [n for n, p in trainable if id(p) not in held]
+        assert not missing, f"{len(missing)} trainable tensors not in the optimizer, e.g. {missing[:3]}"
+        n_enc = sum(1 for n, _ in trainable if n.startswith("encoder."))
+        print(f"optimizer: all {len(trainable)} trainable tensors held ({n_enc} encoder)", flush=True)
     t0 = time.time()
     if resuming:
         print(f"RESUMING from {last}")
