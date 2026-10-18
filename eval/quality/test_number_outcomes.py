@@ -324,7 +324,7 @@ class FormClasses(unittest.TestCase):
     def test_converted_and_digits_left(self):
         self.assertEqual(self.forms("dos mil quinientos", "dos mil quinientos", "es"), [("WORDS_RIGHT_VALUE", "converted")])
         self.assertEqual(self.forms("dos mil quinientos", "2500", "es"), [("DIGITS_RIGHT_VALUE", "digits_left")])
-        self.assertEqual(self.forms("zweitausend", "zwanzigtausend", "de")[0][1], "converted")  # words, wrong value
+        self.assertEqual(self.forms("zweitausend", "zwanzigtausend", "de")[0][1], "words_wrong")  # words, wrong value
         self.assertEqual(self.forms("zweitausend", "2.100", "de"), [("WRONG_VALUE", "digits_left")])  # digits, wrong value
         self.assertEqual(self.forms("zweitausend", "und so", "de"), [("DROPPED", "other")])
 
@@ -337,7 +337,51 @@ class FormClasses(unittest.TestCase):
         self.assertEqual(N.OUTCOMES, ("WORDS_RIGHT_VALUE", "DIGITS_RIGHT_VALUE", "WRONG_VALUE", "DROPPED"))
 
     def test_shares(self):
-        self.assertEqual(N.form_shares({"converted": 1, "mixed": 1, "n": 2}), {"converted": 50.0, "digits_left": 0.0, "mixed": 50.0, "other": 0.0})
+        self.assertEqual(N.form_shares({"converted": 1, "mixed": 1, "n": 2}),
+                         {"converted": 50.0, "digits_left": 0.0, "mixed": 50.0, "words_wrong": 0.0, "other": 0.0})
+        self.assertEqual(N.form_shares({"converted": 1, "words_wrong": 1, "converted_old": 2, "n": 2})["converted_old"], 100.0)
+
+    def test_garbled_words_chain_is_not_converted(self):
+        # red-on-base: before, a wrong or garbled words-only chain was "converted" and ranked as success
+        for lang, ref, hyp in (("de", "zweihundertsiebzig", "zweihundertachtzig"), ("de", "zweitausend", "zwanzigtausend"),
+                               ("it", "centoventicinque", "cento venti sei"), ("nl", "vierentwintig", "vier en dertig")):
+            rows = N.form_outcomes(ref, hyp, lang)
+            self.assertEqual(len(rows), 1, (ref, hyp))
+            self.assertNotEqual(rows[0]["outcome"], "WORDS_RIGHT_VALUE")
+            self.assertEqual(rows[0]["form"], "words_wrong", (ref, hyp, rows))
+            self.assertEqual(rows[0]["form_old"], "converted", (ref, hyp, rows))  # the old count is kept
+        rows = N.form_outcomes("zweitausendeinhundert", "zweitausendzwanz", "de")  # a cut-off compound: broken word
+        self.assertEqual((rows[0]["outcome"], rows[0]["form"], rows[0]["form_old"]), ("WRONG_VALUE", "words_wrong", "other"))
+        r = N.form_outcomes("zweihundertsiebzig", "zwei hundert siebzig", "de")[0]
+        self.assertEqual((r["form"], r["form_old"]), ("converted", "converted"))  # split morphemes with the right value count
+
+    def test_old_form_matches_old_semantics_elsewhere(self):
+        for ref, hyp, lang in (("dos mil quinientos", "2 mil quinientos", "es"), ("zweitausend", "2.100", "de"), ("zweitausend", "und so", "de")):
+            r = N.form_outcomes(ref, hyp, lang)[0]
+            self.assertEqual(r["form"], r["form_old"])
+
+
+class SplitFormValues(unittest.TestCase):  # red-on-base: control (the reader already joins split morphemes)
+    """de / nl / it numbers written as separate morphemes read the same value as the joined compound."""
+
+    def test_split_equals_joined(self):
+        D = __import__("decimal").Decimal
+        cases = [("de", "zwei hundert siebzig", 270), ("de", "zweihundertsiebzig", 270), ("de", "vier und zwanzig", 24),
+                 ("de", "neunzehn hundert neunzig", 1990), ("de", "zwei tausend drei hundert vier und zwanzig", 2324),
+                 ("nl", "vier en twintig", 24), ("nl", "twee honderd vier en twintig", 224), ("nl", "negentien honderd negentig", 1990),
+                 ("it", "cento venti cinque", 125), ("it", "due mila venti tré", 2023), ("it", "due mila venti tre", 2023),
+                 ("it", "venti cinque", 25), ("it", "nove cento", 900)]
+        for lang, text, v in cases:
+            self.assertEqual(N.parse_value(text, lang), D(v), (lang, text))
+
+    def test_split_hyp_is_words_right(self):
+        for lang, ref, hyp in (("de", "270", "zwei hundert siebzig"), ("de", "24", "vier und zwanzig"), ("de", "1990", "neunzehn hundert neunzig"),
+                               ("nl", "24", "vier en twintig"), ("it", "125", "cento venti cinque"), ("it", "2023", "due mila venti tré")):
+            self.assertEqual(N.form_outcomes(ref, hyp, lang)[0]["outcome"], "WORDS_RIGHT_VALUE", (lang, hyp))
+            self.assertEqual(N.form_outcomes(ref, hyp, lang)[0]["form"], "converted", (lang, hyp))
+
+    def test_split_hyp_in_sentence(self):
+        self.assertEqual([r["outcome"] for r in N.number_outcomes("es kostet 270 euro", "es kostet zwei hundert siebzig euro", "de")], ["WORDS_RIGHT_VALUE"])
 
 
 if __name__ == "__main__":

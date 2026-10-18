@@ -131,13 +131,22 @@ def _digit_groups_match(dig: str, text: str) -> bool:
 
 
 def span_form(outcome: str, region: str, lang: str) -> str:
-    """How the hypothesis region of one caption span is written: converted / digits_left / mixed / other (number_outcomes
-    FORM_CLASSES). A right-words span is converted; a digit-right span is digits_left unless a number word joins its
-    digits (mixed); wrong / dropped spans take the form of what stands there."""
+    """How the hypothesis region of one caption span is written: converted / digits_left / mixed / words_wrong / other
+    (number_outcomes FORM_CLASSES). converted = words AND the value is right; a digit-right span is digits_left unless a
+    number word joins its digits (mixed); a wrong span written in words (or with a broken number word) is words_wrong;
+    other wrong / dropped spans take the form of what stands there."""
+    return _span_forms(outcome, region, lang)[0]
+
+
+def _span_forms(outcome: str, region: str, lang: str) -> tuple:
+    """(form, form_old): form_old is the reading before words with a wrong value stopped counting as converted."""
     if outcome == "WORDS_RIGHT_VALUE":
-        return "converted"
+        return "converted", "converted"
     f = N.form_class(region, lang)
-    return "digits_left" if f == "other" and outcome == "DIGITS_RIGHT_VALUE" else f
+    old = "digits_left" if f == "other" and outcome == "DIGITS_RIGHT_VALUE" else f
+    if outcome == "WRONG_VALUE" and (old == "converted" or (old == "other" and not re.search(r"\d", region))):
+        return "words_wrong", old
+    return old, old
 
 
 def long_class(kind: str, text: str) -> str:
@@ -205,14 +214,16 @@ def score_spans(rows: list, lang: str, caps: dict, per_span: list = None, forms:
             c[sp.kind][o] += 1
             c["all"][o] += 1
             if forms is not None:  # form shares (converted / digits_left / mixed / other) over the same spans
-                fc = span_form(o, reg, lang)
+                fc, fold = _span_forms(o, reg, lang)
                 forms[fc] = forms.get(fc, 0) + 1
                 forms["n"] = forms.get("n", 0) + 1
+                forms["converted_old"] = forms.get("converted_old", 0) + (fold == "converted")
                 lc = long_class(sp.kind, sp.text)
                 if forms_by_class is not None and lc:  # converted share on the long classes, per class
                     fb = forms_by_class.setdefault(lc, {})
                     fb[fc] = fb.get(fc, 0) + 1
                     fb["n"] = fb.get("n", 0) + 1
+                    fb["converted_old"] = fb.get("converted_old", 0) + (fold == "converted")
             if per_span is not None:  # paired comparisons (bootstrap / McNemar between two runs on the same spans)
                 per_span.append((r["id"], sp.text, sp.kind, o))
             if o in ("WRONG_VALUE", "DROPPED"):
@@ -491,7 +502,7 @@ def main(argv=None):
                   + " ".join(f"{k}:{v.get('WORDS_RIGHT_VALUE', 0)}/{sum(v.values())}" for k, v in sorted(sc.items()) if k not in ("all", "unplaced"))
                   + f"   | lost {di['lost_per100']} invented {di['invented_per100']} per 100 words (n={di['ref_content_words']})")
             sh = N.form_shares(fm)
-            print(f"{'':24s} {'':4s} FORM converted {sh['converted']}% digits-left {sh['digits_left']}% mixed {sh['mixed']}% other {sh['other']}%")
+            print(f"{'':24s} {'':4s} FORM converted {sh['converted']}% digits-left {sh['digits_left']}% mixed {sh['mixed']}% words-wrong {sh['words_wrong']}% other {sh['other']}% (old converted {sh.get('converted_old')}%)")
     if a.no_damage_vs:
         for run in out:
             if run == a.no_damage_vs:

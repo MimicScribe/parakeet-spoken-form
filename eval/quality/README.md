@@ -59,3 +59,7 @@ python3 test_judge_plro.py        # a plain script that runs judge_plro.py on a 
 The parse step turns decoded text into numbers with a number grammar that is **not in this repo**. Supply your own parser that writes this format.
 
 **Slot matching (strict).** Slots are matched in order, and each parsed number is used once. A phone (`PH`) must be an exact digit run. Clock (`T`) and price (`P`) parts must be adjacent. Other slots match a parsed number equal to the expected value. The headline is **total wrong** (wrong slot readings summed over offsets); seam-broken and always-wrong split it. Compare arms with a paired bootstrap over files (90% CI) and a sign test over slots. It is still a screen, not a proof.
+
+Invented words and split-form numbers (R8 measurement):
+- `invented_words.py` counts words that are in no lexicon of the language (references, stock/base decodes, training text, number morphemes): sentences with an invented token, invented tokens per converted number, invented rate by token length. Method in its docstring; `--help` for the parity-decode and app-path inputs.
+- `number_outcomes.form_outcomes` calls a number `converted` only when it is written as words AND the value is right; a wrong or broken words chain is `words_wrong`, and the old count stays in `form_old` / `converted_old`.

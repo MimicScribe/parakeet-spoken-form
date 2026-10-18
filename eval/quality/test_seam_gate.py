@@ -314,6 +314,18 @@ class PickMostConverted(unittest.TestCase):  # score_heldout.pick_most_converted
         self.assertEqual(self.H.span_form("DIGITS_RIGHT_VALUE", "2500", "es"), "digits_left")
         self.assertEqual(self.H.span_form("WRONG_VALUE", "2 mil quinientos", "es"), "mixed")
         self.assertEqual(self.H.span_form("DROPPED", "y", "es"), "other")
+        self.assertEqual(self.H.span_form("WRONG_VALUE", "zweitausendzwanz", "de"), "words_wrong")  # garbled words are not converted
+        self.assertEqual(self.H.span_form("WRONG_VALUE", "zwanzig tausend", "de"), "words_wrong")
+
+    def test_pick_ignores_garbled_conversion(self):
+        sp = lambda w, d, x, dr, fm: {"spans": {"all": {"WORDS_RIGHT_VALUE": w, "DIGITS_RIGHT_VALUE": d,  # noqa: E731
+                                                        "WRONG_VALUE": x, "DROPPED": dr}}, "forms": fm}
+        out = {"B": {"de": sp(0, 90, 5, 5, {"digits_left": 100, "n": 100})},
+               "garbler": {"de": sp(80, 10, 5, 5, {"converted": 40, "words_wrong": 55, "digits_left": 5, "n": 100, "converted_old": 95})},
+               "clean": {"de": sp(80, 10, 5, 5, {"converted": 60, "digits_left": 40, "n": 100, "converted_old": 60})}}
+        pk = self.H.pick_most_converted(out, "B")
+        self.assertEqual(pk["pick"], "clean")  # on the old count the garbler (95%) would have won
+        self.assertEqual(pk["per_language"]["de"]["garbler"]["converted_old"], 95.0)
 
     def test_pick(self):
         sp = lambda w, d, x, dr, fm: {"spans": {"all": {"WORDS_RIGHT_VALUE": w, "DIGITS_RIGHT_VALUE": d,  # noqa: E731

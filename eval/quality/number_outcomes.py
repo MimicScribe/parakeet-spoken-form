@@ -962,7 +962,9 @@ def number_outcomes(ref: str, hyp: str, lang: str) -> list:
 # ===== FORM CLASSES (outside CORE: the public scorer is unchanged) =====
 # How a hypothesis WRITES a number, independent of its value: a spoken-form model that converts only some numbers (or
 # half of one: "2 mil quinientos") makes the two overlapping windows read the same audio in different forms.
-FORM_CLASSES = ("converted", "digits_left", "mixed", "other")
+# "converted" = the number is written as words AND its value is right. A words-only chain with the wrong value (a garbled
+# or invented compound) is "words_wrong"; the old count (words-only chain, value ignored) stays as `form_old` / `converted_old`.
+FORM_CLASSES = ("converted", "digits_left", "mixed", "words_wrong", "other")
 
 
 def number_groups(text: str, lang: str) -> list:
@@ -998,9 +1000,10 @@ def form_class(text: str, lang: str) -> str:
 
 def form_outcomes(ref: str, hyp: str, lang: str) -> list:
     """number_outcomes rows (semantics unchanged) plus a `form` per reference number: converted / digits_left / mixed /
-    other. WORDS_RIGHT -> converted, DIGITS_RIGHT -> digits_left; for WRONG / DROPPED rows the leftover hypothesis
-    chains are dealt out in order: a mixed chain makes that row `mixed` (the old scorer folded it into WRONG_VALUE), a
-    digits-only chain `digits_left` (digits written, wrong value), a words-only chain `converted` (words, wrong value)."""
+    other (+ words_wrong). WORDS_RIGHT -> converted, DIGITS_RIGHT -> digits_left; for WRONG / DROPPED rows the leftover
+    hypothesis chains are dealt out in order: a mixed chain makes that row `mixed` (the old scorer folded it into
+    WRONG_VALUE), a digits-only chain `digits_left` (digits written, wrong value), a words-only chain `words_wrong`
+    (words, wrong value: NOT converted). `form_old` keeps the previous reading, where that last case was `converted`."""
     rows = number_outcomes(ref, hyp, lang)
     left = [g["form"] for g in number_groups(hyp, lang)]
     right_digits = sum(r["outcome"] == "DIGITS_RIGHT_VALUE" for r in rows)
@@ -1019,13 +1022,19 @@ def form_outcomes(ref: str, hyp: str, lang: str) -> list:
             r["form"] = {"mixed": "mixed", "digits": "digits_left", "words": "converted"}[pool.pop(0)]
         else:
             r["form"] = "other"
+        r["form_old"] = r["form"]  # the previous reading: a words-only chain stood for converted whatever its value
+        if r["outcome"] != "WORDS_RIGHT_VALUE" and (r["form"] == "converted" or r["hyp_form"] == "garble"):
+            r["form"] = "words_wrong"  # words written, value wrong / broken word: not converted
     return rows
 
 
 def form_shares(counts: dict) -> dict:
     """{class: percent of n} from a Counter of FORM_CLASSES (+ n)."""
     n = sum(counts.get(k, 0) for k in FORM_CLASSES)
-    return {k: round(100 * counts.get(k, 0) / n, 1) if n else None for k in FORM_CLASSES}
+    out = {k: round(100 * counts.get(k, 0) / n, 1) if n else None for k in FORM_CLASSES}
+    if "converted_old" in counts:  # the old reading (words-only chain of any value), for comparison
+        out["converted_old"] = round(100 * counts["converted_old"] / n, 1) if n else None
+    return out
 
 
 def summarize(rows: list) -> dict:
