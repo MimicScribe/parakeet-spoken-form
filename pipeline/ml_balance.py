@@ -274,21 +274,28 @@ PRONOUN = {
 # homophones / homographs of number words in number-free speech (the non-number spelling or sense)
 HOMOPHONE = {
     "de": r"\b(?:außer acht|in acht (?:nehmen|genommen|zu nehmen)|acht (?:geben|gegeben|zu geben)|achtgeben|achten|"
-          r"achtet|beachten|beachtet|zehen)\b",
-    "fr": r"\b(?:sans|sang|sent|s'en|vin|vins|vain|d'eux|cette|cet)\b",  # cent / vingt / deux / sept
+          r"achtet|beachten|beachtet|zehen|neuen|neuer|neues|neuem)\b",  # 2026-10-18: neun
+    "fr": r"\b(?:sans|sang|sent|s'en|vin|vins|vain|d'eux|cette|cet)\b|"  # cent / vingt / deux / sept
+          # 2026-10-18: "neuf" = new (flambant neuf, quoi de neuf, à neuf), neuve(s) / neufs
+          r"\b(?:flambant|tout|toute|tous|quoi de|rien de|du|à) neufs?\b|\bneufs\b|\bneuves?\b",
     "es": r"\b(?:siento|siente|sientes)\b",  # ciento / siete
     "it": r"\b(?:tu|non|se|ne|ci|lo|la|li|le|mi|ti|ma|che|dove|come|chi|quando|perché|già) sei\b|"
-          r"\bsei (?:stato|stata|un|una|il|la|qui|qua|sicuro|sicura|tu|davvero|bravo|brava|pronto|pronta|d'accordo)\b",
+          r"\bsei (?:stato|stata|un|una|il|la|qui|qua|sicuro|sicura|tu|davvero|bravo|brava|pronto|pronta|d'accordo)\b|"
+          # 2026-10-18: "venti" = winds (i venti, venti di guerra, venti forti)
+          r"\b(?:i|dei|ai|nei|coi|sui|dai|questi|quei|forti|nuovi) venti\b|"
+          r"\bventi (?:di (?:guerra|cambiamento|crisi|tempesta|protesta|rivolta|libertà)|forti|freddi|caldi|contrari)\b",
     "pt": r"\b(?:sem|cento e|trás|atrás)\b",  # cem / três
     "nl": r"\b(?:ik acht|acht ik|geacht|achten|achtte|vieren|viert|gevierd)\b",  # acht / vier
     "en": r"\b(?:for|to|too|ate|won|fore)\b",  # four / two / eight / one
 }
 # homophone tokens that are themselves number-word strings: a row holding one is number-free only when HOMOPHONE
 # matches it (it "sei" = you are, de "außer Acht", nl "ik acht") and no number context does
-HOMO_TOKENS = {"de": {"acht", "achten"}, "it": {"sei"}, "nl": {"acht"}}
+HOMO_TOKENS = {"de": {"acht", "achten"}, "it": {"sei", "venti"}, "nl": {"acht"}, "fr": {"neuf"}}
 NUM_CONTEXT = {
-    "it": r"\bsei (?:anni|mesi|giorni|ore|volte|milioni|mila|per cento|euro|punti|settimane|minuti|persone|paesi|gruppi|"
-          r"stati|membri)\b",
+    "it": r"\b(?:sei|venti) (?:anni|mesi|giorni|ore|volte|milioni|mila|per cento|euro|punti|settimane|minuti|persone|"
+          r"paesi|gruppi|stati|membri|miliardi|chilometri|metri)\b",
+    "fr": r"\bneuf (?:ans|mois|jours|heures|pour cent|millions|milliards|euros|fois|semaines|minutes|pays|états|personnes|"
+          r"membres|cents|mille)\b|\b(?:dix|vingt|trente|quarante|cinquante|soixante|cent) neuf\b",
     "de": r"\bacht (?:jahre|monate|tage|stunden|prozent|millionen|euro|mal|wochen|minuten|uhr|länder|mitgliedstaaten)\b|"
           r"\b(?:am|zum|vom|im|des|dem|den|der|die|das) achten\b",  # "am achten Mai" is the ordinal
     "nl": r"\bacht (?:jaar|maanden|dagen|uur|procent|miljoen|euro|keer|weken|minuten|landen|lidstaten)\b",

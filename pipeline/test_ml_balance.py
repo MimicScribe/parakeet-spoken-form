@@ -122,7 +122,16 @@ cases = [("Wir dürfen das nicht außer Acht lassen.", "de", True, "homophone"),
          ("Er zijn tienduizenden mensen.", "nl", False, None),
          ("We vieren de successen van Europa.", "nl", True, "homophone"),
          ("Il y a dix-sept ans.", "fr", False, None),
-         ("Nel duemilaventi a settembre.", "it", False, None)]
+         ("Nel duemilaventi a settembre.", "it", False, None),
+         # 2026-10-18 look-alikes: fr "neuf" = new, it "venti" = winds, de "neuen" (neun)
+         ("C'est un bâtiment flambant neuf.", "fr", True, "homophone"),
+         ("Quoi de neuf aujourd'hui ?", "fr", True, "homophone"),
+         ("Il a neuf ans.", "fr", False, None),
+         ("Rendez-vous à neuf heures.", "fr", False, None),
+         ("I venti di guerra soffiano ancora.", "it", True, "homophone"),
+         ("Sono passati venti anni.", "it", False, None),
+         ("Wir brauchen neuen Schwung.", "de", True, "homophone"),
+         ("Es sind neun Länder.", "de", False, None)]
 for text, lang, free, tag in cases:
     assert B.number_free(text, lang) == free, (text, lang)
     if tag:

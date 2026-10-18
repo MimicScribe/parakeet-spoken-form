@@ -12,6 +12,7 @@ Data-quality and scoring tools. Python 3, stdlib only for the tests (the number-
 | `wordfix_ext.py` | interior word repair from agreeing sources |
 | `seam_gate.py` | seam veto vs a baseline: offset score over decoder dumps (fails on a missing scope, language or slot); proxy gate and lost-word rate are report-only |
 | `offset_score.py`, `score_values.py` | seam scorers over decoder dumps (see CONCEPTS.md) |
+| `false_conversion.py` | false-conversion gate: spurious digits / number words per 1,000 words on number-free speech, paired vs a base arm (stock) |
 
 ## Tests
 
