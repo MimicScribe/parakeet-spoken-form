@@ -30,6 +30,7 @@ stats.json; check_<n>.json (checker). The build reads them with build4 win15_sha
 
     modal run win15.py::main --langs de,es --tag a --share 0.12    # build
     modal run win15.py::check --langs de --tag a --n 120             # alignment checker
+    modal run win15.py::edge --tag sym --set-tag ttsSYM1 --hours de:0.6   # edge windows of one synthetic set
     python win15.py census <dir with windows_<lang>.jsonl + pool_<lang>.jsonl> [--langs ...]
 """
 
@@ -172,6 +173,98 @@ def plan_windows(rows: list, gaps: list, quiet, rng, win: float = WIN, min_len: 
     return out
 
 
+# edge windows (2026-10-18): a LONG number reading
+# (>= LONG_MIN_WORDS words: phones, big amounts, decimals with units) placed at the window's start, middle or end --
+# its end EDGE_TAIL s before the right edge ("tail"), its start EDGE_HEAD s after the left edge ("head": the previous
+# window would end right before it) or its middle near the window's middle ("middle").
+# Edges are the usual quiet cuts between words, never inside a reading, so the reading is whole and labels stay exact.
+LONG_MIN_WORDS = 3
+EDGE_TAIL = (0.1, 2.0)
+EDGE_HEAD = (0.0, 1.5)
+EDGE_MODES = ("head", "middle", "tail")  # start, middle and end, about evenly
+
+
+def long_targets(words: list, min_words: int = LONG_MIN_WORDS) -> list:
+    """[(reading key, start, end)] of the readings with >= min_words words, in stream order."""
+    by = {}
+    for x in words:
+        if x[3] is not None:
+            by.setdefault(x[3], []).append(x)
+    return [(k, xs[0][1], xs[-1][2]) for k, xs in by.items() if len(xs) >= min_words]
+
+
+def edge_bucket(w: dict) -> str:
+    """Where a window's long reading sits: "start" (begins <= 2 s after the left edge), "end" (ends <= 3 s before the
+    right edge), "both" (a short window holding it from edge to edge), else "middle"."""
+    a, b = w["edge_pos_s"]
+    return "both" if a <= 2.0 and b <= 3.0 else "start" if a <= 2.0 else "end" if b <= 3.0 else "middle"
+
+
+def plan_edge_windows(rows: list, gaps: list, quiet, rng, win: float = WIN, min_len: float = MIN_LEN,
+                      min_rows: int = MIN_NUM_ROWS, edge_ok=None) -> list:
+    """One window per long reading of the stream (when the geometry allows): "tail" -- the right edge is the cut
+    after the reading closest to its end + U(EDGE_TAIL), the left edge a random cut min_len-win s earlier; "head" --
+    the left edge is the cut before the reading closest to its start - U(EDGE_HEAD), the right edge a random cut
+    min_len-win s later. Kept when >= min_rows rows have a number word inside, the target reading is whole and every
+    cut row edge re-decodes (ends_ok). Window dicts as plan_windows, plus edge / edge_gap_s / edge_words."""
+    starts, words, total = layout(rows, gaps)
+    cuts = cut_points(words, total, quiet)
+    out, seen = [], set()
+    for key, t0, t1 in long_targets(words):
+        mode = rng.choice(EDGE_MODES)
+        if mode == "tail":
+            want = t1 + rng.uniform(*EDGE_TAIL)
+            near = [k for k, (c, _) in enumerate(cuts) if t1 - 1e-6 <= c <= t1 + EDGE_TAIL[1] + 0.6]
+            if not near:
+                continue
+            kb = min(near, key=lambda k: abs(cuts[k][0] - want))
+            far = [k for k, (c, _) in enumerate(cuts) if min_len <= cuts[kb][0] - c <= win]
+            if not far:
+                continue
+            ka = rng.choice(far)
+        elif mode == "middle":  # the reading's middle near the window's middle (+- 1 s)
+            mid = (t0 + t1) / 2
+            span = rng.uniform(min_len, win)
+            want_a = mid - span / 2 + rng.uniform(-1.0, 1.0)
+            ka = min(range(len(cuts)), key=lambda k: abs(cuts[k][0] - want_a))
+            far = [k for k, (c, _) in enumerate(cuts) if min_len <= c - cuts[ka][0] <= win and c >= t1]
+            if not far or cuts[ka][0] > t0:
+                continue
+            kb = min(far, key=lambda k: abs(cuts[k][0] - (cuts[ka][0] + span)))
+        else:
+            want = t0 - rng.uniform(*EDGE_HEAD)
+            near = [k for k, (c, _) in enumerate(cuts) if t0 - EDGE_HEAD[1] - 0.6 <= c <= t0 + 1e-6]
+            if not near:
+                continue
+            ka = min(near, key=lambda k: abs(cuts[k][0] - want))
+            far = [k for k, (c, _) in enumerate(cuts) if min_len <= c - cuts[ka][0] <= win]
+            if not far:
+                continue
+            kb = rng.choice(far)
+        (a, j0), (b, j1) = cuts[ka], cuts[kb]
+        if (j0, j1) in seen or j1 <= j0:
+            continue
+        w = {"a": a, "b": b, "j0": j0, "j1": j1}
+        ws = words[j0:j1]
+        if not all(x[3] != key or j0 <= n < j1 for n, x in enumerate(words)):
+            continue  # the target reading must be whole inside
+        n_rows = len({x[4] for x in ws if x[3] is not None})
+        if n_rows < min_rows or not ends_ok(rows, words, w, edge_ok):
+            continue
+        seen.add((j0, j1))
+        rws = sorted({x[4] for x in ws})
+        cut_l = j0 > 0 and words[j0 - 1][4] == words[j0][4]
+        cut_r = j1 < len(words) and words[j1][4] == words[j1 - 1][4]
+        out.append(dict(w, text=" ".join(x[0] for x in ws), num_tokens=[x[3] is not None for x in ws],
+                        word_times=[[round(x[1] - a, 3), round(x[2] - a, 3)] for x in ws],
+                        src=[[x[4], x[5]] for x in ws], rows=rws, n_num_rows=n_rows, cut_left=cut_l, cut_right=cut_r,
+                        seg=[[i, round(max(starts[i], a) - a, 3), round(min(starts[i] + rows[i]["duration"], b) - a, 3)]
+                             for i in rws],
+                        edge=mode, edge_gap_s=round((b - t1) if mode == "tail" else (t0 - a), 3),
+                        edge_pos_s=[round(t0 - a, 3), round(b - t1, 3)], edge_words=sum(1 for x in words if x[3] == key)))
+    return out
+
+
 def safe_quiet(x, t0: float, t1: float):
     """ml_p3_core.quiet_cut on [t0, t1] clipped to the audio (None when nothing is left of it)."""
     t0, t1 = max(0.0, t0), min(len(x) / 16000, t1)
@@ -306,6 +399,9 @@ def window_row(w: dict, stream: list, lang: str, wid: str, wav: str, dur: float,
            "stream": C.stream_key(par[0])[0], "greedy": greedy, "cer": round(cer, 3), "synthetic": syn}
     if syn:
         row["voice"] = par[0].get("voice")
+    for k in ("edge", "edge_gap_s", "edge_pos_s", "edge_words"):  # edge windows (plan_edge_windows)
+        if k in w:
+            row[k] = w[k]
     return row
 
 
@@ -863,6 +959,128 @@ if modal is not None:
         json.dump(res, open(dest, "w"), indent=1, ensure_ascii=False)
         vol.commit()
         return res
+
+    @app.function(image=image, volumes={VOL: vol}, gpu="L4", timeout=3 * 3600, max_containers=7)
+    def build_edge(lang: str, tag: str, set_tag: str, hours: float, seed: int = 1) -> dict:
+        """Edge windows (plan_edge_windows) from one synthetic set's verified rows (ml/<set_tag>/<lang>/rows.jsonl,
+        clean audio, one voice per stream); rows with a letter+digit code are left out (the build re-labels codes in
+        rows, not in windows). The same CTC re-decode / edge / alignment checks as build_lang. A build keeps a window
+        only when every parent row is one it trains on (select_for_build), so windows are cut from the whole set."""
+        from collections import Counter
+
+        import librosa
+        import soundfile as sf
+
+        out = f"{VOL}/ml/win15{tag}/{lang}"
+        assert not os.path.exists(f"{out}/windows.jsonl"), f"{out}/windows.jsonl exists: use a new tag"
+        os.makedirs(f"{out}/wav", exist_ok=True)
+        rng = random.Random(f"win15edge-{lang}-{seed}")
+        st = Counter()
+        ctc = _ctc(lang)
+        src = [dict(x, src="tts", _set=set_tag) for x in _rows(f"{VOL}/ml/{set_tag}/{lang}/rows.jsonl")]
+        syn = [x for x in src if C.has_times(x) and not any(sp.get("kind") == "alnum" for sp in x.get("spans") or [])]
+        st["source_rows"], st["source_alnum_or_untimed"] = len(src), len(src) - len(syn)
+
+        def read(p):
+            x, sr = sf.read(p, dtype="float32")
+            x = x.mean(1) if x.ndim > 1 else x
+            return x if sr == 16000 else librosa.resample(x, orig_sr=sr, target_sr=16000)
+
+        rows_out, kept_s, rejects, modes = [], 0.0, [], Counter()
+        f = open(f"{out}/windows.jsonl", "w", encoding="utf-8")
+        for ph in range(PHASES):
+            if kept_s >= hours * 3600:
+                break
+            streams = group(syn, rng)
+            for si, stream in enumerate(streams):
+                if kept_s >= hours * 3600:
+                    break
+                got = []
+                for r in stream:
+                    try:
+                        x = read(r["audio_filepath"])
+                    except Exception:  # noqa: BLE001
+                        st["row_unreadable"] += 1
+                        continue
+                    r, x = trim_row(dict(r, duration=len(x) / 16000), x)
+                    got.append(dict(r, _x=x))
+                stream = got
+                if len(stream) < MIN_NUM_ROWS:
+                    continue
+                gaps = stream_gaps(len(stream), rng)
+                x_all = stitch(stream, gaps, seed=zlib_seed(lang, "edge", ph, si))
+                total = len(x_all) / 16000
+                quiet = lambda t0, t1: safe_quiet(x_all, t0, t1)  # noqa: E731
+                flags = {}
+
+                def edge_ok(i, side, stream=stream, flags=flags):
+                    r = stream[i]
+                    if (i, side) not in flags:
+                        n = int(EDGE_S * 16000)
+                        g = ctc.greedy(ctc.lp(r["_x"][:n] if side == "start" else r["_x"][-n:]))
+                        flags[(i, side)] = end_close(r["text"], g, side)
+                        st[f"row_{side}_bad"] += not flags[(i, side)]
+                    return flags[(i, side)]
+
+                planned = plan_edge_windows(stream, gaps, quiet, rng, edge_ok=edge_ok)
+                for j, w in enumerate(planned):
+                    if kept_s >= hours * 3600:
+                        break
+                    st["planned"] += 1
+                    x = x_all[int(round(w["a"] * 16000)):int(round(min(w["b"], total) * 16000))]
+                    lp = ctc.lp(x)
+                    g = ctc.greedy(lp)
+                    cer = C.cer(w["text"], g)
+                    if cer > WIN_MAX_CER:
+                        st["cer"] += 1
+                        continue
+                    if not edges_ok(w["text"], g):
+                        st["edge_word"] += 1
+                        if len(rejects) < 40:
+                            rejects.append({"label": w["text"], "greedy": g})
+                        continue
+                    why = check_alignment(dict(w, src=[[stream[i]["id"], k] for i, k in w["src"]],
+                                               seg=[[stream[i]["id"], a, b] for i, a, b in w["seg"]]),
+                                          ctc.word_times(lp, w["text"]))
+                    if boundary_fail(why):
+                        st["align_boundary"] += 1
+                        continue
+                    wid = f"w15{tag}_e{ph}_{si}_{j}"
+                    wav = f"{out}/wav/{wid}.wav"
+                    assert not os.path.exists(wav), wav
+                    sf.write(wav, x, 16000, subtype="PCM_16")
+                    row = window_row(w, stream, lang, wid, wav, len(x) / 16000, g, cer)
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+                    rows_out.append(row)
+                    kept_s += len(x) / 16000
+                    st["kept"] += 1
+                    modes[w["edge"]] += 1
+                if si % 40 == 0:
+                    f.flush()
+                    vol.commit()
+        f.close()
+        pool_rows = [{k: v for k, v in r.items() if not k.startswith("_")} for r in syn]
+        gaps_s = [r["edge_gap_s"] for r in rows_out]
+        res = {"lang": lang, "tag": tag, "set": set_tag, "hours_target": hours, "kept_h": round(kept_s / 3600, 3),
+               "counts": dict(st), "modes": dict(modes), "position": dict(Counter(edge_bucket(r) for r in rows_out)),
+               "edge_gap_s": {"min": min(gaps_s, default=None), "max": max(gaps_s, default=None),
+                              "mean": round(sum(gaps_s) / max(len(gaps_s), 1), 3)},
+               "census": census(rows_out, pool_rows, lang), "edge_rejects": rejects}
+        json.dump(res, open(f"{out}/stats.json", "w"), indent=1, ensure_ascii=False)
+        with open(f"{out}/pool.jsonl", "w", encoding="utf-8") as pf:
+            for r in pool_rows:
+                pf.write(json.dumps({k: r.get(k) for k in ("id", "text", "spans", "num_chars", "src", "voice",
+                                                           "audio_filepath")}, ensure_ascii=False) + "\n")
+        vol.commit()
+        return res
+
+    @app.local_entrypoint()
+    def edge(langs: str = "de,es,fr,it,nl,pt", tag: str = "sym", set_tag: str = "ttsSYM1", hours: str = "",
+             default_h: float = 0.5, seed: int = 1):
+        """Edge windows of one synthetic set: modal run win15.py::edge --tag sym --set-tag ttsSYM1 --hours de:0.6,nl:0.1"""
+        over = {k: float(v) for k, v in (x.split(":") for x in hours.split(",") if x)}
+        for r in build_edge.starmap([(l, tag, set_tag, over.get(l, default_h), seed) for l in langs.split(",")]):
+            print(json.dumps({k: r[k] for k in ("lang", "kept_h", "counts", "modes", "edge_gap_s")}, ensure_ascii=False))
 
     @app.local_entrypoint()
     def main(langs: str = "de,es,fr,it,nl,pt", tag: str = "a", mix_dir: str = "mix4final8", share: float = 0.12,

@@ -875,7 +875,15 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
             # reading-variety fill (2026-10-18, ml_tts_variety): the same numbers read the other ways people say them
             # (relative clock times, natural phone groupings, paired years, prices without the unit, ...); its rows
             # REPLACE the older synthetic rows they name (TTS_REPLACING)
-            ("ttsRV1b", "ttsRV1b_judge"), ("ttsRV1r2", "ttsRV1r2_judge"))
+            ("ttsRV1b", "ttsRV1b_judge"), ("ttsRV1r2", "ttsRV1r2_judge"),
+            # symbol-class set (2026-10-18, ml_tts_symbol): percent with the unit word, decimals with the decimal word,
+            # prices, units, big numbers with magnitude words, phones, letter+digit codes; 2-4 numbers per sentence,
+            # open-licence cloned voices (ml_tts_open); sized to the synthetic room of each class in the current mix
+            ("ttsSYM1", "ttsSYM1_judge"),
+            # ttsSYM1r: the same generator's single-class rows for the cells at their synthetic cap (nl / it cur, phone,
+            # dec, int_big; de phone; pt int_big; de / it Roman numerals); each REPLACES older single-class synthetic
+            # rows of its class (TTS_REPLACING, never a ttsRV1 row), so the class sizes stay as they are
+            ("ttsSYM1r", "ttsSYM1r_judge"))
 # sets planned against the census's per-value gaps (tts5y: thin year values, normal speaking rates): the share cap
 # applies, the "real speech has enough of this class" cut-off does not (synthetic years and counts
 # are fine within the cap)
@@ -890,18 +898,21 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
 TTS_TARGETED = {"tts5y", "tts6uk", "tts7", "tts8", "tts9nl", "tts9ru", "tts9ru2", "ttsm2", "ttsm1", "ttsL0", "ttsL1", "ttsL2p", "ttsL2", "ttsES1",
                 "ttsFT1", "ttsFT2", "ttsFT3", "ttsFT4", "ttsFT5", "ttsFT5c", "ttsFT5d",
                 "ttsFT6c", "ttsFT6r", "ttsFT6rd", "ttsLNw", "ttsLNr", "ttsLNm", "ttsYRm", "ttsYRr",
-                "ttsYRs", "ttsYRn", "ttsCNm", "ttsLTw", "ttsLTr", "ttsNL1", "ttsNL2", "ttsW1", "ttsRV1b", "ttsRV1r2"}
+                "ttsYRs", "ttsYRn", "ttsCNm", "ttsLTw", "ttsLTr", "ttsNL1", "ttsNL2", "ttsW1", "ttsRV1b", "ttsRV1r2", "ttsSYM1",
+                "ttsSYM1r"}
 # sets whose rows replace older synthetic rows (2026-10-18, B2): a row's "supersedes" lists the ids it replaces (rows of
 # the same class and value spread, read one convention; ml_tts_variety picked them). order_synthetic drops those ids
 # and puts the set's rows first, so they take the room the dropped rows leave (a class at its fill-to-bar or share cap
 # would otherwise admit none of them)
-TTS_REPLACING = {"ttsRV1b", "ttsRV1r2"}  # ttsRV1r2: re-judged ttsRV1b rows, century-dropped years out (ttsRV1r: mix4final9b)
+TTS_REPLACING = {"ttsRV1b", "ttsRV1r2", "ttsSYM1r"}  # ttsRV1r2: re-judged ttsRV1b rows, century-dropped years out (ttsRV1r: mix4final9b)
 REPLACE_ROUNDS = 3  # build4 reruns of the synthetic selection when a replacing row is refused (then fatal)
 TTS_AUG_FRAC = 0.6  # share of chosen synthetic rows given a degraded copy instead of the clean audio
 # the long-number top-up sets (2026-10-17): mostly synthetic in their classes (fill-to-bar), so more of them are degraded
 # ttsRV1 (2026-10-18): its cells are synthetic-heavy too (clock / phone / price rows mostly synthetic), and it replaces
 # rows of the long sets, so it keeps their degraded share
-TTS_LONG_SETS = {"ttsLNw", "ttsLNr", "ttsLNm", "ttsLTw", "ttsLTr", "ttsNL2", "ttsW1", "ttsRV1b", "ttsRV1r2"}
+# ttsSYM1 (2026-10-18): long numbers (phones, big amounts, decimals with units) in mostly-synthetic cells, like the long sets
+TTS_LONG_SETS = {"ttsLNw", "ttsLNr", "ttsLNm", "ttsLTw", "ttsLTr", "ttsNL2", "ttsW1", "ttsRV1b", "ttsRV1r2", "ttsSYM1",
+                 "ttsSYM1r"}
 TTS_AUG_FRAC_LONG = 0.75
 
 
@@ -2586,6 +2597,7 @@ NUMBER_PART.update({"mix3b/d1_ycap.jsonl": 1.0, "mix3b/d10n_ycap.jsonl": 1.0,
                     "d1/en4_ok/tts9_en_train.jsonl": 1.0, "d1/en4_ok/tts10_en_train.jsonl": 1.0,
                     "d1/en4_ok/tts11_en_train.jsonl": 1.0, "d1/en4_ok/yodas_enh_train_ycap.jsonl": 1.0,
                     "d1/en4_ok/tts12_en_train.jsonl": 1.0, "d1/en4_ok/yodas_rare_train_ycap.jsonl": 1.0,
+                    "d1/en4_ok/ttsSYM1_en_train.jsonl": 1.0,
                     "d1/en4_ok/vox_rare_train_ycap.jsonl": 1.0,
                     "d1/en4_ok/win_en.jsonl": 1.0, "d1/en4_ok/seam_en.jsonl": 0.977})
 # the balance-capped English copies (en_balance) carry their source part's number share

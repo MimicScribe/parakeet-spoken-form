@@ -42,7 +42,7 @@ OUT = f"{VOL}/ml/{TAG}"
 CER_MAX = 0.15
 # planned-row fields a verified row keeps when present (the reading-variety fill: the rows it replaces, the convention
 # of each number, the voice locale); rows without them are written exactly as before
-PASS_THROUGH = ("supersedes", "convs", "locale", "ckey", "register")
+PASS_THROUGH = ("supersedes", "convs", "locale", "ckey", "register", "engine_src", "slots", "gclasses")
 SPEED_LO, SPEED_HI = 0.9, 1.3
 WORDS_MIN, WORDS_MAX = 8, 20
 FORBIDDEN = re.compile(r"[0-9$€£¥%#/+°²³½¼¾ºª‰&]")  # the build audit's list
@@ -1048,18 +1048,21 @@ def _kept_row(row, path, x, wt, info, lang) -> dict:
             "word_times": [[round(a, 3), round(b, 3)] for a, b in wt], "cer_ctc": info["cer_ctc"],
             "fit": info.get("fit"), "edge_quiet": C.edge_quiet(x), "split": row["split"], "voice": row["voice"],
             "voice_license": row["voice_license"], "speed": row["speed"], "engine": row["engine"],
-            **{k: row[k] for k in PASS_THROUGH if k in row}}
+            **{k: row[k] for k in PASS_THROUGH if k in row}, **({"greedy": info["greedy"]} if "greedy" in info else {})}
 
 
 @_fn
 def tts_lang(lang: str, n: int = 600, seed: int = 1, hours: float = 0.0, overgen: float = 1.6, broad: bool = False,
-             classes: str = "", out_tag: str = TAG, rows_file: str = "", keep_failed: bool = False) -> dict:
+             classes: str = "", out_tag: str = TAG, rows_file: str = "", keep_failed: bool = False,
+             keep_greedy: bool = False) -> dict:
     """Plan ~n*overgen sentences, synthesise, keep the clips the CTC reader confirms, write /vol/ml/tts1/<lang>/.
     `hours` > 0 stops once that much audio is kept. `broad`: draw values from wide domains instead of the ones the grammar table already
     holds (use after the table was extended with `needed` keys). Writes rows.jsonl, wav/*.wav and stats.json (drops per class/voice).
     keep_failed (2026-10-18, default off = unchanged): the clips the CTC reader rejects but can still align are written too,
     to rows_ctc_failed.jsonl (with the greedy text and the reason), never to rows.jsonl: a second, independent check (a
-    verbatim second transcript that matches the label word for word) may accept them later (the reading-variety fill)."""
+    verbatim second transcript that matches the label word for word) may accept them later (the reading-variety fill).
+    keep_greedy (2026-10-18, default off = unchanged): kept rows carry the CTC reader's greedy text ("greedy"), so a
+    fuzzy fit can be checked number by number later (ml_tts_symbol.finalize)."""
     import soundfile as sf
     import numpy as np
 
@@ -1100,6 +1103,8 @@ def tts_lang(lang: str, n: int = 600, seed: int = 1, hours: float = 0.0, overgen
         lp = ctc.lp(x)
         greedy = ctc.greedy(lp)
         ok, why, info = check_greedy(row, greedy)
+        if keep_greedy:
+            info["greedy"] = greedy
         if not ok:
             by_cls[row["cls"]]["drop_" + why] += 1
             by_voice[vk]["dropped"] += 1
@@ -1143,10 +1148,11 @@ def tts_lang(lang: str, n: int = 600, seed: int = 1, hours: float = 0.0, overgen
 if _MODAL:
     @app.local_entrypoint()
     def main(langs: str = "es,fr,de,it,pt,nl", n: int = 600, seed: int = 1, hours: float = 0.0, broad: bool = False,
-             classes: str = "", out_tag: str = TAG, rows_file: str = "", keep_failed: bool = False):
+             classes: str = "", out_tag: str = TAG, rows_file: str = "", keep_failed: bool = False,
+             keep_greedy: bool = False):
         # rows_file: a per-language path template with {lang}, e.g. ml/tts3/{lang}/planned.jsonl
         for res in tts_lang.starmap([(lang, n, seed, hours, 1.6, broad, classes, out_tag,
-                                      rows_file.format(lang=lang) if rows_file else "", keep_failed)
+                                      rows_file.format(lang=lang) if rows_file else "", keep_failed, keep_greedy)
                                      for lang in langs.split(",")]):
             print(res)
 

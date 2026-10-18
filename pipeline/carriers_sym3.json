@@ -1,0 +1,40 @@
+{
+ "_doc": "Replacing rows of ml_tts_symbol.py (2026-10-18, set ttsSYM1r): one symbol class per sentence (phones, prices, decimals, big counts, Roman numerals) for the cells whose synthetic share is at its cap, so each new row can take the place of older single-class synthetic rows of the same class (supersedes) and the class sizes stay as they are. Slots as in carriers_sym.json.",
+ "de": [
+  "Ruf mich unter {phone} an, oder schreib an die {phone2}.",
+  "Die Hotline erreichen Sie unter {phone}, werktags bis achtzehn Uhr.",
+  "Meine neue Nummer ist die {phone}, die alte kannst du löschen.",
+  "Für Rückfragen steht Frau Weber unter {phone} zur Verfügung.",
+  "{roman} und {roman2} kamen in der Vorlesung vor."
+ ],
+ "nl": [
+  "Bel me op {phone}, of anders op {phone2}.",
+  "De klantenservice is bereikbaar op {phone}, op werkdagen tot zes uur.",
+  "Mijn nieuwe nummer is {phone}, het oude mag je wissen.",
+  "Een kilo tomaten kost nu {cur}, in de zomer was dat {cur2}.",
+  "De lunch kostte {cur} per persoon en de koffie {cur2}.",
+  "Het kaartje kost {cur} en een programmaboekje {cur2}.",
+  "De meting gaf {dec} bij de eerste en {dec2} bij de tweede poging.",
+  "Het gemiddelde cijfer was {dec}, vorig jaar nog {dec2}.",
+  "In de stad wonen {bign} mensen en in de regio ruim {bign2}.",
+  "Er kwamen {bign} bezoekers, en online keken er {bign2} mee."
+ ],
+ "it": [
+  "Chiamami al {phone}, oppure al {phone2}.",
+  "Il servizio clienti risponde al {phone}, nei giorni feriali fino alle diciotto.",
+  "Il mio nuovo numero è {phone}, quello vecchio puoi cancellarlo.",
+  "Un chilo di pomodori costa ora {cur}, d'estate costava {cur2}.",
+  "Il pranzo costava {cur} a testa e il caffè {cur2}.",
+  "Il biglietto costa {cur} e il programma {cur2}.",
+  "La misura ha dato {dec} al primo tentativo e {dec2} al secondo.",
+  "La media dei voti era {dec}, l'anno scorso {dec2}.",
+  "In città vivono {bign} persone e nella regione oltre {bign2}.",
+  "Sono arrivati {bign} visitatori, e online ci hanno seguito in {bign2}.",
+  "{roman} e {roman2} sono stati citati nella lezione."
+ ],
+ "pt": [
+  "Na cidade vivem {bign} habitantes e na região mais de {bign2}.",
+  "Vieram {bign} visitantes, e pela internet mais {bign2} acompanharam.",
+  "O estádio recebeu {bign} torcedores no sábado e {bign2} no domingo."
+ ]
+}

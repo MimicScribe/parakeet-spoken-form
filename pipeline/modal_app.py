@@ -1147,6 +1147,7 @@ EN4_PARTS = [("d1/en4_ok/yodas_en4_cap30_ycap.jsonl", 0, "span"), ("d1/en4_ok/vo
              ("d1/en4_ok/tts9_en_train.jsonl", 0, "free"), ("d1/en4_ok/tts10_en_train.jsonl", 0, "free"),
              ("d1/en4_ok/tts11_en_train.jsonl", 0, "free"),  # tts11: UK / Australian forms (en-GB / en-AU voices)
              ("d1/en4_ok/tts12_en_train.jsonl", 0, "free"),  # tts12: count spread
+             ("d1/en4_ok/ttsSYM1_en_train.jsonl", 0, "free"),  # ttsSYM1: symbol classes, 2-4 numbers per sentence
              # Roman numerals / "&" / versions / fractions: real YouTube caption-scan hits and English parliament
              ("d1/en4_ok/yodas_rare_train_ycap.jsonl", 0, "span"), ("d1/en4_ok/vox_rare_train_ycap.jsonl", 0, "span")]
 

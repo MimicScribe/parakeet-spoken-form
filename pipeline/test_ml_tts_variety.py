@@ -99,7 +99,7 @@ repl = [{"id": "n1", "_set": "ttsRV1b", "supersedes": ["r3", "r5"]}, {"id": "n2"
 got, st = MB.order_synthetic(list(old) + repl, random.Random(7), 1, "de")
 assert {x["id"] for x in got[:2]} == {"n1", "n2"} and [x for x in got[2:]] == [x for x in a if x["id"] not in ("r3", "r5", "r9")]
 assert st == {"replacing_rows": 2, "superseded_ids": 3, "superseded_dropped": 3}
-assert "ttsRV1b" in MB.TTS_TARGETED and ("ttsRV1b", "ttsRV1b_judge") in MB.TTS_SETS and MB.TTS_REPLACING == {"ttsRV1b", "ttsRV1r2"}
+assert "ttsRV1b" in MB.TTS_TARGETED and ("ttsRV1b", "ttsRV1b_judge") in MB.TTS_SETS and MB.TTS_REPLACING == {"ttsRV1b", "ttsRV1r2", "ttsSYM1r"}
 assert "supersedes" in T.PASS_THROUGH and "convs" in T.PASS_THROUGH
 # ---- census_common: a decimal span read as two numbers ("8.30" -> "ocho treinta") is counted apart (dec_pair), a
 # decimal reading (decimal word, es "con", a half) stays "dec"
