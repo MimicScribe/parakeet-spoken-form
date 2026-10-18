@@ -1599,6 +1599,11 @@ R3_ARMS.update({
 _R8S_DENL_RECIPE = dict(_R8S_RECIPE, langs="de,nl")
 R3_ARMS.update({
     "R8-s-denl": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_DENL_RECIPE, build_langs=",".join(RUN2_LANGS)),
+    # R8-s-denl-m = R8-s-denl + kl_mask_space: the KL terms stop teaching the bare "▁" digit-entry piece over the number's
+    # audio on nonen_span rows (2026-10-18 gradient audit: their pull on "▁" outweighed the TDT term at units-first
+    # onsets). One change against R8-s-denl.
+    "R8-s-denl-m": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_DENL_RECIPE, build_langs=",".join(RUN2_LANGS),
+                        kl_mask_space=True),
 })
 R3_ARMS.update({
     "R8-s3e": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, wf_en_weight=3.0),
@@ -1649,6 +1654,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     cfg.setdefault("en_set", "whole")
     cfg.setdefault("comma_weight", 0.0)
     cfg.setdefault("wf_en_weight", 1.0)
+    cfg.setdefault("kl_mask_space", False)
     given = dict(mix=mix, init_from=init_from, anchor_init=anchor_init, dur_weight=dur_weight, warmup=warmup,
                  langs=",".join(_langs(langs)))
     bad = {k: (given[k], v) for k, v in cfg.pop("recipe", {}).items() if given[k] != v}
@@ -1702,7 +1708,8 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
                    on_save=vol.commit, stage_dir="/tmp/stage", r3=True, wf_weight=cfg["wf_weight"],
                    en_weight=en_weight, l2sp_c=cfg["l2sp_c"], l2sp_anchor=anchor, dur_weight=dur_weight,
                    en_set=cfg["en_set"], r3_sub_batch=r3_sub_batch, comma_weight=cfg["comma_weight"],
-                   wf_en_weight=cfg["wf_en_weight"], unfreeze_top=unfreeze_top, **r4)
+                   wf_en_weight=cfg["wf_en_weight"], unfreeze_top=unfreeze_top, kl_mask_space=cfg["kl_mask_space"],
+                   **r4)
     vol.commit()
 
 

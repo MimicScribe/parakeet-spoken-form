@@ -850,7 +850,8 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                   dur_weight: float = 0.0, span_prefix: dict | None = None, suffix_anchor: bool = False,
                   anchor_after: int = 1, nspan_pos: dict | None = None, gate: float = 0.9, gate_human: float = 0.0,
                   synthetic: set | None = None, cons_weight: float = 0.0, pair_bank: "PairBank | None" = None,
-                  en_set: str = "whole", comma_weight: float = 0.0, wf_en_weight: float = 1.0):
+                  en_set: str = "whole", comma_weight: float = 0.0, wf_en_weight: float = 1.0,
+                  kl_mask_space: bool = False):
     """R3 losses (table above). R4 options, all off by default: suffix_anchor (arm b: anchor every non-number position of
     span / anchor_num rows, and of nonen_span rows via nspan_pos {label ids: anchor_positions}), gate_human (arm b: the
     blank-KL teacher gate on human-verified rows, `gate` elsewhere), cons_weight + pair_bank (arm c: cross-window
@@ -858,7 +859,9 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
     en_pen_cols). comma_weight > 0: the decimal-comma penalty (comma_piece_ids) at the number columns of nonen_span rows
     (klu False, as en_set "first"), except columns whose own target is a comma (comma_target_cols); 0 = the loss is
     unchanged bit for bit. wf_en_weight != 1: wf_pen per row x wf_row_weights (English rows x wf_en_weight, nonen_span
-    rows x 1); 1 = unchanged bit for bit."""
+    rows x 1); 1 = unchanged bit for bit. kl_mask_space: the nonen_span "teacher is writing digits" cell mask also counts
+    the bare word-boundary piece "▁" (the only entry into digit mode: the vocabulary has no "▁2"-style pieces), so the
+    KL terms stop teaching digit entry over the number's audio at units-first onsets; False = unchanged bit for bit."""
     import copy
 
     assert en_set in ("whole", "first"), en_set
@@ -879,6 +882,11 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
     else:
         en_ids = en_num_piece_ids(spm)
     wf_t, en_t = torch.tensor(wf_piece_ids(spm)), torch.tensor(en_ids, dtype=torch.long)
+    space_ids = [i for i in range(spm.get_piece_size()) if spm.id_to_piece(i) == "▁"]
+    wfm_t = torch.tensor(wf_piece_ids(spm) + space_ids) if kl_mask_space else wf_t
+    if kl_mask_space:
+        assert space_ids, "kl_mask_space but no bare '▁' piece in the tokenizer"
+        print(f"kl_mask_space: nonen_span digit-cell mask counts wf pieces + '▁' {space_ids}", flush=True)
     th_first = int(m.tokenizer.text_to_ids("thousand")[0])
     th_t = torch.tensor([th_first])
     cm_t = torch.tensor(comma_piece_ids(spm) if comma_weight else [], dtype=torch.long)
@@ -956,6 +964,7 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                         yrcol[i, u] = True
         yrcol = yrcol.to(dev)
         tid, wf, en, th, cm = term_t.to(dev), wf_t.to(dev), en_t.to(dev), th_t.to(dev), cm_t.to(dev)
+        wfm = wfm_t.to(dev)
         # comma penalty: columns open to it (not a comma target of the row's own label); unused when comma_weight 0
         cm_ok = (~comma_target_cols(row_toks, cm_t.tolist(), W)).to(dev) if comma_weight else torch.ones_like(klu)
 
@@ -991,7 +1000,7 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             # on nonen_span rows the prefix columns still span every frame, including the number's audio,
             # where stock writes digits; drop cells where the teacher's written-form mass (given non-blank) is > 0.1
             if bool(nspan_sl.any()):
-                t_wf = (t_logits[..., wf].logsumexp(-1) - t_nbz).exp()
+                t_wf = (t_logits[..., wfm].logsumexp(-1) - t_nbz).exp()
                 wf_cell = nspan_sl[:, None, None] & (t_wf > 0.1)
                 tmask = tmask & ~wf_cell
                 bmask = bmask & ~wf_cell
@@ -1321,7 +1330,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           l2sp_anchor: str = "", accumulate: int = 1, dur_weight: float = 0.0, suffix_anchor: bool = False,
           anchor_after: int = 1, gate: float = 0.9, gate_human: float = 0.0, cons_weight: float = 0.0,
           cons_pairs: str = "", cons_per_batch: int = 1, en_set: str = "whole", r3_sub_batch: int = 2,
-          comma_weight: float = 0.0, wf_en_weight: float = 1.0, unfreeze_top: int = 0):
+          comma_weight: float = 0.0, wf_en_weight: float = 1.0, unfreeze_top: int = 0, kl_mask_space: bool = False):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
     entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists.
@@ -1442,7 +1451,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
                       suffix_anchor=suffix_anchor, anchor_after=anchor_after, nspan_pos=nspan_pos, gate=gate,
                       gate_human=gate_human, synthetic=synthetic, cons_weight=cons_weight, pair_bank=bank,
                       en_set=en_set, sub_batch=r3_sub_batch, comma_weight=comma_weight,
-                      wf_en_weight=wf_en_weight)
+                      wf_en_weight=wf_en_weight, kl_mask_space=kl_mask_space)
         if l2sp_c:
             last_layer = m.joint.joint_net[-1].weight.shape[0]
             exempt = [i for i in wf_piece_ids(m.tokenizer.tokenizer) if i < last_layer]
