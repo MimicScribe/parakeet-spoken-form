@@ -50,6 +50,7 @@ FMT = {
 }
 MONTHS_HINT = "write the month as a word"
 YEARS_POOL: list = []  # year values the "years" class draws from (pop order); empty = a spread 1900-2060
+COUNTS_POOL: list = []  # small-count values (0-999) the "counts" class draws from (pop order); empty = a spread
 CLASSES = {"price": 12, "clock": 12, "phone": 10, "date": 8, "code": 6, "version": 6, "temp": 6}
 SPEEDS = [(0.9, 1), (1.0, 2), (1.15, 2), (1.35, 1)]
 DEV_VOICES = 3
@@ -70,9 +71,11 @@ def _group(n: int, sep: str) -> str:
 
 
 # the source sentence of each class comes from parliament captions of a related kind, so the shape fits its topic
-SOURCE_KIND = {"years": "years", "dec": None, "pct": None, "ord": None, "range": None, "big": "cur", "price": "cur", "clock": "clock", "date": "years", "phone": None, "code": None, "version": None, "temp": None}
+SOURCE_KIND = {"counts": None, "years": "years", "dec": None, "pct": None, "ord": None, "range": None, "big": "cur", "price": "cur", "clock": "clock", "date": "years", "phone": None, "code": None, "version": None, "temp": None}
 HINTS = {
     "years": "years the sentence compares or lists (each written in digits)",
+    "counts": "plain counts of different things (people, items, pages, votes, meetings), each written in digits; "
+              "not money, not a date, no thousand / million after them",
     "dec": "a decimal number (a measurement, a rate, an average)",
     "pct": "a percentage",
     "ord": "an ordinal number (a place in a ranking, a floor, an anniversary, a point of an agenda)",
@@ -94,15 +97,23 @@ def fragment(cls: str, lang: str, rng: random.Random) -> dict:
     dec, th, curs, phones = FMT[lang]
     if cls == "years":  # 2-3 years per sentence (cheaper per year span); YEARS_POOL (a planned spread) when set
         k = rng.choice([2, 3, 3])
-        pool = YEARS_POOL or [rng.choice([rng.randint(1990, 2030), rng.randint(2031, 2060), rng.randint(1900, 1989)])
-                              for _ in range(12)]
         ys = []
-        while len(ys) < k:
-            y = pool.pop() if YEARS_POOL else rng.choice(pool)
+        while len(ys) < k:  # the planned pool first; once it is used up, a spread 1900-2060
+            y = YEARS_POOL.pop() if YEARS_POOL else rng.choice([rng.randint(1990, 2030), rng.randint(2031, 2060),
+                                                                rng.randint(1900, 1989)])
             if y not in ys:
                 ys.append(y)
         return {"written": ", ".join(map(str, ys)), "check": "years", "years": ys,
                 "hint": f"the years {', '.join(map(str, ys))}, each written in digits in the same sentence"}
+    if cls == "counts":  # 2-3 small counts per sentence (cheaper per span); COUNTS_POOL (a planned spread) when set
+        k = rng.choice([2, 3, 3])
+        ns = []
+        while len(ns) < k:
+            v = COUNTS_POOL.pop() if COUNTS_POOL else rng.choice([rng.randint(0, 100), rng.randint(101, 999)])
+            if v not in ns:
+                ns.append(v)
+        return {"written": ", ".join(map(str, ns)), "check": "nums", "nums": [str(v) for v in ns], "counts": ns,
+                "hint": f"the counts {', '.join(map(str, ns))}, each written in digits for a different thing"}
     if cls == "dec":
         n = rng.choice([rng.randint(0, 99), rng.randint(100, 999)])
         f = rng.choice([str(rng.randint(1, 9)), f"{rng.randint(1, 99):02d}"])
@@ -182,6 +193,8 @@ Answer as a JSON list of objects with keys "id", "written", "spoken", "pieces"."
 def _shown(it: dict) -> str:
     """The fragment as the prompt shows it: a "years" item lists its years apart, so they are not written as one
     comma list (a list of years reads as one long number to the span finder)."""
+    if it.get("counts"):
+        return " / ".join(map(str, it["counts"])) + " (each count on its own, for different things, joined by words)"
     if it.get("check") == "years":
         return " / ".join(map(str, it["years"])) + " (each year on its own, in different places of the sentence, " \
             "joined by words, never as a comma list)"
@@ -294,7 +307,7 @@ def check_row(r: dict, lang: str) -> tuple:
     return (not why), why
 
 
-CLS_KIND = {"years": "int", "dec": "dec", "pct": "pct", "ord": "ord", "range": "range", "big": "int", "price": "cur", "clock": "clock", "phone": "phone", "date": "date", "code": "code", "version": "version",
+CLS_KIND = {"counts": "int", "years": "int", "dec": "dec", "pct": "pct", "ord": "ord", "range": "range", "big": "int", "price": "cur", "clock": "clock", "phone": "phone", "date": "date", "code": "code", "version": "version",
             "temp": "unit"}
 
 
@@ -352,6 +365,11 @@ def synth_rows(rows: list, lang: str, wav_dir: str, seed: int = 1, threads: int 
     rng = random.Random(f"{seed}-{lang}-voices")
     rng.shuffle(vs)
     dev_v, train_v = vs[:DEV_VOICES], vs[DEV_VOICES:]
+    if not voice:  # the language's held-out persona (mix_build.HELDOUT_VOICES, every locale) never voices a train row
+        from mix_build import is_heldout_voice
+        train_v = [v for v in train_v if not is_heldout_voice(lang, v)]
+        if not train_v:
+            raise ValueError(f"{lang}: no train voice left once the held-out voice is out")
     os.makedirs(wav_dir, exist_ok=True)
     speeds, wts = zip(*SPEEDS)
     turn = {"dev": 0, "train": 0}

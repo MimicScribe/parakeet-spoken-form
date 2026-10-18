@@ -155,6 +155,11 @@ def main():
         rng = random.Random(f"{a.tag}|{a.seed}|{lang}")
         rng.shuffle(vs)
         dev_v, train_v = vs[:DEV_VOICES], vs[DEV_VOICES:]
+        if not a.heldout_voice:  # the language's held-out persona (mix_build.HELDOUT_VOICES, every locale) never trains
+            from mix_build import is_heldout_voice
+            train_v = [v for v in train_v if not is_heldout_voice(lang, v[0])]
+            if not train_v:
+                raise SystemExit(f"{lang}: no train voice left once the held-out voice is out")
         rep = {}
         if lang == "en":
             import gen

@@ -239,6 +239,34 @@ class Build(unittest.TestCase):
             "de")["synthetic_over"])
 
 
+class HeldoutPersona(unittest.TestCase):
+    def test_persona_across_locales(self):
+        # red-on-base: the filter compared exact names, so es-ES-...-Erinome trained while es-US-...-Erinome was held out
+        self.assertTrue(MB.is_heldout_voice("es", "es-ES-Chirp3-HD-Erinome"))
+        self.assertTrue(MB.is_heldout_voice("es", MB.HELDOUT_VOICES["es"]))
+        self.assertFalse(MB.is_heldout_voice("es", "es-ES-Chirp3-HD-Puck"))
+        self.assertFalse(MB.is_heldout_voice("bg", "bg-BG-Chirp3-HD-Erinome"))
+        self.assertTrue(MB.is_heldout_voice("fr", "fr-FR-Chirp3-HD-Sadaltager"))
+
+    def test_every_build_language_has_a_heldout_voice_or_is_exempt(self):
+        # red-on-base: fr had no held-out voice and nothing checked it
+        MB.check_heldout_voices(("de", "es", "fr", "it", "nl", "pt", "ru", "uk", "pl", "ro", "sv", "cs", "hu", "fi", "sk",
+                                 "bg", "hr", "en"))
+        with self.assertRaises(AssertionError):
+            MB.check_heldout_voices(("de", "et"))
+
+    def test_no_silent_fallback_to_the_heldout_voice(self):
+        # red-on-base: an emptied train pool fell back to every voice ("or train_v")
+        import os
+        here = os.path.dirname(os.path.abspath(__file__))
+        for f in ("ml_tts_cloud.py", "ml_tts_multi.py"):
+            src = open(os.path.join(here, f)).read()
+            self.assertIn("is_heldout_voice(lang", src)
+            self.assertNotIn("HELDOUT_VOICES.get(lang)] or train_v", src)
+            self.assertNotIn("HELDOUT_VOICES.get(lang)] or train_v", src)
+            self.assertIn("no train voice left once the held-out voice is out", src)
+
+
 class FillToBar(unittest.TestCase):
     """Rule (2026-10-17): synthetic may fill a thin class up to its bar; rich classes keep the share caps."""
 
@@ -399,7 +427,7 @@ class HeldoutVoice(unittest.TestCase):
         for t in ("ttsHOw", "ttsHOr", "ttsHOm", "ttsYRm", "ttsYRr"):  # the held-out and year sets are read
             self.assertIn((t, f"{t}_judge"), MB.TTS_SETS)
         self.assertNotIn("bg", MB.HELDOUT_VOICES)
-        for l in ("nl", "it", "pt", "de", "es", "ru", "uk", "pl", "ro", "sv", "cs", "hu", "fi", "sk", "hr"):
+        for l in ("nl", "it", "pt", "de", "es", "fr", "ru", "uk", "pl", "ro", "sv", "cs", "hu", "fi", "sk", "hr"):
             self.assertIn(l, MB.HELDOUT_VOICES)
 
 

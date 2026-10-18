@@ -895,11 +895,31 @@ RARE_REAL_MAX = 19  # real spans at or under which a class has (almost) no real 
 # synthetic decision set (split "dev": tts_dev, seam_crops --heldout-tts); a train-split row in that voice never trains
 HELDOUT_VOICES = {
     "cs": "cs-CZ-Chirp3-HD-Achird", "de": "de-DE-Chirp3-HD-Algieba", "es": "es-US-Chirp3-HD-Erinome",
+    "fr": "fr-CA-Chirp3-HD-Sadaltager",
     "fi": "fi-FI-Chirp3-HD-Laomedeia", "hr": "hr-HR-Chirp3-HD-Alnilam",
     "hu": "hu-HU-Chirp3-HD-Erinome", "it": "it-IT-Chirp3-HD-Alnilam", "nl": "nl-NL-Chirp3-HD-Iapetus",
     "pl": "pl-PL-Chirp3-HD-Orus", "pt": "pt-BR-Chirp3-HD-Iapetus", "ro": "ro-RO-Chirp3-HD-Kore",
     "ru": "ru-RU-Chirp3-HD-Aoede", "sk": "sk-SK-Chirp3-HD-Achird", "sv": "sv-SE-Chirp3-HD-Rasalgethi",
     "uk": "uk-UA-Chirp3-HD-Achird"}
+# languages a build may take without a held-out voice: English has its own held-out route, bg stays at stock
+HELDOUT_EXEMPT = {"en", "bg"}
+
+
+def heldout_persona(voice: str) -> str:
+    """A cloud voice's persona ("es-US-Chirp3-HD-Erinome" -> "Erinome"): personas repeat across a language's locales
+    (es-ES / es-US, fr-FR / fr-CA, nl-NL / nl-BE), so the held-out voice is the persona in every locale."""
+    return (voice or "").rsplit("-", 1)[-1]
+
+
+def is_heldout_voice(lang: str, voice: str) -> bool:
+    hv = HELDOUT_VOICES.get(lang)
+    return bool(hv and voice and heldout_persona(voice) == heldout_persona(hv))
+
+
+def check_heldout_voices(langs) -> None:
+    """Every build language has a held-out voice or is exempt (HELDOUT_EXEMPT)."""
+    missing = sorted(l for l in langs if l not in HELDOUT_VOICES and l not in HELDOUT_EXEMPT)
+    assert not missing, f"no held-out voice for {missing} (add one to HELDOUT_VOICES or exempt it)"
 GRAMMAR_REJECTS = "grammar_reject_ids.txt"  # per language in ml/p3v2/<lang>/: synthetic rows whose audio speaks a
 # grammar slip of an old generator (grammar_scan.py); they never train
 
@@ -1896,6 +1916,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
                 anchor_h[lc(x)] = anchor_h.get(lc(x), 0.0) + x["duration"] / 3600
         _write(f"{vol}/{mix_dir}/{os.path.basename(src)}", kept)
         stats[os.path.basename(src)] = {"rows": [len(rows_), len(kept)], "h": [round(_h(rows_), 2), round(_h(kept), 2)]}
+    check_heldout_voices(langs)
     for lang in langs:
         # one generator per language: a language's draws never depend on which languages were built before it
         rng = random.Random(f"{seed}-{lang}")
@@ -2029,10 +2050,9 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
                 real_h[sp["kind"]] = real_h.get(sp["kind"], 0) + x["duration"] / 3600
         stats.setdefault("grammar_rejected", {})[lang] = len(all_tts_ids & gram_rej)
         tts = [x for x in tts if x["id"] not in gram_rej]  # a grammar slip in the audio: neither train nor dev
-        hv = HELDOUT_VOICES.get(lang)
-        stats.setdefault("heldout_voice_train_dropped", {})[lang] = sum(1 for x in tts if hv and x.get("voice") == hv
-                                                                         and x.get("split", "train") != "dev")
-        tts = [x for x in tts if not (hv and x.get("voice") == hv and x.get("split", "train") != "dev")]
+        ho_train = lambda x: is_heldout_voice(lang, x.get("voice")) and x.get("split", "train") != "dev"  # noqa: E731
+        stats.setdefault("heldout_voice_train_dropped", {})[lang] = sum(1 for x in tts if ho_train(x))
+        tts = [x for x in tts if not ho_train(x)]
         _write(f"{vol}/{mix_dir}/tts_dev_{lang}.jsonl", [x for x in tts if x.get("split") == "dev"])  # held-out voices
         tts = [x for x in tts if x.get("split", "train") == "train" and x["id"] not in rej]  # judged like real rows
         if dedupe:  # a synthetic text equal to a held-out / eval text leaves training too (text keys only)
