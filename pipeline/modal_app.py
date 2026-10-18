@@ -1620,6 +1620,12 @@ R3_ARMS.update({
     # R8-s-denl-m05 = both: anchors off AND lr x5, the decoder+joint ceiling at 500 steps (2x2 with m, m0, m5)
     "R8-s-denl-m05": dict(_R8, lr=5e-4, l2sp_c=0.0, recipe=_R8S_DENL_RECIPE, build_langs=",".join(RUN2_LANGS),
                           kl_mask_space=True, kl_scale=0.0),
+    # 2026-10-18 follow-up (A60): the rate (lr x5) with protection kept OFF the number cells only, on the ALL-language R8-s
+    # mix (es/fr/it/pt trained, other languages digit-anchored); compare spike_enc0_all (R8-s, lr 1e-4).
+    # R8-s-m5x = lr 5e-4 + kl_mask_space + number-piece / '▁' rows exempt from L2-SP (KL and L2-SP on everywhere else)
+    # R8-s-m5k = lr 5e-4 + kl_mask_space + L2-SP off, KL on (which anchor throttles: the pull or the KL?)
+    "R8-s-m5x": dict(_R8, lr=5e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True, l2sp_exempt_num=True),
+    "R8-s-m5k": dict(_R8, lr=5e-4, l2sp_c=0.0, recipe=_R8S_RECIPE, kl_mask_space=True),
 })
 R3_ARMS.update({
     "R8-s3e": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, wf_en_weight=3.0),
