@@ -849,7 +849,10 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
             ("ttsFT1", "ttsFT1_judge"), ("ttsFT2", "ttsFT2_judge"),  # ttsFT1/2: exact-value fills for fr / de / pt / it
             ("ttsFT3", "ttsFT3_judge"), ("ttsFT4", "ttsFT4_judge"),  # ttsFT3/4: it / nl counts 0-100
             # ttsFT5: es / pt / fr / it thin years + fr / pt counts; ttsFT5c / 5d: fr decimals, it 24 h clock times
-            ("ttsFT5", "ttsFT5_judge"), ("ttsFT5c", "ttsFT5c_judge"), ("ttsFT5d", "ttsFT5d_judge"))
+            ("ttsFT5", "ttsFT5_judge"), ("ttsFT5c", "ttsFT5c_judge"), ("ttsFT5d", "ttsFT5d_judge"),
+            # ttsFT6c / ttsFT6r / ttsFT6rd: grammar-checked replacements for excluded rows (grammar_scan): it 24 h
+            # clock times, ro prices, ro dates (judge rejects left out of the sets)
+            ("ttsFT6c", "ttsFT6c_judge"), ("ttsFT6r", "ttsFT6r_judge"), ("ttsFT6rd", "ttsFT6rd_judge"))
 # sets planned against the census's per-value gaps (tts5y: thin year values, normal speaking rates): the share cap
 # applies, the "real speech has enough of this class" cut-off does not (synthetic years and counts
 # are fine within the cap)
@@ -862,7 +865,8 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
 # ttsm2 (2026-10-17, ml_tts_multi): clock times and prices for the moderate-tier languages, each class planned at or
 # below its real span count so the per-class share cap holds
 TTS_TARGETED = {"tts5y", "tts6uk", "tts7", "tts8", "tts9nl", "tts9ru", "tts9ru2", "ttsm2", "ttsm1", "ttsL0", "ttsL1", "ttsL2p", "ttsL2", "ttsES1",
-                "ttsFT1", "ttsFT2", "ttsFT3", "ttsFT4", "ttsFT5", "ttsFT5c", "ttsFT5d"}
+                "ttsFT1", "ttsFT2", "ttsFT3", "ttsFT4", "ttsFT5", "ttsFT5c", "ttsFT5d",
+                "ttsFT6c", "ttsFT6r", "ttsFT6rd"}
 TTS_AUG_FRAC = 0.6  # share of chosen synthetic rows given a degraded copy instead of the clean audio
 TTS_ENOUGH_H = 0.25  # h of real speech in a class above which no synthetic rows of that class are used
 # a gate class real speech (almost) never has (de / it / nl "&", fractions, roman numerals, versions; the moderate
@@ -1809,7 +1813,9 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         assert allow_no_judge or os.path.exists(rp), f"{lang}: reject_ids.txt missing (run the judge first)"
         held, held_u = read_held_list(hp)  # "#" comment lines are no ids; "# group" lines add their unit
         rej = {l.strip() for l in open(rp) if l.strip()} if os.path.exists(rp) else set()
-        gram_rej = read_id_list(f"{base}/{GRAMMAR_REJECTS}")  # synthetic rows only (their audio speaks the slip)
+        gram_rej = set()  # synthetic rows only (their audio speaks the slip); a later scan adds grammar_reject_ids_<n>
+        for gp in sorted(glob.glob(f"{base}/{GRAMMAR_REJECTS}") + glob.glob(f"{base}/{GRAMMAR_REJECTS[:-4]}_*.txt")):
+            gram_rej |= read_id_list(gp)
         # validation-only passes (val_*.jsonl, e.g. VoxPopuli dev/test): judged like every pass, never trained; their
         # ids (and below their days / videos) join the held-out set
         val = _rows(f"{base}/val_*.jsonl")

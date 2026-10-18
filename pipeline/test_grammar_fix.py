@@ -69,6 +69,10 @@ class Rules(unittest.TestCase):
             ("ro", "2002", "int", "year", "", "", "doi mii doi", "două mii doi", "ro_gender"),
             ("pl", "18.55", "clock", "clock", "", "", "osiemnastej pięćdziesiątej piątej", "osiemnastej pięćdziesiąt pięć",
              "pl_clock_minute"),
+            ("ro", "3,50 €", "cur", "price", "", "", "trei euro și cincizeci de bani", "trei euro și cincizeci de cenți",
+             "cur_word_mismatch"),
+            ("pl", "74,11 €", "cur", "price", "", "", "siedemdziesiąt cztery złote jedenaście groszy",
+             "siedemdziesiąt cztery euro jedenaście centów", "cur_word_mismatch"),
             ("pl", "2 680", "int", "big", "", "Zabrakło nam dwa tysiące sześćset osiemdziesiąt euro.",
              "dwa tysiące sześćset osiemdziesiąt", "dwóch tysięcy sześciuset osiemdziesięciu", "pl_gen_case"),
         ]
@@ -181,7 +185,8 @@ class Build(unittest.TestCase):
         # red-on-base: build4 never read grammar_reject_ids.txt, so a row speaking an old slip trained
         vol = _fixture(n_win=0)
         tts, _ = _tts_fixture(vol)
-        open(f"{vol}/ml/p3v2/de/{MB.GRAMMAR_REJECTS}", "w").write(f"# list\n{tts[0]['id']}\n")
+        open(f"{vol}/ml/p3v2/de/{MB.GRAMMAR_REJECTS}", "w").write("# list\nnot_a_row\n")
+        open(f"{vol}/ml/p3v2/de/grammar_reject_ids_2.txt", "w").write(f"{tts[0]['id']}\n")  # a later scan's list
         aug, MB.TTS_AUG_FRAC = MB.TTS_AUG_FRAC, 0.0
         self.addCleanup(setattr, MB, "TTS_AUG_FRAC", aug)
         st = MB.build4(vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True)
@@ -189,10 +194,25 @@ class Build(unittest.TestCase):
         self.assertNotIn("de_x0", {w["id"] for w in rj(f"{vol}/mix4/win_de.jsonl")})  # its window leaves too
         self.assertEqual(st["grammar_rejected"]["de"], 1)
 
+    def test_scan_never_rewrites_a_list(self):
+        import tempfile
+
+        import grammar_scan as GS
+
+        with tempfile.TemporaryDirectory() as d:
+            res = {"ids": {"pl": {"a": ["x"], "b": ["y"]}}}
+            p1 = GS.write_lists(res, d)["pl"]
+            self.assertTrue(p1.endswith("/grammar_reject_ids.txt"))
+            res["ids"]["pl"]["c"] = ["z"]
+            p2 = GS.write_lists(res, d)["pl"]
+            self.assertTrue(p2.endswith("/grammar_reject_ids_2.txt"))
+            self.assertEqual([l.strip() for l in open(p2) if not l.startswith("#")], ["c"])
+            self.assertEqual(GS.write_lists(res, d), {})  # nothing new: nothing written
+
     def test_ft5_sets_wired(self):
         # red-on-base: ttsFT5 / 5c / 5d were not read by build4
         tags = {t for t, _ in MB.TTS_SETS}
-        for t in ("ttsFT5", "ttsFT5c", "ttsFT5d"):
+        for t in ("ttsFT5", "ttsFT5c", "ttsFT5d", "ttsFT6c", "ttsFT6r", "ttsFT6rd"):
             self.assertIn(t, tags)
             self.assertIn(t, MB.TTS_TARGETED)
             self.assertIn((t, f"{t}_judge"), MB.TTS_SETS)

@@ -22,6 +22,8 @@ Each check finds one known generator slip (code: what it catches):
   nl_een_half         nl "en één half" (the stressed numeral; "en een half" / "-enhalf" are the spoken forms)
   it_spelling         it "ventiseesimo", unaccented final "-tre" in compounds ("duemilatre"; standard "duemilatré")
   slav_cost_acc       uk / ru feminine "одна" after "коштує" / "стоит" (the verb takes the accusative "одну")
+  cur_word_mismatch   ro / pl reading names another currency or its cents ("3,50 €" -> "trei euro și cincizeci de
+                      bani", "74,11 €" -> "siedemdziesiąt cztery złote ...")
   ro_de_linker        ro "de" before the noun iff the last two digits are 00 or 20-99 ("douăzeci de euro",
                       "nouăsprezece euro", "o sută cinci lei")
   ro_noun_gender      ro feminine "două" / "una" before a masculine / neuter currency noun ("două de euro")
@@ -62,6 +64,10 @@ OF_WORDS = {"de", "di", "d'", "do", "da", "del"}
 IT_TRE = re.compile(r"^\w+(?:ta|ti|la|le|to)tre$")
 SLAV_COST = {"uk": {"коштує", "коштують", "коштувала", "коштував"}, "ru": {"стоит", "стоят", "стоила", "стоил"}}
 
+# written currency (regex) -> (its own words, words of the OTHER currency its reading must not have)
+CUR_WORDS = {"ro": {r"€|\beur": (r"\beuro\b", r"\b(?:lei|leu|bani|ban)\b"),
+                    r"\blei\b|\bron\b": (r"\b(?:lei|leu)\b", r"\b(?:euro|cenți|cent)\b")},
+             "pl": {r"€|\beur": (r"\beur", r"złot|grosz"), r"zł": (r"złot", r"\beur|\bcent")}}
 RO_CUR_NOUNS = {"euro", "lei", "leu", "bani", "ban", "cenți", "cent", "dolari", "dolar", "ron"}
 RO_FEM_END = {"două", "una"}
 PL_NOM = set("""jeden jedna jedno dwa dwie trzy cztery pięć sześć siedem osiem dziewięć dziesięć jedenaście dwanaście
@@ -179,11 +185,23 @@ def span_errors(lang: str, sp: dict, row: dict) -> list:
         if set(prev) & SLAV_COST[lang]:
             out.append("slav_cost_acc")
 
+    if lang in CUR_WORDS and kind == "cur" and _cur_mismatch(lang, st, rl):
+        out.append("cur_word_mismatch")
     if lang == "ro":
         out += _ro_errors(rd, s_before, s_after)
     if lang == "pl":
         out += _pl_errors(sp, row, rd, toks, s_before, clock)
     return out
+
+
+def _cur_mismatch(lang: str, written: str, rl: str) -> bool:
+    """The reading names another currency than the written symbol, or the other currency's cents ("3,50 €" read
+    "trei euro și cincizeci de bani", "74,11 €" read "... złote ... eurocentów")."""
+    w = written.lower()
+    for sym, (mine, other) in CUR_WORDS[lang].items():
+        if re.search(sym, w):
+            return bool(re.search(other, rl))
+    return False
 
 
 def _ro_errors(rd: str, before: str, after: str) -> list:
