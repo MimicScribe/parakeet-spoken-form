@@ -871,8 +871,8 @@ TTS_AUG_FRAC = 0.6  # share of chosen synthetic rows given a degraded copy inste
 TTS_ENOUGH_H = 0.25  # h of real speech in a class above which no synthetic rows of that class are used
 # a gate class real speech (almost) never has (de / it / nl "&", fractions, roman numerals, versions; the moderate
 # tier's dates / phones) may hold up to TTS_FLOOR_H hours of synthetic rows whatever its synthetic share (the floor
-# the share rule replaced), so it is represented at all; the gate's share check fails there by design (owner waiver
-# 2026-10-17) and post_build_check reports it as "waived_synthetic_floor"
+# the share rule replaced), so it is represented at all; the gate's share check fails there by design (an accepted
+# waiver) and post_build_check reports it as "waived_synthetic_floor"
 TTS_FLOOR_H = 0.15
 RARE_REAL_MAX = 19  # real spans at or under which a class has (almost) no real speech: under the gate's 20-span floor
 GRAMMAR_REJECTS = "grammar_reject_ids.txt"  # per language in ml/p3v2/<lang>/: synthetic rows whose audio speaks a
