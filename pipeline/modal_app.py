@@ -1316,6 +1316,48 @@ def mix_add_tts(base_dir: str, new_dir: str, add: str, langs: str, aug_frac: flo
     return rep
 
 
+@app.function(image=mix_image, volumes={VOL: vol}, cpu=2, memory=8192, timeout=3600)
+def mix_add_part(base_dir: str, new_dir: str, add: str, langs: str, part: str = "plain", dry: bool = False):
+    """A diagnostic copy of a built mix (base_dir -> new_dir, which must not exist) with rows appended to the
+    <part>_<lang>.jsonl of each language (2026-10-18: rehearsal anchors in the plain parts). add = comma-separated
+    paths with {lang} (anchor_rows.py output); rows are appended as they are (their audio stays where it is). The
+    copy shares the base's audio (tts_aug is not copied; its rows keep their absolute paths). Prints, per language,
+    the part's rows and hours before and after."""
+    import json
+    import shutil
+
+    vol.reload()
+    src, dst = f"{VOL}/{base_dir}", f"{VOL}/{new_dir}"
+    assert os.path.isdir(src) and not os.path.exists(dst), (src, dst)
+    rep = {}
+    plan = {}
+    for l in _langs(langs):
+        rows = []
+        for pat in [a for a in add.split(",") if a]:
+            p = f"{VOL}/{pat.format(lang=l)}"
+            assert os.path.exists(p), p
+            rows += [json.loads(x) for x in open(p) if x.strip()]
+            assert all(os.path.exists(x["audio_filepath"]) for x in rows), l
+        ids = [x["id"] for x in rows]
+        assert len(ids) == len(set(ids)), f"{l}: duplicate ids in the added rows"
+        old = f"{src}/{part}_{l}.jsonl"
+        old_rows = [json.loads(x) for x in open(old) if x.strip()] if os.path.exists(old) else []
+        plan[l] = (old_rows, rows)
+        h = lambda rs: round(sum(x["duration"] for x in rs) / 3600, 3)  # noqa: E731
+        rep[l] = {"before": [len(old_rows), h(old_rows)], "added": [len(rows), h(rows)]}
+    if not dry:
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("tts_aug"))
+        for l, (old_rows, rows) in plan.items():
+            with open(f"{dst}/{part}_{l}.jsonl", "w") as f:
+                for x in old_rows + rows:
+                    f.write(json.dumps(x, ensure_ascii=False) + "\n")
+        with open(f"{dst}/add_part_report.json", "w") as f:
+            json.dump({"base": base_dir, "add": add, "part": part, "langs": rep}, f, indent=1)
+        vol.commit()
+    print(json.dumps(rep, ensure_ascii=False), flush=True)
+    return rep
+
+
 @app.function(image=mix_image, volumes={VOL: vol}, cpu=8, memory=32768, timeout=4 * 3600)  # 17 languages: > 1 h
 def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(WAVE1), allow_no_judge: bool = False,
                dedupe: bool = False, seam_h: float = 0.0, plain_share: float = 0.0, balance: bool = False,
