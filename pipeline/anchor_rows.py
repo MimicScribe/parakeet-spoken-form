@@ -76,24 +76,29 @@ def has_number_word(text: str, words: set) -> bool:
 
 
 def pick(rows, hours, rng, unit_of, src_cap=None):
-    """Random rows up to `hours`; no source above src_cap of the hours (when several sources), no unit above UNIT_CAP."""
+    """Random rows up to `hours`; no source above src_cap of the hours (when several sources), no unit above UNIT_CAP.
+    A second pass lifts the source cap when the first leaves the target short (a language whose rows are nearly all
+    from one source)."""
     rows = list(rows)
     rng.shuffle(rows)
     out, h, by_src, by_unit = [], 0.0, {}, {}
     multi = len({r.get("src") for r in rows}) > 1
-    for r in rows:
-        if h >= hours * 3600:
-            break
-        s, u = r.get("src") or "?", unit_of(r["id"])
-        if multi and src_cap and by_src.get(s, 0.0) + r["duration"] > src_cap * hours * 3600:
-            continue
-        if u and by_unit.get(u, 0.0) + r["duration"] > UNIT_CAP * hours * 3600:
-            continue
-        out.append(r)
-        h += r["duration"]
-        by_src[s] = by_src.get(s, 0.0) + r["duration"]
-        if u:
-            by_unit[u] = by_unit.get(u, 0.0) + r["duration"]
+    for capped in (True, False):
+        for r in rows:
+            if h >= hours * 3600:
+                break
+            if any(r is o for o in out):
+                continue
+            s, u = r.get("src") or "?", unit_of(r["id"])
+            if capped and multi and src_cap and by_src.get(s, 0.0) + r["duration"] > src_cap * hours * 3600:
+                continue
+            if u and by_unit.get(u, 0.0) + r["duration"] > UNIT_CAP * hours * 3600:
+                continue
+            out.append(r)
+            h += r["duration"]
+            by_src[s] = by_src.get(s, 0.0) + r["duration"]
+            if u:
+                by_unit[u] = by_unit.get(u, 0.0) + r["duration"]
     return out
 
 
