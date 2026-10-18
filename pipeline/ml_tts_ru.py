@@ -493,7 +493,9 @@ def _lead(rng, text: str) -> str:
 def plan(n: int, seed: int, report: dict | None = None, classes: tuple = (), tag: str = TAG) -> list[dict]:
     """~n rows split over CLASSES by weight (or `classes`, equal shares, for a pilot). Deterministic in (n, seed)."""
     rng = random.Random(f"{tag}|{seed}|{LANG}")
-    if classes:
+    if isinstance(classes, dict):  # {class: rows}: each class to its own row count
+        quota = dict(classes)
+    elif classes:
         quota = {c: n // len(classes) + (1 if i < n % len(classes) else 0) for i, c in enumerate(classes)}
     else:
         tot = sum(CLASSES.values())

@@ -856,7 +856,11 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
             ("ttsFT6c", "ttsFT6c_judge"), ("ttsFT6r", "ttsFT6r_judge"), ("ttsFT6rd", "ttsFT6rd_judge"),
             # ttsLNw / ttsLNr / ttsLNm (2026-10-17): long numbers (int_big, prices with cents, phones) placed mid / late
             # in the sentence, for wave-1 (ml_tts), uk / ru (ml_tts_uk / ru) and the LLM-written languages (ml_tts_multi)
-            ("ttsLNw", "ttsLNw_judge"), ("ttsLNr", "ttsLNr_judge"), ("ttsLNm", "ttsLNm_judge"))
+            ("ttsLNw", "ttsLNw_judge"), ("ttsLNr", "ttsLNr_judge"), ("ttsLNm", "ttsLNm_judge"),
+            # ttsYRm / ttsYRr (2026-10-17): years for the next / moderate tiers, 2-3 per sentence, normal rates
+            ("ttsYRm", "ttsYRm_judge"), ("ttsYRr", "ttsYRr_judge"),
+            # ttsHOw / ttsHOr / ttsHOm: the held-out voice's decision-set rows (split dev only, HELDOUT_VOICES)
+            ("ttsHOw", "ttsHOw_judge"), ("ttsHOr", "ttsHOr_judge"), ("ttsHOm", "ttsHOm_judge"))
 # sets planned against the census's per-value gaps (tts5y: thin year values, normal speaking rates): the share cap
 # applies, the "real speech has enough of this class" cut-off does not (synthetic years and counts
 # are fine within the cap)
@@ -870,7 +874,7 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
 # below its real span count so the per-class share cap holds
 TTS_TARGETED = {"tts5y", "tts6uk", "tts7", "tts8", "tts9nl", "tts9ru", "tts9ru2", "ttsm2", "ttsm1", "ttsL0", "ttsL1", "ttsL2p", "ttsL2", "ttsES1",
                 "ttsFT1", "ttsFT2", "ttsFT3", "ttsFT4", "ttsFT5", "ttsFT5c", "ttsFT5d",
-                "ttsFT6c", "ttsFT6r", "ttsFT6rd", "ttsLNw", "ttsLNr", "ttsLNm"}
+                "ttsFT6c", "ttsFT6r", "ttsFT6rd", "ttsLNw", "ttsLNr", "ttsLNm", "ttsYRm", "ttsYRr"}
 TTS_AUG_FRAC = 0.6  # share of chosen synthetic rows given a degraded copy instead of the clean audio
 # the long-number top-up sets (owner 2026-10-17): up to 85% synthetic in their classes, so more of them are degraded
 TTS_LONG_SETS = {"ttsLNw", "ttsLNr", "ttsLNm"}

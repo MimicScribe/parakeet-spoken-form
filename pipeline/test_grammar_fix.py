@@ -396,6 +396,8 @@ class HeldoutVoice(unittest.TestCase):
         self.assertFalse([x for x in train if x.get("voice") == hv])
         self.assertIn("tts1_de_hvdev", {x["id"] for x in rj(f"{vol}/mix4/tts_dev_de.jsonl")})
         self.assertEqual(st["heldout_voice_train_dropped"]["de"], 1)
+        for t in ("ttsHOw", "ttsHOr", "ttsHOm", "ttsYRm", "ttsYRr"):  # the held-out and year sets are read
+            self.assertIn((t, f"{t}_judge"), MB.TTS_SETS)
         self.assertNotIn("bg", MB.HELDOUT_VOICES)
         for l in ("nl", "it", "pt", "de", "es", "ru", "uk", "pl", "ro", "sv", "cs", "hu", "fi", "sk", "hr"):
             self.assertIn(l, MB.HELDOUT_VOICES)

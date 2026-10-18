@@ -130,13 +130,15 @@ def main():
     ap.add_argument("--work", default="/tmp/tts_cloud")
     ap.add_argument("--threads", type=int, default=8)
     ap.add_argument("--year-quota", help="json {lang: {year: rows}}: a year-only pass that fills those values")
-    ap.add_argument("--uk-classes", default="", help="Ukrainian / Russian: only these ml_tts_uk / ml_tts_ru classes, equal shares (pilot)")
+    ap.add_argument("--uk-classes", default="", help="Ukrainian / Russian: only these ml_tts_uk / ml_tts_ru classes, equal "
+                    "shares (pilot), or 'class:rows,...' for a row count per class")
     ap.add_argument("--rm-local", action="store_true", help="delete the local wavs once uploaded")
     ap.add_argument("--class-n", default="", help='json {class: rows}: plan each class to its own row count '
                     '(instead of --n split equally over --classes)')
     ap.add_argument("--count-quota", help="json {lang: {value: rows}}: weights the count values (ml_tts.COUNT_QUOTA)")
     ap.add_argument("--normal-rates", action="store_true", help="normal speaking rates only (SPEEDS_YEAR)")
     ap.add_argument("--natural-dates", action="store_true", help="with --class-n: dates read with a month name only")
+    ap.add_argument("--years-pool", default="", help="json {lang: [year, ...]}: uk / ru years3 values, drawn in turn")
     ap.add_argument("--heldout-voice", default="", help="every row in this one voice, split dev: the language's "
                     "held-out decision-set voice (mix_build.HELDOUT_VOICES; it never trains)")
     ap.add_argument("--voice-cycle", action="store_true", help="every voice in turn (round robin per split) instead of "
@@ -168,7 +170,12 @@ def main():
             import importlib
 
             slav = importlib.import_module(f"ml_tts_{lang}")
-            rows = slav.plan(a.n, a.seed, rep, tuple(c for c in a.uk_classes.split(",") if c), a.tag)
+            cs = [c for c in a.uk_classes.split(",") if c]
+            if any(":" in c for c in cs):  # "years3:30,clock:15": each class to its own row count
+                cs = {c.split(":")[0]: int(c.split(":")[1]) for c in cs}
+            if a.years_pool:  # the years3 class draws these planned values (a census-driven year spread)
+                slav.YEARS_POOL[:] = list(json.load(open(a.years_pool)).get(lang, []))
+            rows = slav.plan(a.n, a.seed, rep, cs if isinstance(cs, dict) else tuple(cs), a.tag)
         elif a.class_n:
             T.COUNT_QUOTA = {int(v): k for v, k in (json.load(open(a.count_quota)).get(lang, {}) if a.count_quota
                                                      else {}).items()}

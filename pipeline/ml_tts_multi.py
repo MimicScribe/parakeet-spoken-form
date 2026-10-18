@@ -109,7 +109,7 @@ def fragment(cls: str, lang: str, rng: random.Random) -> dict:
         return {"written": f"{n}{dec}{f}", "check": "values", "hint": "a decimal number"}
     if cls == "pct":
         v = rng.choice([str(rng.randint(1, 100)), f"{rng.randint(0, 99)}{dec}{rng.randint(1, 9)}"])
-        return {"written": f"{v} %" if rng.random() < 0.6 else f"{v}%", "check": "values", "hint": "a percentage"}
+        return {"written": f"{v} %" if rng.random() < 0.6 else f"{v}%", "check": "nums", "nums": [v], "hint": "a percentage"}
     if cls == "ord":
         n = rng.choice([rng.randint(2, 31), rng.randint(32, 120)])
         w = {"sv": f"{n}:e", "ro": f"al {n}-lea"}.get(lang, f"{n}.")
@@ -117,7 +117,8 @@ def fragment(cls: str, lang: str, rng: random.Random) -> dict:
     if cls == "range":
         a = rng.choice([rng.randint(2, 90), rng.randint(100, 900), rng.randint(1000, 90000)])
         b = a + rng.choice([2, 3, 5, 10, 20, 50]) * max(1, a // 10)
-        return {"written": f"{_group(a, th)}–{_group(b, th)}", "check": "values", "hint": "a range of two numbers"}
+        return {"written": f"{_group(a, th)}–{_group(b, th)}", "check": "nums", "nums": [_group(a, th), _group(b, th)],
+                "hint": "a range of two numbers"}
     if cls == "big":
         while True:  # thousands to billions; never a 4-digit 1100-2099 (a year to the census)
             a = rng.choice([rng.randint(1000, 9999), rng.randint(10000, 999999), rng.randint(1000000, 999999999),
@@ -178,6 +179,15 @@ Items:
 Answer as a JSON list of objects with keys "id", "written", "spoken", "pieces"."""
 
 
+def _shown(it: dict) -> str:
+    """The fragment as the prompt shows it: a "years" item lists its years apart, so they are not written as one
+    comma list (a list of years reads as one long number to the span finder)."""
+    if it.get("check") == "years":
+        return " / ".join(map(str, it["years"])) + " (each year on its own, in different places of the sentence, " \
+            "joined by words, never as a comma list)"
+    return it["written"]
+
+
 def write_rows(lang: str, sentences: list, n: int, seed: int = 1, batch: int = 10) -> list:
     """Plan n rows: classes round-robin over CLASSES weights, a real sentence and a fragment each, written by the LLM."""
     rng = random.Random(f"{seed}-{lang}")
@@ -196,7 +206,7 @@ def write_rows(lang: str, sentences: list, n: int, seed: int = 1, batch: int = 1
     name = __import__("ml_multi_lexgen").NAMES[lang]
     for b in range(0, len(items), batch):
         chunk = items[b:b + batch]
-        txt = "\n".join(json.dumps({"id": it["id"], "sentence": it["sentence"], "fragment": it["written"], "use as": it["hint"]},
+        txt = "\n".join(json.dumps({"id": it["id"], "sentence": it["sentence"], "fragment": _shown(it), "use as": it["hint"]},
                                    ensure_ascii=False) for it in chunk)
         try:
             ans = json.loads(ml_llm.call(PROMPT.format(name=name, items=txt).replace("{hint}", "the 'use as' note"),
@@ -247,6 +257,10 @@ def check_row(r: dict, lang: str) -> tuple:
     if r["check"] == "date":
         nums = re.findall(r"\d+", w)
         if str(r["day"]) not in nums or str(r["year"]) not in nums:
+            why.append("fragment_missing")
+    elif r["check"] == "nums":  # the numbers in the written sentence, however it joins them ("od 62 do 93", "84 procent")
+        have = {_digits(m) for m in re.findall(r"\d[\d  .,]*\d|\d", w)}
+        if not all(_digits(str(n)) in have for n in r["nums"]):
             why.append("fragment_missing")
     elif r["check"] == "years":
         nums = re.findall(r"\d+", w)
