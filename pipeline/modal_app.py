@@ -1702,6 +1702,10 @@ R3_ARMS.update({
     "R9-S2": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0",
                   wf_weight=0.0),
     "R9-S3": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R7_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0"),
+    # R9-S4 = S1 with wf_pen on digit pieces only (2026-10-18 review: the frozen encoder carries "%" / "," / currency at the
+    # spoken unit words and wf_pen on those symbols sends the mass to blank -> the unit word is dropped)
+    "R9-S4": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0",
+                  wf_pen_digits_only=True),
 })
 R3_ARMS.update({
     "R8-s3e": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, wf_en_weight=3.0),
@@ -1755,6 +1759,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     cfg.setdefault("kl_mask_space", False)
     cfg.setdefault("l2sp_exempt_num", False)
     cfg.setdefault("kl_scale", 1.0)
+    cfg.setdefault("wf_pen_digits_only", False)
     cfg.setdefault("en_teacher", "")
     cfg.setdefault("en_teacher_num", "anchor")
     cfg.setdefault("en_kl_scale", 1.0)
@@ -1813,7 +1818,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
                    en_weight=en_weight, l2sp_c=cfg["l2sp_c"], l2sp_anchor=anchor, dur_weight=dur_weight,
                    en_set=cfg["en_set"], r3_sub_batch=r3_sub_batch, comma_weight=cfg["comma_weight"],
                    wf_en_weight=cfg["wf_en_weight"], unfreeze_top=unfreeze_top, kl_mask_space=cfg["kl_mask_space"],
-                   l2sp_exempt_num=cfg["l2sp_exempt_num"], en_teacher=cfg["en_teacher"],
+                   l2sp_exempt_num=cfg["l2sp_exempt_num"], wf_pen_digits_only=cfg["wf_pen_digits_only"], en_teacher=cfg["en_teacher"],
                    en_teacher_num=cfg["en_teacher_num"], en_kl_scale=cfg["en_kl_scale"],
                    **r4)
     vol.commit()

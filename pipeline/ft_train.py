@@ -933,8 +933,10 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                   synthetic: set | None = None, cons_weight: float = 0.0, pair_bank: "PairBank | None" = None,
                   en_set: str = "whole", comma_weight: float = 0.0, wf_en_weight: float = 1.0,
                   kl_mask_space: bool = False, en_teacher_state: dict | None = None, en_teacher_num: str = "anchor",
-                  en_kl_scale: float = 1.0):
-    """R3 losses (table above). R4 options, all off by default: suffix_anchor (arm b: anchor every non-number position of
+                  en_kl_scale: float = 1.0, wf_pen_digits_only: bool = False):
+    """wf_pen_digits_only: wf_pen counts only the pieces made of digits (0-9), not the symbol pieces (% $ € £ / …) that the
+    frozen encoder carries at spoken percent / currency / unit words; False = unchanged bit for bit.
+    R3 losses (table above). R4 options, all off by default: suffix_anchor (arm b: anchor every non-number position of
     span / anchor_num rows, and of nonen_span rows via nspan_pos {label ids: anchor_positions}), gate_human (arm b: the
     blank-KL teacher gate on human-verified rows, `gate` elsewhere), cons_weight + pair_bank (arm c: cross-window
     consistency, consistency_term). en_set: the en_pen piece set and columns ("whole" | "first"; EN_NUM_WORDS_FIRST,
@@ -976,6 +978,11 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
     wf_t, en_t = torch.tensor(wf_piece_ids(spm)), torch.tensor(en_ids, dtype=torch.long)
     space_ids = [i for i in range(spm.get_piece_size()) if spm.id_to_piece(i) == "▁"]
     wfm_t = torch.tensor(wf_piece_ids(spm) + space_ids) if kl_mask_space else wf_t
+    wfp_t = wf_t
+    if wf_pen_digits_only:
+        wfp_t = torch.tensor([i for i in wf_piece_ids(spm) if re.fullmatch(r"▁?[0-9]+", spm.id_to_piece(i))])
+        assert len(wfp_t), "wf_pen_digits_only but no digit piece"
+        print(f"wf_pen_digits_only: wf_pen on {len(wfp_t)} digit pieces (of {len(wf_t)} written-form pieces)", flush=True)
     if kl_mask_space:
         assert space_ids, "kl_mask_space but no bare '▁' piece in the tokenizer"
         print(f"kl_mask_space: nonen_span digit-cell mask counts wf pieces + '▁' {space_ids}", flush=True)
@@ -1066,6 +1073,7 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
         yrcol = yrcol.to(dev)
         tid, wf, en, th, cm = term_t.to(dev), wf_t.to(dev), en_t.to(dev), th_t.to(dev), cm_t.to(dev)
         wfm = wfm_t.to(dev)
+        wfp = wfp_t.to(dev)
         # comma penalty: columns open to it (not a comma target of the row's own label); unused when comma_weight 0
         cm_ok = (~comma_target_cols(row_toks, cm_t.tolist(), W)).to(dev) if comma_weight else torch.ones_like(klu)
 
@@ -1128,7 +1136,7 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                 per_row = (-torch.log1p(-p) * e).sum((1, 2)) / e.sum((1, 2)).clamp(min=1)
                 return per_row, rows_sl.float()  # per row: 0 off rows_sl (no emitting cell counted there)
 
-            wf_s, wf_n = pen(wf, ~nonen_sl)
+            wf_s, wf_n = pen(wfp, ~nonen_sl)
             if wf_en_weight != 1.0:  # off: wf_s untouched, bit for bit
                 wf_s = wf_s * wf_row_weights(nspan_sl, wf_en_weight)
             en_s, en_n = (pen(en, nonen_sl | nspan_sl, en_pen_cols(klu_sl, nonen_sl, nspan_sl, en_set)) if len(en)
@@ -1447,7 +1455,8 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           anchor_after: int = 1, gate: float = 0.9, gate_human: float = 0.0, cons_weight: float = 0.0,
           cons_pairs: str = "", cons_per_batch: int = 1, en_set: str = "whole", r3_sub_batch: int = 2,
           comma_weight: float = 0.0, wf_en_weight: float = 1.0, unfreeze_top: int = 0, kl_mask_space: bool = False,
-          l2sp_exempt_num: bool = False, en_teacher: str = "", en_teacher_num: str = "anchor", en_kl_scale: float = 1.0):
+          l2sp_exempt_num: bool = False, en_teacher: str = "", en_teacher_num: str = "anchor", en_kl_scale: float = 1.0,
+          wf_pen_digits_only: bool = False):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
     entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists.
@@ -1583,7 +1592,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
                       gate_human=gate_human, synthetic=synthetic, cons_weight=cons_weight, pair_bank=bank,
                       en_set=en_set, sub_batch=r3_sub_batch, comma_weight=comma_weight,
                       wf_en_weight=wf_en_weight, kl_mask_space=kl_mask_space, en_teacher_state=en_state,
-                      en_teacher_num=en_teacher_num, en_kl_scale=en_kl_scale)
+                      en_teacher_num=en_teacher_num, en_kl_scale=en_kl_scale, wf_pen_digits_only=wf_pen_digits_only)
         if l2sp_c:
             last_layer = m.joint.joint_net[-1].weight.shape[0]
             exempt = [i for i in wf_piece_ids(m.tokenizer.tokenizer) if i < last_layer]
