@@ -896,6 +896,7 @@ TTS_TARGETED = {"tts5y", "tts6uk", "tts7", "tts8", "tts9nl", "tts9ru", "tts9ru2"
 # and puts the set's rows first, so they take the room the dropped rows leave (a class at its fill-to-bar or share cap
 # would otherwise admit none of them)
 TTS_REPLACING = {"ttsRV1b"}
+REPLACE_ROUNDS = 3  # build4 reruns of the synthetic selection when a replacing row is refused (then fatal)
 TTS_AUG_FRAC = 0.6  # share of chosen synthetic rows given a degraded copy instead of the clean audio
 # the long-number top-up sets (2026-10-17): mostly synthetic in their classes (fill-to-bar), so more of them are degraded
 # ttsRV1 (2026-10-18): its cells are synthetic-heavy too (clock / phone / price rows mostly synthetic), and it replaces
@@ -2031,7 +2032,9 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
       seam, seam_long, plain, pairs, heldout, tts_dev, tts_dev_other) spells compound number words as separate
       morphemes (compound_split: "zweihundertsiebzig" -> "zwei hundert siebzig"). Applied at WRITE time only: every
       selection, cap, dedupe and pair choice above runs on the unsplit text, so the rows are the ones the same build
-      without the flag writes; the anchor parts (d2, d2p, fleurs_train_multi) keep their stock labels.
+      without the flag writes; the anchor parts (d2, d2p, fleurs_train_multi) keep their stock labels. Italian:
+      "it+" / "it-" force the elided forms split / whole ("it-" reproduces mix4final8), "it" follows
+      compound_split.IT_SPLIT_ELIDED (ON); stats["italian_split_elided"] records the form written.
     - win15_share > 0 (2026-10-18): mix4/win15_<lang>.jsonl, 15 s multi-number windows (win15.py, <win15_dir>/<lang>/
       windows.jsonl) whose every parent is a row this build trains on with the same label, none held out / rejected /
       ext; <= win15_share x the language's number hours (rows + synthetic + windows + seam parts), synthetic windows
@@ -2047,13 +2050,18 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
     os.makedirs(f"{vol}/{mix_dir}", exist_ok=True)
     unsplit_targets = set()  # the unsplit texts of split target rows (the anchor-collision check below)
 
+    # Italian form (review 2026-10-18): "it+" = elided forms split too ("venti uno"), "it-" = elided forms kept whole
+    # ("ventuno"; the mix4final8 form), plain "it" = compound_split.IT_SPLIT_ELIDED (default ON: always split)
+    it_mode = {"it+": True, "it-": False}.get(next((l for l in split_langs if l in ("it+", "it-")), ""), None)
+    split_set = {("it" if l in ("it+", "it-") else l) for l in split_langs}
+    if "it" in split_set:
+        stats["italian_split_elided"] = CS.IT_SPLIT_ELIDED if it_mode is None else it_mode
+
     def S(rows_, lang_, part, pairs=False):
-        """rows_ as written: split (a copy) when lang_ is a split language, else unchanged. "it+" in split_langs: Italian
-        with the elided forms split too ("venti uno"; compound_split.IT_SPLIT_ELIDED)."""
-        it_plus = lang_ == "it" and "it+" in split_langs
-        if lang_ not in split_langs and not it_plus:
+        """rows_ as written: split (a copy) when lang_ is a split language, else unchanged (Italian: it_mode above)."""
+        if lang_ not in split_set:
             return rows_
-        out_, st_ = CS.split_rows(rows_, lang_, pairs=pairs, it_elided=True if it_plus else None)
+        out_, st_ = CS.split_rows(rows_, lang_, pairs=pairs, it_elided=it_mode if lang_ == "it" else None)
         stats.setdefault("split_compounds", {}).setdefault(lang_, {})[part] = st_
         if part in ("p3", "win", "win15", "tts", "seam", "seam_long"):
             unsplit_targets.update(x["text"] for x in rows_)
@@ -2251,48 +2259,58 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         if dedupe:  # a synthetic text equal to a held-out / eval text leaves training too (text keys only)
             tts, trep = B.dedupe(tts, protect[lang], within=False, part_of=lambda x: "tts")
             stats["dedupe"][lang]["tts"] = trep["counts"]
-        tts, rst = order_synthetic(tts, rng, seed, lang)  # = rng.shuffle(tts) when no TTS_REPLACING set has rows
-        stats.setdefault("synthetic_replaced", {})[lang] = rst
-        before = gate_counts(tr, [], lang)  # the first-stage caps' result: a later step must not undo it
-        took = select_synthetic(tts, tr, lang, real_h)
-        before_syn = gate_counts(tr, took, lang)
-        # synthetic rows never displace real ones (2026-10-17): a class the synthetic spans alone push over the gate's
-        # 20-span ext floor, or a year value they push over the top-year share, loses synthetic rows, not real ones
-        took, sx = trim_synthetic_ext(took, tr, lang)
-        took, sy = trim_synthetic_years(took, tr, lang)
-        stats.setdefault("synthetic_trimmed_not_real", {})[lang] = {"ext_floor": sx, "top_year": sy}
-        # the per-class ext cap once more, now that the synthetic rows are chosen: the gate counts them in each class
-        # (they make a thin class reach its 20-span floor and add to its denominator). Rows holding a value at its fill
-        # floor leave last, so this does not undo fill_thin
-        syn_cls = Counter(ext_class(sp, x, lang) for x in took for sp in x.get("spans") or [])
-        _vc2 = gate_counts(tr, [], lang)["vals"]
-        at_floor = lambda x: any(_vc2[v] <= _fill_floor(v) for v in _span_values(x, lang))  # noqa: E731
-        tr, xst2 = cap_ext_per_class(tr, EXT_SHARE_CLASS, random.Random(f"{seed}-extcls2-{lang}"), lang=lang,
-                                     extra=syn_cls, keep_last=at_floor, real_floor=True)
-        stats.setdefault("ext_per_class_with_synthetic", {})[lang] = xst2
-        if xst2["still_over"]:
-            print(f"WARNING {lang}: ext share still over {EXT_SHARE_CLASS} after the cap: {xst2['still_over']}")
-        if xst2["rows_out"]:
-            # the removed real rows raise the other years' shares and the synthetic shares: the top-year trim once
-            # more if a year went over (synthetic rows of that year first; real rows only for a year real speech
-            # alone puts over), then the synthetic rows a class can no longer hold leave
-            took, sy2 = trim_synthetic_years(took, tr, lang)
-            stats["synthetic_trimmed_not_real"][lang]["top_year_after_ext2"] = sy2
-            if top_year_share(gate_counts(tr, took, lang)["years"]) > GATE_TOP_YEAR:
-                n_tr = {x["id"] for x in tr}
-                tr, ycap3 = _cap_top_years(tr, TOP_YEAR_SHARE - TOP_YEAR_MARGIN, random.Random(f"{seed}-years3-{lang}"),
-                                           mixed_ok=lambda x: not _rare(x) and not at_floor(x), lang=lang)
-                year_out |= n_tr - {x["id"] for x in tr}
-                stats.setdefault("year_cap_after_ext2", {})[lang] = ycap3
-            took, n_syn_trim = trim_synthetic(took, tr, lang)
-            stats.setdefault("synthetic_trimmed_after_ext2", {})[lang] = n_syn_trim
-        # B2 check: a replacing row the caps / trims refused leaves its class one row short (its superseded rows are
-        # out of the pool): say so, never silently
-        miss = sorted({x["id"] for x in tts if x.get("_set") in TTS_REPLACING} - {x["id"] for x in took})
-        stats["synthetic_replaced"][lang]["not_admitted"] = len(miss)
-        if miss:
-            print(f"WARNING {lang}: {len(miss)} replacing synthetic rows not admitted (their classes lost the rows "
-                  f"they replace), e.g. {miss[:5]}")
+        # B2 (review 2026-10-18): a replacing row the caps / trims refuse must not leave its class short. Its
+        # superseded rows come back into the pool and the whole selection reruns from the same state (rng, real rows,
+        # year-cap set), without the refused replacing rows; after REPLACE_ROUNDS a refusal is fatal
+        tts0, tr0, year_out0, rng0 = tts, list(tr), set(year_out), rng.getstate()
+        refused = set()
+        for _round in range(REPLACE_ROUNDS + 1):
+            tts, tr, year_out = [x for x in tts0 if x["id"] not in refused], list(tr0), set(year_out0)
+            rng.setstate(rng0)
+            tts, rst = order_synthetic(tts, rng, seed, lang)  # = rng.shuffle(tts) when no TTS_REPLACING set has rows
+            stats.setdefault("synthetic_replaced", {})[lang] = rst
+            before = gate_counts(tr, [], lang)  # the first-stage caps' result: a later step must not undo it
+            took = select_synthetic(tts, tr, lang, real_h)
+            before_syn = gate_counts(tr, took, lang)
+            # synthetic rows never displace real ones (2026-10-17): a class the synthetic spans alone push over the gate's
+            # 20-span ext floor, or a year value they push over the top-year share, loses synthetic rows, not real ones
+            took, sx = trim_synthetic_ext(took, tr, lang)
+            took, sy = trim_synthetic_years(took, tr, lang)
+            stats.setdefault("synthetic_trimmed_not_real", {})[lang] = {"ext_floor": sx, "top_year": sy}
+            # the per-class ext cap once more, now that the synthetic rows are chosen: the gate counts them in each class
+            # (they make a thin class reach its 20-span floor and add to its denominator). Rows holding a value at its fill
+            # floor leave last, so this does not undo fill_thin
+            syn_cls = Counter(ext_class(sp, x, lang) for x in took for sp in x.get("spans") or [])
+            _vc2 = gate_counts(tr, [], lang)["vals"]
+            at_floor = lambda x: any(_vc2[v] <= _fill_floor(v) for v in _span_values(x, lang))  # noqa: E731
+            tr, xst2 = cap_ext_per_class(tr, EXT_SHARE_CLASS, random.Random(f"{seed}-extcls2-{lang}"), lang=lang,
+                                         extra=syn_cls, keep_last=at_floor, real_floor=True)
+            stats.setdefault("ext_per_class_with_synthetic", {})[lang] = xst2
+            if xst2["still_over"]:
+                print(f"WARNING {lang}: ext share still over {EXT_SHARE_CLASS} after the cap: {xst2['still_over']}")
+            if xst2["rows_out"]:
+                # the removed real rows raise the other years' shares and the synthetic shares: the top-year trim once
+                # more if a year went over (synthetic rows of that year first; real rows only for a year real speech
+                # alone puts over), then the synthetic rows a class can no longer hold leave
+                took, sy2 = trim_synthetic_years(took, tr, lang)
+                stats["synthetic_trimmed_not_real"][lang]["top_year_after_ext2"] = sy2
+                if top_year_share(gate_counts(tr, took, lang)["years"]) > GATE_TOP_YEAR:
+                    n_tr = {x["id"] for x in tr}
+                    tr, ycap3 = _cap_top_years(tr, TOP_YEAR_SHARE - TOP_YEAR_MARGIN, random.Random(f"{seed}-years3-{lang}"),
+                                               mixed_ok=lambda x: not _rare(x) and not at_floor(x), lang=lang)
+                    year_out |= n_tr - {x["id"] for x in tr}
+                    stats.setdefault("year_cap_after_ext2", {})[lang] = ycap3
+                took, n_syn_trim = trim_synthetic(took, tr, lang)
+                stats.setdefault("synthetic_trimmed_after_ext2", {})[lang] = n_syn_trim
+            miss = {x["id"] for x in tts if x.get("_set") in TTS_REPLACING} - {x["id"] for x in took}
+            if not miss:
+                break
+            refused |= miss
+            print(f"{lang}: {len(miss)} replacing synthetic rows refused (round {_round}); their superseded rows "
+                  f"return, selection reruns: e.g. {sorted(miss)[:5]}")
+        assert not miss, f"{lang}: replacing synthetic rows still refused after {REPLACE_ROUNDS} reruns: {sorted(miss)[:5]}"
+        stats["synthetic_replaced"][lang].update(refused_restored=len(refused), rounds=_round)
+        stats["synthetic_replaced"][lang]["not_admitted"] = 0
         reg = post_build_check(tr, took, lang, before_syn)["regressions"]
         # fail loudly: a later step undid what the caps / fill had reached (the gate would fail where it passed)
         assert not reg, f"{lang}: the build's later steps undid the earlier caps: {reg}"

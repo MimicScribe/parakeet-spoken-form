@@ -100,7 +100,11 @@ def cut_time(times: list, k: int, side: str, x=None) -> float | None:
         t0, t1 = kept[1] + CUT_PAD, (drop[0] if drop else kept[1] + LOOK) - CUT_PAD
     if t1 <= t0:  # touching letter frames: their midpoint
         return round((t0 + t1) / 2, 3)
-    q = C.quiet_cut(x, t0, t1) if x is not None else None
+    t0 = max(t0, 0.0)
+    try:
+        q = C.quiet_cut(x, t0, t1) if x is not None and t1 > t0 else None
+    except ValueError:  # word times past the audio's end
+        q = None
     return round(q if q is not None else (t0 + t1) / 2, 3)
 
 
@@ -259,7 +263,8 @@ if modal is not None:
         return out
 
     @app.function(image=image, volumes={VOL: vol}, gpu="L4", timeout=3 * 3600, max_containers=8)
-    def check_lang(lang: str, mix_dir: str, tag: str, shard: int = 0, n_shards: int = 1, limit: int = 0) -> dict:
+    def check_lang(lang: str, mix_dir: str, tag: str, shard: int = 0, n_shards: int = 1, limit: int = 0,
+                   resume: bool = False) -> dict:
         from collections import Counter
         from concurrent.futures import ThreadPoolExecutor
 
@@ -269,11 +274,13 @@ if modal is not None:
         import soundfile as sf
 
         out = f"{VOL}/ml/edgefix{tag}/{lang}"
-        fpath = f"{out}/fixes_{shard}.jsonl"
+        fpath = f"{out}/fixes_{shard}{'r' if resume else ''}.jsonl"  # resume: a crashed shard's remaining rows
         assert not os.path.exists(fpath), f"{fpath} exists: use a new tag"
+        done = {f["id"] for f in _rows(f"{out}/fixes_{shard}.jsonl")} if resume else set()
         os.makedirs(f"{out}/wav", exist_ok=True)
         rows = _sources(lang, mix_dir)[shard::n_shards]
         rows = rows[:limit] if limit else rows  # a smoke run
+        rows = [r for r in rows if r["id"] not in done]
         ctc = D.LangCTC(lang)
         st = Counter()
         n_edge = int(EDGE_S * 16000)
@@ -291,6 +298,9 @@ if modal is not None:
             res = []
             for i in range(0, len(chunks), 32):
                 part = chunks[i:i + 32]
+                if any(len(c) < 1600 for c in part):  # < 0.1 s (an empty file): no reading
+                    res += [ctc.greedy(ctc.lp(c)) if len(c) >= 1600 else "" for c in part]
+                    continue
                 same = len({len(c) for c in part}) == 1
                 if not same:
                     res += [ctc.greedy(ctc.lp(c)) for c in part]
@@ -343,13 +353,19 @@ if modal is not None:
                 vol.commit()
         f.close()
         res = {"lang": lang, "shard": shard, "rows": len(rows), "counts": dict(st)}
-        json.dump(res, open(f"{out}/stats_{shard}.json", "w"), indent=1)
+        json.dump(res, open(f"{out}/stats_{shard}{'r' if resume else ''}.json", "w"), indent=1)
         vol.commit()
         return res
 
     @app.local_entrypoint()
-    def main(langs: str = "de,es,fr,it,nl,pt", mix_dir: str = "mix4final8", tag: str = "1", shards: int = 2, limit: int = 0):
-        jobs = [(l, mix_dir, tag, s, shards, limit) for l in langs.split(",") for s in range(shards)]
-        res = list(check_lang.starmap(jobs))
+    def main(langs: str = "de,es,fr,it,nl,pt", mix_dir: str = "mix4final8", tag: str = "1", shards: int = 2, limit: int = 0,
+             resume: str = ""):
+        """resume "de:0,es:1": rerun those crashed shards on their remaining rows (fixes_<shard>r.jsonl)."""
+        if resume:
+            jobs = [(l, mix_dir, tag, int(s), shards, limit, True) for l, s in (x.split(":") for x in resume.split(","))]
+        else:
+            jobs = [(l, mix_dir, tag, s, shards, limit) for l in langs.split(",") for s in range(shards)]
+        res = list(check_lang.starmap(jobs, return_exceptions=True))  # one failing shard keeps the others
+        res = [r if isinstance(r, dict) else {"error": repr(r)[:300]} for r in res]
         print(json.dumps(res, indent=1))
         sys.stdout.flush()
