@@ -480,6 +480,18 @@ def scan2_lang(lang: str, src: str, rare_hours: float = 3.0, int_hours: float = 
     return st
 
 
+def _offer(M, cands_on: str) -> None:
+    """label2 cands_on: offer these regional / fill readings (ml_cands.VARIETY_ALL | FILL_ALL) in spans() on top of the
+    start-up ML_CANDS_ON set; a warm container starts every call from that start-up set."""
+    on = set(filter(None, cands_on.split(",")))
+    allowed = set(M.VARIETY_ALL) | set(getattr(M, "FILL_ALL", ()))
+    assert on <= allowed, f"cands_on names not in VARIETY_ALL / FILL_ALL: {sorted(on - allowed)}"
+    if not hasattr(M, "VARIETY_START"):
+        M.VARIETY_START = M.VARIETY
+    M.VARIETY = frozenset(M.VARIETY_START | on)
+    M.CAND_FIXES |= on
+
+
 def _diag(row, r, res) -> dict:
     return {"id": row["id"], "origin": row["origin"], "src": row["src"],
             "reason": res.get("reason") or ("kept_salvage" if res.get("salvaged") else "kept"), "trim": row.get("trim"),
@@ -494,7 +506,8 @@ def label2_lang(lang: str, limit: int = 0, int_new_hours: float = 1.5, crops: bo
                 srcs: str = "vox,yodas", with_d2: bool = True, name: str = "rows", ext: str = "",
                 cer_ext: bool = True, split_long: bool = True, max_row: float = 20.0, only_ids: str = "",
                 trim_ext: bool = True, piece_ext: bool = True, salvage: bool = True, decide_off: str = "",
-                cands_off: str = "", partial: bool = True, ctc_model: str = "", force: bool = False) -> dict:
+                cands_off: str = "", partial: bool = True, ctc_model: str = "", force: bool = False,
+                cands_on: str = "", ids_file: str = "") -> dict:
     """ext: a file in <lang>/ of {"id", "text"} verbatim transcripts by a second recognizer. When given,
     ONLY those ids are labelled, and a span the CTC greedy text misspells is decided when ext agrees (ml_decide).
     cer_ext (2026-10-16): the row CER / caption-gap guards take the better of the CTC greedy and the ext transcript
@@ -511,7 +524,11 @@ def label2_lang(lang: str, limit: int = 0, int_new_hours: float = 1.5, crops: bo
     ctc_model: another CTC reader than ml_decide.MODELS[lang] ("strong" = ml_decide.STRONG[lang]); give the pass its own
     --name so the outputs of the default reader stay.
     A finished pass (its stats<sfx>.json exists) is never relabelled into the same files: the call refuses to start
-    (its rows, crops and diag files open for writing) unless force=True (--force)."""
+    (its rows, crops and diag files open for writing) unless force=True (--force).
+    cands_on (2026-10-18, real recovery L1): comma list of ml_cands.VARIETY_ALL / FILL_ALL readings offered to this call
+    on top of ML_CANDS_ON (like the other CAND_FIXES: with an external transcript only), e.g. clock_rel,cur_bare,dec_con.
+    ids_file: like only_ids (a file in <lang>/ of ids, no hour quota) but the pass writes its real outputs (refuse_rerun
+    applies), for a relabel of known rows into a new --name. Both empty = the old pass, bit for bit."""
     import random
     import shutil
 
@@ -528,6 +545,7 @@ def label2_lang(lang: str, limit: int = 0, int_new_hours: float = 1.5, crops: bo
     M.CAND_FIXES.clear(); M.CAND_FIXES.update(M.ALL_CAND_FIXES)
     D.FIXES -= set(filter(None, decide_off.split(",")))
     M.CAND_FIXES -= set(filter(None, cands_off.split(",")))
+    _offer(M, cands_on)
     ctc = D.LangCTC(lang, model=(D.STRONG[lang] if ctc_model == "strong" else ctc_model) or None)
     dry = bool(dry_per_kind or only_ids)
     out = f"{OUT2}/{lang}" + ("/dry" if dry else "")  # a dry run never touches the real outputs
@@ -591,9 +609,9 @@ def label2_lang(lang: str, limit: int = 0, int_new_hours: float = 1.5, crops: bo
         ids = {i for v in by.values() for i in v}
         d2, new = [r for r in d2 if r["id"] in ids], [r for r in new if r["id"] in ids]
         int_new_hours = 1e9
-    if only_ids:  # dry run on a fixed id sample (yield audit)
-        ids = _id_set(f"{OUT2}/{lang}/{only_ids}")
-        d2, new = [r for r in d2 if r["id"] in ids], [r for r in new if r["id"] in ids]
+    if only_ids or ids_file:  # only_ids: dry run on a fixed id sample (yield audit); ids_file: same, real outputs
+        keep = _id_set(f"{OUT2}/{lang}/{only_ids or ids_file}")
+        d2, new = [r for r in d2 if r["id"] in keep], [r for r in new if r["id"] in keep]
         int_new_hours = 1e9
     rng = random.Random(f"crops-{lang}")
     acc = C.Acc(lang)
@@ -1790,10 +1808,12 @@ def label2(langs: str = ",".join(LANGS), limit: int = 0, int_new_hours: float = 
            dry_per_kind: int = 0, srcs: str = "vox,yodas", with_d2: bool = True, name: str = "rows", ext: str = "",
            cer_ext: bool = True, split_long: bool = True, max_row: float = 20.0, only_ids: str = "",
            trim_ext: bool = True, piece_ext: bool = True, salvage: bool = True, decide_off: str = "",
-           cands_off: str = "", partial: bool = True, ctc_model: str = "", force: bool = False):
+           cands_off: str = "", partial: bool = True, ctc_model: str = "", force: bool = False,
+           cands_on: str = "", ids_file: str = ""):
     import ml_cands as M
 
     M.CAND_FIXES -= set(filter(None, cands_off.split(",")))  # the coverage check below sees the same candidates
+    _offer(M, cands_on)
     if ctc_model == "strong":
         import ml_decide as D
         bad = [l for l in langs.split(",") if l not in D.STRONG]
@@ -1826,7 +1846,7 @@ def label2(langs: str = ",".join(LANGS), limit: int = 0, int_new_hours: float = 
         print(f"{l}: grammar table covers {len(texts)} captions")
     for r in label2_lang.starmap([(l, limit, int_new_hours, crops, dry_per_kind, srcs, with_d2, name, ext, cer_ext,
                                    split_long, max_row, only_ids, trim_ext, piece_ext, salvage, decide_off, cands_off,
-                                   partial, ctc_model, force)
+                                   partial, ctc_model, force, cands_on, ids_file)
                                   for l in langs.split(",")]):
         print(json.dumps({k: v for k, v in r.items() if k not in ("examples", "row_samples", "noncanonical_different_words")},
                          ensure_ascii=False))
