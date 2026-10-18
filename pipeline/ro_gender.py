@@ -35,6 +35,12 @@ def _word(text: str, last: bool) -> str:
     return (ws[-1] if last else ws[0]) if ws else ""
 
 
+def _after_noun(after: str) -> str:
+    """The noun after a reading: the first word of `after`, or the word after a linking "de" ("de minute")."""
+    ws = [w for w in (_tok(w) for w in after.split()) if w]
+    return ws[1] if len(ws) > 1 and ws[0] == "de" else ws[0] if ws else ""
+
+
 def violation_indexes(reading: str, before: str = "", after: str = "") -> list:
     """Token indexes of `reading` whose masculine form is ungrammatical here."""
     toks = reading.split()
@@ -51,11 +57,13 @@ def violation_indexes(reading: str, before: str = "", after: str = "") -> list:
             out.add(i)
         elif nxt == "virgulă":  # "doi virgulă cinci miliarde"
             m = j
-            while m < len(keys) and keys[m] in _DECIMAL_FILL:
+            # "și" joins a tens word and its unit ("douăzeci și cinci"); after any other word it starts the next
+            # number ("doi virgulă cinci și două mii"), so the scan stops there
+            while m < len(keys) and keys[m] in _DECIMAL_FILL and not (keys[m] == "și" and keys[m - 1] not in TENS):
                 m += 1
             if m < len(keys) and keys[m] in SCALE_PL:
                 out.add(i)
-        elif j >= len(keys) and _word(after, last=False) in FEM_COUNT_NOUNS:
+        elif j >= len(keys) and _after_noun(after) in FEM_COUNT_NOUNS:  # "... și doi" + " de minute"
             out.add(i)
     # clock hour: the hour is the first number (after "ora" / "orele", either before the span or leading it)
     hour_ctx = _word(before, last=True) in HOUR_WORDS

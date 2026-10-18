@@ -7,14 +7,15 @@ Each check finds one known generator slip (code: what it catches):
   date_ord_apocope    es "el primer de octubre" (the apocope belongs before a masculine noun; dates say "primero")
   pt_clock_hour_masc  pt clock hours 1, 2, 21, 22 are feminine ("às duas e cinco", never "dois e cinco")
   es_clock_hour_masc  es clock hours 1 / 21 are feminine ("la una y cinco", "las veintiuna horas")
-  fr_clock_et         fr "et" between the hour and the minutes ("seize heures et quinze"); "et quart", "et demie"
+  fr_clock_et         fr "et" between the hour and the minutes ("seize heures et quinze"); "et (un) quart", "et demie"
                       and the "et" inside "vingt et un" are right
   fr_clock_hour_un    fr hour 1 / 21 masculine ("vingt et un heures": the hour is feminine, "vingt et une heures")
   fr_12am_douze       fr 12:xx a.m. read "douze ..." (that is noon; midnight is "minuit" / "zéro heure")
   it_clock_ore        it "<hour> ore ..." for a clock time ("sedici ore e un quarto" is a duration)
   clock_midnight_noon it 0:xx read "dodici ..." (that is 12:xx)
   count_digit_chunks  a count read as digit chunks ("51000 funcionários" -> "cinco dez zero zero")
-  hour_noun_number    hour noun in the wrong number ("vingt heure", "dezenove hora", "une heures")
+  hour_noun_number    hour noun in the wrong number ("vingt heure", "dezenove hora", "une heures", "vingt et une
+                      heure", fr "zéro heures")
   cents_word          es "dólares / pesos ... céntimos", pt "reais / dólares ... cêntimos" (those cents are centavos)
   price_two_numbers   de / nl price with cents and no unit word joined by "und" / "en" ("achtundvierzig und zehn":
                       heard as two numbers)
@@ -51,9 +52,23 @@ MONTHS = {
 MONTH_SET = {lang: set(v.split()) for lang, v in MONTHS.items()}
 FIRST_MASC = {"es": "primero", "pt": "primeiro", "it": "primo", "fr": "premier"}
 
-FR_ET_BAD = re.compile(r"(?<!vingt )(?<!trente )(?<!quarante )(?<!cinquante )(?<!soixante )\bet (?!quart\b|demie?\b)")
-PT_HOUR_MASC = re.compile(r"^(?:vinte e )?(?:um|dois)\b")
-ES_HOUR_MASC = re.compile(r"^(?:veintiuno|veintiún|uno|un)\b")
+FR_ET_BAD = re.compile(r"(?<!vingt )(?<!trente )(?<!quarante )(?<!cinquante )(?<!soixante )\bet "
+                       r"(?!quart\b|un quart\b|demie?\b)")
+# a masculine first word is the hour only when it is not the minutes / quarter of "<minutes> para as <hour>" ("um
+# quarto para as três", "dois minutos para as três", "un cuarto para las tres")
+PT_HOUR_MASC = re.compile(r"^(?:vinte e )?(?:um|dois)\b(?! quarto\b| minutos?\b)")
+ES_HOUR_MASC = re.compile(r"^(?:veintiuno|veintiún|uno|un)\b(?! cuarto\b| minutos?\b)")
+# it "alle ore sedici e trenta": "ore" after an article / preposition is the clock noun, not a duration
+IT_ORE_ARTICLE = re.compile(r"^(?:\S+ )?(?:le|alle|dalle|delle|nelle|sulle|verso le) ore\b")
+# generator class names that mean the same census class ("years": ml_tts_multi's multi-year sentences)
+CLS_ALIAS = {"years": "year", "dates": "date"}
+
+
+def _cls(row: dict) -> str:
+    c = row.get("cls") or ""
+    return CLS_ALIAS.get(c, c)
+
+
 CENTS_BAD = {"es": (re.compile(r"\b(?:dólar|dólares|peso|pesos)\b"), re.compile(r"\bcéntimos?\b")),
              "pt": (re.compile(r"\b(?:real|reais|dólar|dólares)\b"), re.compile(r"\bcêntimos?\b"))}
 UNIT_WORDS = {"de": re.compile(r"\b(?:Euro|Dollar|Pfund|Cent|Franken)\b", re.I),
@@ -110,7 +125,7 @@ def span_errors(lang: str, sp: dict, row: dict) -> list:
     rd = (sp.get("reading") or "").strip()
     st = sp.get("text") or ""
     kind = sp.get("kind")
-    cls = row.get("cls") or ""
+    cls = _cls(row)
     if not rd:
         return []
     rl = rd.lower()
@@ -142,7 +157,7 @@ def span_errors(lang: str, sp: dict, row: dict) -> list:
         if re.match(r"\s*12\s*[:h.]\s*\d{2}\s*a\.?\s?m", st, re.I) and rl.startswith("douze"):
             out.append("fr_12am_douze")
     if clock and lang == "it":
-        if re.match(r"\S+(?: \S+)? ore\b", rl) and not rl.startswith("le ore"):
+        if re.match(r"\S+(?: \S+)? ore\b", rl) and not IT_ORE_ARTICLE.match(rl):
             out.append("it_clock_ore")  # "sedici ore e un quarto" is a duration
         if re.match(r"\s*0?0\s*[:.]", st) and rl.startswith("dodici"):
             out.append("clock_midnight_noon")  # 0:55 read as 12:55
@@ -150,12 +165,17 @@ def span_errors(lang: str, sp: dict, row: dict) -> list:
         for i, t in enumerate(toks):
             if t in ("heure", "hora"):
                 prev = toks[i - 1] if i else ""
+                prev2 = toks[i - 2] if i > 1 else ""
                 if prev not in ("un", "une", "um", "uma", "zéro", "zero"):
                     out.append("hour_noun_number")
+                elif prev in ("un", "une", "um", "uma") and prev2 in ("et", "e", "y"):
+                    out.append("hour_noun_number")  # "vingt et une heure": 21 takes the plural
             elif t in ("heures", "horas") and i:
                 prev, prev2 = toks[i - 1], toks[i - 2] if i > 1 else ""
                 if prev in ("un", "une", "um", "uma") and prev2 not in ("et", "e", "y"):
                     out.append("hour_noun_number")
+                elif lang == "fr" and prev == "zéro":
+                    out.append("hour_noun_number")  # "zéro heures": French 0 takes the singular ("zéro heure")
 
     if kind == "int" and cls in ("count", "large") and re.search(r"\b(?:zero|cero|zéro|null|nul|nulla)\b", rl) \
             and not re.match(r"\s*0", st):
@@ -253,7 +273,7 @@ def _pl_errors(sp, row, rd, toks, before, clock) -> list:
         if t == "dwie" and re.match(r"(?:tysiące|tysięcy|miliony|milionów|miliardy|miliardów)$", toks[i + 1]):
             out.append("pl_dwie_scale")
             break
-    kind, cls = sp.get("kind"), row.get("cls") or ""
+    kind, cls = sp.get("kind"), _cls(row)
     if kind in ("int", "cur", "range") and cls not in ("year", "date") and toks and toks[0] in PL_NOM \
             and not PL_ORD_END.search(toks[-1]):
         prev = [_tok(t) for t in before.split()[-2:]]

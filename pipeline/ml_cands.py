@@ -564,7 +564,12 @@ CLOCK_JOIN = {"de": [""], "es": ["y", ""], "fr": [""], "it": ["e", ""], "nl": ["
 FEM_HOUR = {"es": {"uno": "una", "un": "una", "veintiuno": "veintiuna", "veintiún": "veintiuna"},
             "fr": {"un": "une"}, "pt": {"um": "uma", "dois": "duas"}}
 MIDNIGHT = {"fr": "minuit"}  # 12:xx a.m. ("douze heures" is noon)
-NO_NOON_MIDNIGHT = {"it"}  # 0:55 is "zero e cinquantacinque", never "dodici ..." (12:55)
+# 0:xx is never read with the 12 hour in any language: 0:55 is "zero e cinquantacinque", "null Uhr dreißig", "zéro
+# heure trois", "cero y veintitrés", "nul uur elf", never "dodici ..." / "zwölf Uhr dreißig" / "douze trois" / "doce
+# veintitrés" / "twaalf uur elf" (that is 12:xx, noon). The 12-hour reading is only offered for 13:00-23:59
+NO_NOON_MIDNIGHT = True
+# French says the hour word in the singular for 0 and 1 ("zéro heure trois", "une heure"; "zéro heures" is a slip)
+SING_HOUR_ZERO = {"fr"}
 
 
 def _fem_hour(ws: list[str], lang: str, hh: int) -> list[str]:
@@ -591,8 +596,10 @@ def _clock_core(d: dict, lang: str) -> list[str]:
     hw0 = g(lang, "card", h)
     if canon[:len(hw0)] == hw0:  # the table's own hour words, feminine where the hour is ("um e dez" -> "uma e dez")
         canon = _fem_hour(hw0, lang, h) + canon[len(hw0):]
+        if h == 0 and lang in SING_HOUR_ZERO and canon[len(hw0):len(hw0) + 1] == ["heures"]:
+            canon = canon[:len(hw0)] + ["heure"] + canon[len(hw0) + 1:]  # "zéro heures trois" -> "zéro heure trois"
     out = [canon]
-    hours = {h} | ({h % 12 or 12} if h > 12 or (h == 0 and lang not in NO_NOON_MIDNIGHT) else set())
+    hours = {h} | ({h % 12} if h > 12 else set())  # NO_NOON_MIDNIGHT: 0:xx never gets the 12 hour
     if lang in MIDNIGHT and d.get("ap") == "a" and h == 12:
         hours, out = set(), []  # 12:xx a.m.: midnight, not "douze heures"
         mw = [MIDNIGHT[lang]]
@@ -611,7 +618,8 @@ def _clock_core(d: dict, lang: str) -> list[str]:
             # the hour word agrees with the hour: singular "hora" / "heure" for 1 (and 0, "zero hora", "zéro heure"),
             # plural otherwise ("quinze hora e meia", "une heures" were generator slips, judge audit 2026-10-17)
             heads = [hv] + [hv + [u] for u in HOUR_UNIT[lang]
-                            if not (u in SING_HOUR_UNIT and hh not in (0, 1)) and not (u in PLUR_HOUR_UNIT and hh == 1)]
+                            if not (u in SING_HOUR_UNIT and hh not in (0, 1))
+                            and not (u in PLUR_HOUR_UNIT and (hh == 1 or (hh == 0 and lang in SING_HOUR_ZERO)))]
             if m == 0:
                 out += heads
                 continue
