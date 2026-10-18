@@ -19,9 +19,11 @@ from census_common import synthetic  # noqa: E402
 lang, name = sys.argv[1], sys.argv[2]
 up = "--upload" in sys.argv
 W = Path(os.environ.get("SPOKEN_FORM_JUDGE_ROOT", "/tmp/spoken_form_judge")) / lang / name
-# this pass's rejects from its previous judge run: a re-judge takes back only these (ids can repeat across passes)
-_OLD_OWN = ({x.strip() for x in open(W / "jr/reject_ids.txt") if x.strip()}
-            if (W / "jr/reject_ids.txt").exists() else set())
+# this pass's rejects as last UPLOADED into the merged list: a re-judge takes back only these (ids can repeat across
+# passes). Read from jr/uploaded_reject_ids.txt, written only after a successful upload (jr/reject_ids.txt is rewritten
+# by every run, uploaded or not, so it is not what the merged list holds)
+_OLD_OWN = ({x.strip() for x in open(W / "jr/uploaded_reject_ids.txt") if x.strip()}
+            if (W / "jr/uploaded_reject_ids.txt").exists() else set())
 ext = {json.loads(l)["id"]: json.loads(l) for l in open(W / "ext.jsonl")}
 WORD = re.compile(r"[^\W\d_]+(?:['’][^\W\d_]+)?", re.U)
 
@@ -331,4 +333,5 @@ if up:
     merged.write_text("".join(x + "\n" for x in allr))
     V.put(merged, f"ml/p3v2/{lang}/reject_ids.txt")
     V.put(W / "jr/judge_stats.json", f"ml/p3v2/{lang}/judged_{name}.json")
+    (W / "jr/uploaded_reject_ids.txt").write_text("".join(i + "\n" for i in rej))  # what the merged list now holds
     print(f"{lang}/{name}: uploaded; reject_ids.txt now {len(allr)}")

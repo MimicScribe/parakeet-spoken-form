@@ -192,5 +192,111 @@ class Build4(unittest.TestCase):
         self.assertEqual(a, b)
 
 
+# ---------------------------------------------------------------- review round 2 (Gemini Argon on 45bc56f)
+def _tts_fixture(vol, lang="de"):
+    """Synthetic rows (tts1) for a fixture volume: t0 chosen, t1 judge-rejected; windows: a synthetic window over each,
+    and a real window over a real parent that was rejected after windows2 built it."""
+    base = f"ml/p3v2/{lang}"
+    tts = [{"id": f"tts1_{lang}_{k}", "text": "fünfzig Prozent da", "duration": 2.0, "src": "tts", "origin": "tts",
+            "audio_filepath": "t.wav",
+            "split": "train", "num_chars": [[0, 15]], "spans": [{"kind": "pct", "text": "50 %", "by": "tts"}]}
+           for k in range(2)]
+    wj(vol, f"ml/tts1/{lang}/rows.jsonl", tts)
+    rows = rj(f"{vol}/{base}/rows.jsonl")
+    open(f"{vol}/{base}/reject_ids.txt", "w").write(f"{tts[1]['id']}\n{rows[5]['id']}\n")
+    win = lambda k, par, syn: {"id": f"{lang}_x{k}", "text": "fünfzig Prozent da", "num_tokens": [True, True, False],  # noqa: E731
+                               "duration": 3.0, "parents": par, "audio_filepath": "w.wav", "synthetic": syn}
+    wj(vol, f"{base}/windows.jsonl", [win(0, [tts[0]["id"]], True), win(1, [tts[1]["id"]], True),
+                                      win(2, [rows[5]["id"]], False), win(3, [rows[4]["id"]], False)])
+    return tts, rows
+
+
+class Round2(unittest.TestCase):
+    def test_synthetic_window_with_a_removed_parent_leaves(self):
+        # red-on-base: tts_ids was built after the reject filter, so a rejected synthetic parent vanished from the
+        # check (set() <= took_ids) and its window stayed; a real parent rejected after windows2 crashed the build
+        vol = _fixture(n_win=0)
+        tts, rows = _tts_fixture(vol)
+        aug, MB.TTS_AUG_FRAC = MB.TTS_AUG_FRAC, 0.0  # no degraded copies (no audio in the fixture)
+        self.addCleanup(setattr, MB, "TTS_AUG_FRAC", aug)
+        MB.build4(vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True)
+        ids = [w["id"] for w in rj(f"{vol}/mix4/win_de.jsonl")]
+        self.assertNotIn("de_x1", ids)  # its only parent was judge-rejected
+        self.assertNotIn("de_x2", ids)  # a real parent rejected after the windows were built: dropped, no crash
+        self.assertIn("de_x3", ids)
+
+    def test_one_year_definition(self):
+        # red-on-base: _year_of missed hu / fi suffixed years (the gate counts them) and took "2015." ordinals (the
+        # gate does not); post_build_check keyed years on the raw caption token
+        hu = {"text": "a kétezer-tizenötben", "spans": []}
+        self.assertEqual(MB._year_of({"kind": "int", "text": "2015-ben"}, hu, "hu"), 2015)
+        self.assertEqual(MB._year_of({"kind": "ord", "text": "2015."}, {}, "de"), None)
+        self.assertEqual(MB._year_of({"kind": "int", "text": "1999"}), 1999)
+        rows = [{"id": f"h{i}", "text": "x", "spans": [{"kind": "int", "text": "2015-ben"}]} for i in range(40)]
+        rows += [{"id": f"o{i}", "text": "x", "spans": [{"kind": "int", "text": str(1950 + i % 70)}]} for i in range(700)]
+        kept, st = MB._cap_top_years(rows, 0.03, random.Random(0), lang="hu")
+        self.assertIn(2015, st)
+        self.assertLessEqual(MB.post_build_check(kept, [], "hu")["top_year"], 0.03 + 1e-9)
+
+    def test_regressions_fail_loudly(self):
+        # red-on-base: no before / after comparison; a later step could undo a fill floor or the top-year trim
+        rows = [{"id": f"y{i}", "text": "x", "spans": [{"kind": "int", "text": str(1990 + i % 41)}]} for i in range(41 * 45)]
+        before = MB.gate_counts(rows, [], "de")
+        after = [x for x in rows if x["spans"][0]["text"] != "1995"][:]  # 1995: 45 -> 0
+        reg = MB.post_build_check(after, [], "de", before)["regressions"]
+        self.assertTrue(any(r.startswith("year1995") for r in reg), reg)
+        self.assertEqual(MB.post_build_check(rows, [], "de", before)["regressions"], [])
+
+    def test_ext_cap_keeps_floor_rows_last(self):
+        rs = [{"id": f"x{i}", "spans": [{"kind": "dec", "text": "1,5", "by": "ext" if i < 12 else "ctc"}]} for i in range(30)]
+        kept, _ = MB.cap_ext_per_class(rs, 0.24, random.Random(0), keep_last=lambda x: x["id"] in ("x0", "x1"))
+        self.assertTrue({"x0", "x1"} <= {x["id"] for x in kept})
+
+    def test_synthetic_selected_by_gate_class_spans(self):
+        # red-on-base: synthetic rows were capped by hours per raw kind, the gate counts spans per gate class
+        real = [{"id": f"r{i}", "text": "im Jahr", "spans": [{"kind": "int", "text": "2015"}]} for i in range(10)]
+        tts = [{"id": f"t{i}", "text": "im Jahr", "src": "tts", "_targeted": True,
+                "spans": [{"kind": "int", "text": "2016"}]} for i in range(10)]
+        took = MB.select_synthetic(tts, real, "de", {"int": 1.0})
+        self.assertEqual(len(took), 4)  # 4 / 14 = 0.286 <= 0.30; a fifth would be 0.333
+        chk = MB.post_build_check(real, took + tts[4:6], "de")
+        self.assertIn("year", chk["synthetic_over"])
+        took2, n = MB.trim_synthetic(took, real[:5], "de")  # real rows a later cap removed: shares re-checked
+        self.assertEqual((len(took2), n), (2, 2))  # 2 / 7 = 0.286
+
+    def test_windows2_held_unit(self):
+        # red-on-base: windows2 held out PLENARY days only (committee sessions of a held-out day trained)
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_p3.py")).read()
+        win = src[src.index("def windows2_lang("):src.index("def windows2(")]
+        self.assertNotIn("-PLENARY", win)
+        self.assertIn("held_unit(r[\"id\"]) in held_u", win)
+
+    def test_assemble_refuses_and_scopes(self):
+        import ml_multi_scale as MS  # red-on-base: assemble overwrote an existing (maybe judged) pass, flat wav/
+
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(MS.assemble_paths(d, "rows_x")[2], f"{d}/wav/rows_x")
+            open(f"{d}/rows_x.jsonl", "w").write("")
+            with self.assertRaises(FileExistsError):
+                MS.assemble_paths(d, "rows_x")
+            MS.assemble_paths(d, "rows_x", force=True)
+
+    def test_held_list_comment_and_group_lines(self):
+        # red-on-base: "#" lines were read as ids, and a "# group yodas:<video>" line (vox_heldout / the carve) held
+        # nothing out: rows of that video trained
+        with tempfile.TemporaryDirectory() as d:
+            open(f"{d}/h.txt", "w").write("# list\n# group yodas:V3VVVVVVVVV\n# group vox:20190101\nde_x\n")
+            ids, units = CC.read_held_list(f"{d}/h.txt")
+            self.assertEqual(ids, {"de_x"})
+            self.assertEqual(units, {"vid:V3VVVVVVVVV", "day:20190101"})
+        vol = _fixture(n_win=0)
+        open(f"{vol}/ml/p3v2/heldout_de.txt", "w").write("# carve\n# group yodas:V3VVVVVVVVV\n")
+        MB.build4(vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True)
+        p3 = {x["id"] for x in rj(f"{vol}/mix4/p3_de.jsonl")}
+        ho = {x["id"] for x in rj(f"{vol}/mix4/heldout_de.jsonl")}
+        self.assertNotIn("de100_00000003_V3VVVVVVVVV_10_00_5_00", p3)
+        self.assertIn("de100_00000003_V3VVVVVVVVV_10_00_5_00", ho)
+
+
 if __name__ == "__main__":
     unittest.main()

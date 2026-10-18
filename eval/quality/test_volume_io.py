@@ -87,6 +87,19 @@ class JudgeUpload(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(self.v.read("ml/p3v2/pl/reject_ids.txt"), "old1\nold2\n")
 
+    def test_rejudge_takes_back_only_uploaded_rejects(self):
+        # red-on-base: a local re-judge (no --upload) rewrote jr/reject_ids.txt, which the next --upload read as "this
+        # pass's own earlier rejects": the id rejected and uploaded first could never be taken back
+        w = self.root / "pl" / "p1"
+        env = dict(self.v.env(), SPOKEN_FORM_JUDGE_ROOT=str(self.root))
+        cmd = [sys.executable, str(HERE / "judge_plro.py"), "pl", "p1"]
+        self.assertEqual(subprocess.run(cmd + ["--upload"], capture_output=True, env=env).returncode, 0)
+        self.assertIn("a\n", self.v.read("ml/p3v2/pl/reject_ids.txt"))
+        (w / "ext.jsonl").write_text(json.dumps({"id": "a", "text": "mam 7"}) + "\n")  # a is now kept
+        self.assertEqual(subprocess.run(cmd, capture_output=True, env=env).returncode, 0)  # local run, no upload
+        self.assertEqual(subprocess.run(cmd + ["--upload"], capture_output=True, env=env).returncode, 0)
+        self.assertEqual(self.v.read("ml/p3v2/pl/reject_ids.txt"), "old1\nold2\n")
+
     def test_merge_when_readable(self):  # red-on-base: control
         r = self.judge()
         self.assertEqual(r.returncode, 0, r.stderr)

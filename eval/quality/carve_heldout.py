@@ -33,7 +33,7 @@ import volume_io as V
 PIPE = V.PIPE
 VOLUME = V.VOLUME
 sys.path.insert(0, str(PIPE))
-from census_common import ext_row, held_unit  # noqa: E402  (the build's definitions)
+from census_common import ext_row, held_unit, read_held_list  # noqa: E402  (the build's definitions)
 
 COMMON = {"int", "pct", "dec", "ord"}
 vget = V.vget
@@ -64,7 +64,7 @@ def gate_class(lang):
     return f
 
 
-def plan(lang, rows, held, target, max_share, only=None, avoid=frozenset(), cls=None):
+def plan(lang, rows, held, target, max_share, only=None, avoid=frozenset(), cls=None, held_units=frozenset()):
     """Groups to add to the held-out list -> (add {group: ids}, held-out spans per kind after, real spans per kind).
     only None: every rare kind, cap = max_share of ALL its real spans (2026-10-15 behaviour). only given: those
     kinds, richest groups first, and a group is taken only if every listed kind stays within max_share of the spans it
@@ -76,6 +76,8 @@ def plan(lang, rows, held, target, max_share, only=None, avoid=frozenset(), cls=
             by_group[g].append(r)
     # a group with any held-out id is held out whole (mix_build.build4 S5: the video / plenary day is the unit)
     held_g = {g for g, rs in by_group.items() if any(r["id"] in held for r in rs)}
+    # and a unit the list holds out with no id of it here ("# group vox:<day>" lines, e.g. vox_heldout days)
+    held_g |= {g for g in by_group if g.replace("vox:", "day:", 1).replace("yodas:", "vid:", 1) in held_units}
     total = kind_counts(rows, cls)
     have = kind_counts([r for r in rows if r["id"] in held or group(r) in held_g], cls)
     add = {}
@@ -132,7 +134,7 @@ def main():
         first = not V.read_shared(f"ml/p3v2/heldout_{lang}.txt", w / "heldout.txt")
         if first:  # the volume has no list for this language yet: it starts empty
             (w / "heldout.txt").write_text(f"# carve_heldout.py first list for {lang}\n")
-        held = {l.strip() for l in open(w / "heldout.txt") if l.strip() and not l.startswith("#")}
+        held, held_units = read_held_list(w / "heldout.txt")  # "# group" lines hold their unit out too
         rej = set()
         for stale in [*w.glob("rows*.jsonl"), *w.glob("val_*.jsonl")]:
             if stale.stem not in names + vals:
@@ -150,7 +152,8 @@ def main():
         rows += [r for r in val if r["id"] not in seen]
         rows = [r for r in rows if r["id"] not in rej and not ext_row(r)]
         add, have, total = plan(lang, rows, held, a.target, a.max_share, only=a.kinds.split(",") if a.kinds else None,
-                                avoid=set(filter(None, a.avoid.split(","))), cls=gate_class(lang) if a.kinds else None)
+                                avoid=set(filter(None, a.avoid.split(","))), cls=gate_class(lang) if a.kinds else None,
+                                held_units=held_units)
         print(f"{lang}: +{len(add)} groups, +{sum(map(len, add.values()))} rows held out")
         shown = a.kinds.split(",") if a.kinds else [k for k in sorted(total) if k not in COMMON]
         print("   held-out spans per kind (now / real total):", {k: f"{have[k]}/{total[k]}" for k in shown})

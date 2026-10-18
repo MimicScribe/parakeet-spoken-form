@@ -15,11 +15,9 @@ for lang in ("de", "it", "nl", "pt", "uk", "ru"):
         assert MB.tts_share(lang, kind) == 0.5, (lang, kind)
 # the build's per-class cap reads the per-language share (not the language-blind table)
 src = inspect.getsource(MB.build4)
-assert "tts_share(lang, k)" in src and "TTS_SHARE_KIND.get(k, TTS_SHARE)" not in src
-# cap arithmetic the build uses: real hours rh -> synthetic hours allowed rh * sh / (1 - sh)
-rh = 0.4
-assert abs(rh * MB.tts_share("es", "unit") / (1 - MB.tts_share("es", "unit")) - 0.4) < 1e-9  # 50%: as much as real
-assert abs(rh * MB.tts_share("de", "unit") / (1 - MB.tts_share("de", "unit")) - 0.4 * 0.3 / 0.7) < 1e-9
+assert "select_synthetic(" in src and "TTS_SHARE_KIND.get(k, TTS_SHARE)" not in src
+import census_common as CC  # noqa: E402
+assert all(MB.tts_share(l, k) == CC.syn_limit(l, k) for l in ("en", "de", "uk") for k in ("unit", "clock", "year"))
 print("ok")
 
 # every English part the v4 mix lists has a number share (else mix_share counts it as 0% numbers)

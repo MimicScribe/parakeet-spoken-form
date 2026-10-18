@@ -883,7 +883,8 @@ def _vox_suffix(rid: str):
 
 
 def _id_set(path: str) -> set:
-    return {l.strip() for l in open(path) if l.strip()} if os.path.exists(path) else set()
+    """Ids of a list file; "#" lines are comments, never ids."""
+    return {l.strip() for l in open(path) if l.strip() and not l.lstrip().startswith("#")} if os.path.exists(path) else set()
 
 
 def _window_kinds(stream: list, w: dict) -> list:
@@ -933,7 +934,9 @@ def windows2_lang(lang: str, per_stream: int = 3, max_rows: int = 8, seed: int =
     # review H3: a missing held-out or judge file must stop the job, not silently train on held-out / rejected rows
     assert os.path.exists(f"{OUT2}/heldout_{lang}.txt"), f"{lang}: held-out list missing"
     assert allow_no_judge or os.path.exists(f"{out}/reject_ids.txt"), f"{lang}: reject_ids.txt missing (run the judge)"
-    held = _id_set(f"{OUT2}/heldout_{lang}.txt")
+    from census_common import held_unit, read_held_list
+
+    held, held_u = read_held_list(f"{OUT2}/heldout_{lang}.txt")  # "#" lines are comments; "# group" lines add a unit
     import glob as _gv
 
     held |= {json.loads(l)["id"] for p in sorted(_gv.glob(f"{out}/val_*.jsonl")) for l in open(p)}  # validation-only rows
@@ -941,12 +944,11 @@ def windows2_lang(lang: str, per_stream: int = 3, max_rows: int = 8, seed: int =
     import glob as _g
 
     rows_all = [json.loads(l) for p in sorted(_g.glob(f"{out}/rows*.jsonl")) for l in open(p)]  # every labelling pass
-    vid = lambda i: (re.match(r"[a-z]{2}\d+_\d+_(.{11})_", str(i)) or [None, None])[1]  # noqa: E731
-    held_vid = {vid(i) for i in held} - {None}  # the held-out unit is the YODAS video
-    day = lambda i: (re.match(r"(\d{8})-\d{4}-PLENARY", str(i)) or [None, None])[1]  # noqa: E731
-    held_day = {day(i) for i in held} - {None}  # review H2: and the VoxPopuli plenary day
+    # the held-out unit (census_common.held_unit, as build4 and the carve count it): the YODAS video or the parliament
+    # day of any session type, for every language
+    held_u |= {held_unit(i) for i in held} - {None}
     skip = held | _id_set(f"{out}/reject_ids.txt") | {r["id"] for r in rows_all if _vox_suffix(r["id"]) in held_sfx
-                                                       or vid(r["id"]) in held_vid or day(r["id"]) in held_day}
+                                                       or held_unit(r["id"]) in held_u}
     # rows decided by a second recognizer (census_common.EXT_BY, the definition mix_build.build4 and the data gate use)
     # never enter windows or pairs
     from census_common import EXT_BY, ext_row  # noqa: F401
@@ -954,9 +956,6 @@ def windows2_lang(lang: str, per_stream: int = 3, max_rows: int = 8, seed: int =
     ext_ids = {r["id"] for r in rows_all if ext_row(r)}
     skip |= ext_ids
     wave2 = lang in WAVE2
-    if wave2:
-        hdays = C.held_days(held)
-        skip |= {r["id"] for r in rows_all if C.vox_day(r["id"]) in hdays}
     if heldout:  # eval windows: the held-out side of the same split (val_* rows included), never training rows
         val_rows = [json.loads(l) for p in sorted(_g.glob(f"{out}/val_*.jsonl")) for l in open(p)]
         ext_ids |= {r["id"] for r in val_rows if ext_row(r)}

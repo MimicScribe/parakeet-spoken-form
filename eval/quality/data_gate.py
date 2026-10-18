@@ -35,13 +35,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))
 # the census rules the mix build applies too (one definition: the build's caps and these checks count the same things)
-from census_common import (CLOCK_CTX, DOT_CLOCK, EXT_BY, GROUP_CAP, GROUP_CAP_LANG, SPOKEN_CLOCK, SPOKEN_CUR,  # noqa: E402,F401
-                           SPOKEN_DATE, TEMPLATE_CAP, by_value, ext_span, gate_class, group_cap, group_id, morph_class,
-                           span_class, spoken_shape, synthetic, template_key)
+from census_common import (CLASS_MIN, CLOCK_CTX, DOT_CLOCK, EXT_BY, GROUP_CAP, GROUP_CAP_LANG,  # noqa: E402,F401
+                           SPOKEN_CLOCK, SPOKEN_CUR, SPOKEN_DATE, SYN_FLOOR_EXEMPT, SYN_FLOOR_SPANS, SYN_SHARE_KIND,
+                           SYN_SHARE_LANG, TEMPLATE_CAP, TIER_FACTOR, TIER_LANGS, TIER_OF, by_value, ext_span,
+                           gate_class, gate_class_value, group_cap, group_id, morph_class, span_class, spoken_shape,
+                           syn_floor, syn_limit, synthetic, template_key, tier_of)
 
 BAR_YEARS = {"de": 2000, "it": 2000, "nl": 2000}
-CLASS_MIN = {"dec": 300, "pct": 300, "cur": 300, "clock": 300, "phone": 300, "ord": 200, "date": 150, "range": 150,
-             "decade": 150, "unit": 150}
 FORWARD_KEY = (2030, 2035, 2040, 2050)
 
 
@@ -57,22 +57,7 @@ def scale_of(v):
     return "billion" if v >= 10**9 else "million" if v >= 10**6 else "thousand"
 
 
-# shapes real speech rarely has may be up to half synthetic; every other class <= 30%
-SYN_SHARE_KIND = {"clock": 0.5, "cur": 0.5, "phone": 0.5, "date": 0.5}
-# English first, Spanish and French next, filled to the full bar "even if it means using more
-# synthetic speech": in these three languages ANY class may be up to half synthetic (mix_build.TTS_SHARE_LANG mirrors it);
-# every other language keeps the caps above
-SYN_SHARE_LANG = {"en": 0.5, "es": 0.5, "fr": 0.5}
-# English phone numbers may be mostly synthetic (real English speech has ~8): the share may
-# pass 50% while the synthetic spans stay within the class floor (CLASS_MIN x tier factor, 300 at full tier)
-# es/fr fractions and "&" have no real source (their captions hold none), so they get
-# the same exemption, with an explicit floor because they have no class minimum
-SYN_FLOOR_EXEMPT = {("en", "phone"), ("es", "frac"), ("es", "amp"), ("fr", "frac"), ("fr", "amp")}
-SYN_FLOOR_SPANS = {"frac": 150, "amp": 150}  # floor for exempt classes without a CLASS_MIN entry (scaled by the tier factor)
-
-
-def syn_limit(lang, k):
-    return max(SYN_SHARE_KIND.get(k, 0.30), SYN_SHARE_LANG.get(lang, 0.0))
+# synthetic-share limits (SYN_*, syn_limit, syn_floor) and the tiers (TIER_LANGS, tier_of): census_common
 
 
 # a spoken number followed by a scale word ("cinco millones", "deux milliards", "3,5 millones") is a million / billion
@@ -115,14 +100,7 @@ def check(name, ok, got, want):
     return {"check": name, "pass": bool(ok), "got": got, "want": want}
 
 
-TIER_LANGS = {"full": "en de es fr it nl pt", "next": "ru pl ro", "moderate": "uk sk fi bg cs hr sv hu",  # uk: (no real word-form source for years / prices / phones)
-              "light": "et da lt lv mt sl el"}
-TIER_OF = {l: t for t, ls in TIER_LANGS.items() for l in ls.split()}
 FWD_KEYS = FORWARD_KEY
-
-
-def tier_of(lang):
-    return TIER_OF.get(lang, "full")
 
 
 # full = the first bar; next = same checks, counts ~55% (years spread 1990-2030 >= 20, 2031-2060 >= 5, key years >= 20)
@@ -132,6 +110,7 @@ TIER_P = {
     "next": dict(f=0.55, yh=1.65, seen=110, v10=60, each=20, floor=10, fwd=5, key=20, ints=1375, i100=6, hund=3, ih=1.65,
                  big=220, bigd=110, bigs=28, rh=5.5, wh=1.1, grp=275, ho_year=80, ho_cls=16, ext=True),
 }
+assert all(TIER_P[t]["f"] == TIER_FACTOR[t] for t in TIER_P), "census_common.TIER_FACTOR must mirror TIER_P"
 # moderate: ~25% counts, the main classes present with value spread; light: no-damage coverage only
 MOD = dict(year=375, int_small=625, int_big=100, dec=75, pct=75, clock=75, cur=75, each=8, fwd_key=5, fwd_seen=10,
            top=0.05, rh=2.5, wh=0.5, grp=125, ho_year=40, ho_cls=10, ext=True)
@@ -251,8 +230,8 @@ def common_checks(ctx, tier):
         if x["syn"]:
             sh = x["syn"] / x["spans"]
             lim = syn_limit(ctx["lang"], k)
-            if (ctx["lang"], k) in SYN_FLOOR_EXEMPT and (k in CLASS_MIN or k in SYN_FLOOR_SPANS):
-                floor = round(CLASS_MIN.get(k, SYN_FLOOR_SPANS.get(k, 0)) * TIER_P.get(tier, {"f": 1.0})["f"])
+            floor = syn_floor(ctx["lang"], k, tier)
+            if floor is not None:
                 out.append(check(f"{k} synthetic share <= {lim:.0%} or synthetic spans <= floor {floor}",
                                  sh <= lim or x["syn"] <= floor, {"share": round(sh, 3), "synthetic": x["syn"]},
                                  {"share": lim, "floor": floor}))
@@ -290,8 +269,8 @@ def gate_lang(d, lang, tier=None):
             if t:
                 templates[t] += 1
         for sp in sps:
-            c, v = morph_class(r.get("text", ""), sp, *span_class(sp), lang)  # hu / fi suffixes, span scale words
-            c0, c = c, spoken_shape(r.get("text", ""), sp, c, v, lang)  # c0: the caption class (scale words below)
+            c, v = gate_class_value(r, sp, lang)  # census_common: the one (class, value), years included
+            c0 = morph_class(r.get("text", ""), sp, *span_class(sp), lang)[0]  # the caption class (scale words below)
             x = cls[c]
             if syn:  # synthetic counts toward the bar, capped per class (check below)
                 x["syn"] += 1
@@ -313,8 +292,7 @@ def gate_lang(d, lang, tier=None):
                                   / max(1, sum(1 for r in train if not synthetic(r) and r.get("spans"))), 2),
               "class_spans_total": {k: x["spans"] for k, x in cls.items()}}
     wh = sum(w.get("duration", 0) for w in win if not synthetic(w)) / 3600
-    hc = collections.Counter(spoken_shape(r.get("text", ""), sp, *morph_class(r.get("text", ""), sp, *span_class(sp), lang), lang)
-                             for r in ho for sp in r.get("spans") or [])
+    hc = collections.Counter(gate_class(r, sp, lang) for r in ho for sp in r.get("spans") or [])
     ctx = {"cls": cls, "real_h": real_h, "wh": wh, "groups": groups, "templates": templates, "hc": hc, "lang": lang,
            "word_scales": word_scales}
     if tier in ("full", "next"):

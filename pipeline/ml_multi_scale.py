@@ -961,13 +961,26 @@ def assemble_row(item: dict, sc: dict, ext: dict, lang: str) -> dict:
             "pieces": piece_res, "n_spans": len(spans)}
 
 
+def assemble_paths(base: str, out_name: str, force: bool = False) -> tuple:
+    """(rows path, diag path, piece-wav dir) of an assemble pass under `base` (/vol/ml/p3v2/<lang>). A pass whose rows
+    file exists (it may be judged already) is not overwritten unless force; piece audio lives under wav/<out_name>/,
+    so two passes over one score tag never share a wav path."""
+    rows_p = f"{base}/{out_name}.jsonl"
+    if os.path.exists(rows_p) and not force:
+        raise FileExistsError(f"{rows_p} exists: give the new pass its own out_name, or --force to overwrite it")
+    return rows_p, f"{base}/diag_{out_name}.jsonl", f"{base}/wav/{out_name}"
+
+
 @asm_fn
-def assemble_lang(lang: str, tag: str, items_path: str, ext_path: str, out_name: str) -> dict:
-    """Assemble every clip of a pass: rows -> /vol/ml/p3v2/<lang>/<out_name>.jsonl (+ piece wavs), diag ->
-    diag_<out_name>.jsonl."""
+def assemble_lang(lang: str, tag: str, items_path: str, ext_path: str, out_name: str, force: bool = False) -> dict:
+    """Assemble every clip of a pass: rows -> /vol/ml/p3v2/<lang>/<out_name>.jsonl (+ piece wavs under
+    wav/<out_name>/), diag -> diag_<out_name>.jsonl. Refuses an existing pass unless force (assemble_paths). (The score
+    step needs no guard: it returns an existing output as is, and its FLAC pieces live under flac_<tag>/.)"""
     import glob
 
     import soundfile as sf
+
+    rows_p, diag_p, wav_dir = assemble_paths(f"{P3}/{lang}", out_name, force)
 
     items = {json.loads(l)["id"]: json.loads(l) for l in open(items_path)}
     sc = {}
@@ -981,8 +994,8 @@ def assemble_lang(lang: str, tag: str, items_path: str, ext_path: str, out_name:
         if j.get("status") == "completed":
             ext[j["id"]] = j
     st = collections.Counter()
-    os.makedirs(f"{P3}/{lang}/wav", exist_ok=True)
-    with open(f"{P3}/{lang}/{out_name}.jsonl", "w") as rf, open(f"{P3}/{lang}/diag_{out_name}.jsonl", "w") as df:
+    os.makedirs(wav_dir, exist_ok=True)
+    with open(rows_p, "w") as rf, open(diag_p, "w") as df:
         for rid, it in items.items():
             if rid not in sc:
                 st["no_score"] += 1
@@ -999,7 +1012,7 @@ def assemble_lang(lang: str, tag: str, items_path: str, ext_path: str, out_name:
                 if row["origin"] == "piece":
                     if x is None:
                         x, _sr = sf.read(it["audio_filepath"], dtype="float32")
-                    w = f"{P3}/{lang}/wav/{tag}_{row['id']}.wav"
+                    w = f"{wav_dir}/{tag}_{row['id']}.wav"
                     sf.write(w, x[int(row["t0"] * 16000):int(row["t1"] * 16000)], 16000, subtype="PCM_16")
                     row["audio_filepath"] = w
                 else:
@@ -1015,8 +1028,8 @@ def assemble_lang(lang: str, tag: str, items_path: str, ext_path: str, out_name:
 
 
 @entry()
-def assemble(lang: str, tag: str, items: str, ext: str, out_name: str):
-    print(json.dumps(assemble_lang.remote(lang, tag, f"{VOL}/{items}", f"{VOL}/{ext}", out_name)))
+def assemble(lang: str, tag: str, items: str, ext: str, out_name: str, force: bool = False):
+    print(json.dumps(assemble_lang.remote(lang, tag, f"{VOL}/{items}", f"{VOL}/{ext}", out_name, force)))
 
 
 # ------------------------------------------------------------------ CLI (local steps)

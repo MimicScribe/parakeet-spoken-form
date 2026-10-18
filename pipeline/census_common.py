@@ -240,8 +240,86 @@ def held_unit(rid: str) -> str | None:
     return "vid:" + m.group(1) if m else None
 
 
-def gate_class(r: dict, sp: dict, lang: str) -> str:
-    """The census class of span `sp` in row `r` exactly as the data gate counts it (span_class, then the suffix / scale
-    rules of morph_class, then the spoken shapes of spoken_shape)."""
+_GROUP_LINE = re.compile(r"^#\s*group\s+(vox|yodas):(\S+)")
+
+
+def read_held_list(path: str) -> tuple:
+    """(ids, units) of a held-out list (heldout_<lang>.txt). "#" lines are comments, never ids; a carve's
+    "# group vox:<day>" / "# group yodas:<video>" line adds that unit. units = held_unit of every id + the group lines."""
+    ids, units = set(), set()
+    for line in open(path, encoding="utf-8"):
+        t = line.strip()
+        if not t:
+            continue
+        if t.startswith("#"):
+            m = _GROUP_LINE.match(t)
+            if m:
+                units.add(("day:" if m.group(1) == "vox" else "vid:") + m.group(2))
+            continue
+        ids.add(t)
+    return ids, units | ({held_unit(i) for i in ids} - {None})
+
+
+def gate_class_value(r: dict, sp: dict, lang: str) -> tuple:
+    """(class, value) of span `sp` in row `r` exactly as the data gate counts it: span_class, then the suffix / scale
+    rules of morph_class (hu "2015-ben", fi "2015:ssä" are years by their number part), then the spoken shapes of
+    spoken_shape. The one year definition: a span is a year of value v iff this returns ("year", v)."""
     t = r.get("text", "")
-    return spoken_shape(t, sp, *morph_class(t, sp, *span_class(sp), lang), lang)
+    c, v = morph_class(t, sp, *span_class(sp), lang)
+    return spoken_shape(t, sp, c, v, lang), v
+
+
+def gate_class(r: dict, sp: dict, lang: str) -> str:
+    """The census class of span `sp` in row `r` as the data gate counts it (gate_class_value without the value)."""
+    return gate_class_value(r, sp, lang)[0]
+
+
+def year_of(r: dict, sp: dict, lang: str = "") -> int | None:
+    """The year value of a span as the data gate counts years (gate_class_value), else None."""
+    c, v = gate_class_value(r, sp, lang)
+    return v if c == "year" and isinstance(v, int) else None
+
+
+# ---------------------------------------------------------------- tiers and synthetic-share limits (data gate rules)
+CLASS_MIN = {"dec": 300, "pct": 300, "cur": 300, "clock": 300, "phone": 300, "ord": 200, "date": 150, "range": 150,
+             "decade": 150, "unit": 150}
+TIER_LANGS = {"full": "en de es fr it nl pt", "next": "ru pl ro", "moderate": "uk sk fi bg cs hr sv hu",
+              "light": "et da lt lv mt sl el"}  # uk moderate: no real word-form source for years / prices / phones
+TIER_OF = {l: t for t, ls in TIER_LANGS.items() for l in ls.split()}
+TIER_FACTOR = {"full": 1.0, "next": 0.55}  # count factor of a tier's bar (the gate's TIER_P "f"); others 1.0
+
+
+def tier_of(lang):
+    return TIER_OF.get(lang, "full")
+
+
+# shapes real speech rarely has may be up to half synthetic; every other class <= 30%
+SYN_SHARE_KIND = {"clock": 0.5, "cur": 0.5, "phone": 0.5, "date": 0.5}
+# English first, Spanish and French next, filled to the full bar even with more synthetic speech: in these three
+# languages ANY class may be up to half synthetic; every other language keeps the caps above
+SYN_SHARE_LANG = {"en": 0.5, "es": 0.5, "fr": 0.5}
+# English phone numbers may be mostly synthetic (real English speech has ~8): the share may pass 50% while the
+# synthetic spans stay within the class floor (CLASS_MIN x tier factor); es / fr fractions and "&" have no real source,
+# so they get the same exemption, with an explicit floor because they have no class minimum
+SYN_FLOOR_EXEMPT = {("en", "phone"), ("es", "frac"), ("es", "amp"), ("fr", "frac"), ("fr", "amp")}
+SYN_FLOOR_SPANS = {"frac": 150, "amp": 150}
+
+
+def syn_limit(lang, k):
+    """Max synthetic share of a class's spans in a language."""
+    return max(SYN_SHARE_KIND.get(k, 0.30), SYN_SHARE_LANG.get(lang, 0.0))
+
+
+def syn_floor(lang, k, tier=None):
+    """The synthetic span count an exempt (lang, class) may hold whatever its share (SYN_FLOOR_EXEMPT), else None."""
+    if (lang, k) not in SYN_FLOOR_EXEMPT or not (k in CLASS_MIN or k in SYN_FLOOR_SPANS):
+        return None
+    return round(CLASS_MIN.get(k, SYN_FLOOR_SPANS.get(k, 0)) * TIER_FACTOR.get(tier or tier_of(lang), 1.0))
+
+
+def syn_ok(lang, k, syn, spans, tier=None) -> bool:
+    """The gate's synthetic check of one class: share <= syn_limit, or (exempt classes) synthetic spans <= syn_floor."""
+    if not syn:
+        return True
+    fl = syn_floor(lang, k, tier)
+    return syn / max(spans, 1) <= syn_limit(lang, k) or (fl is not None and syn <= fl)
