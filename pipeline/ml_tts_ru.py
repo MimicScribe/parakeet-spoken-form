@@ -30,7 +30,7 @@ TAG = "tts9ru"
 CLASSES = {"year": 80, "count": 40, "big": 60, "price": 80, "clock": 80, "phone": 80, "date": 80, "pct": 70,
            "dec": 70, "ord": 70, "range": 70}
 KINDS = {"year": ["int"], "count": ["int"], "big": ["int"], "price": ["cur"], "clock": ["clock"],
-         "clock2": ["clock", "clock"], "phone": ["chain"], "phone2": ["int", "chain"], "date": ["date"], "pct": ["pct"],
+         "clock2": ["clock", "clock"], "phone": ["chain"], "phone2": ["int", "chain"],  "date": ["date"], "pct": ["pct"],
          "dec": ["dec"], "ord": ["ord"], "range": ["range"]}
 WORDS_MIN, WORDS_MAX = 6, 22
 DEV_FRAC = 0.1
@@ -279,6 +279,19 @@ def g_phone(rng, i, ctx):
     return rng.choice(PHONE_FRAMES).format(p=f"({code}) {g3}-{g2a}-{g2b}"), [card(int(code)), rest], KINDS["phone2"]
 
 
+def g_phone_sp(rng, i, ctx):
+    """A mobile number ("8-919-499-40-14") read group by group, the span a PHONE to the census (the slav span finder
+    calls a hyphen chain "chain"; plan relabels the span kind, the written form and reading are g_phone's)."""
+    while True:
+        g = g_phone(rng, i, ctx)
+        if g[2] == KINDS["phone"]:  # the one-chain mobile form
+            return g
+
+
+# classes whose span kind plan relabels after the candidate check (written-shape kind -> census kind)
+RELABEL_KIND = {"phone_sp": "phone"}
+
+
 DATE_FRAMES = ["Договор подписали {d}, и он уже действует.", "Заявление нужно подать до {d} включительно.",
                "Новые правила действуют с {d}.", "Заседание прошло {d} в большом зале.",
                "Окончательное решение приняли {d} после голосования.", "Регистрация продлится до {d}."]
@@ -389,7 +402,7 @@ def g_range(rng, i, ctx):
     return rng.choice(RANGE_FRAMES[u]).format(r=w), [read], KINDS["range"]
 
 
-GEN = {"year": g_year, "count": g_count, "big": g_big, "price": g_price, "clock": g_clock, "phone": g_phone,
+GEN = {"year": g_year, "count": g_count, "big": g_big, "price": g_price, "clock": g_clock, "phone": g_phone, "phone_sp": g_phone_sp,
        "date": g_date, "pct": g_pct, "dec": g_dec, "ord": g_ord, "range": g_range}
 
 
@@ -486,6 +499,8 @@ def plan(n: int, seed: int, report: dict | None = None, classes: tuple = (), tag
                 drops[cls][why] += 1
                 continue
             label, spans, offs = res
+            if cls in RELABEL_KIND:
+                spans = [dict(sp, kind=RELABEL_KIND[cls]) for sp in spans]
             if not (WORDS_MIN <= len(label.split()) <= WORDS_MAX):
                 drops[cls]["length"] += 1
                 continue

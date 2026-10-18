@@ -238,6 +238,67 @@ class Build(unittest.TestCase):
             "de")["synthetic_over"])
 
 
+class LongWaiver(unittest.TestCase):
+    def test_long_classes_up_to_085(self):
+        # red-on-base: a long-number class (int_big / cur / phone / date) stopped at the 30% / 50% share
+        real = [{"id": f"r{i}", "text": "x", "spans": [{"kind": "int", "text": "1250000"}]} for i in range(30)]
+        tts = [{"id": f"t{i}", "text": "x", "src": "tts", "_targeted": True, "duration": 6.0,
+                "spans": [{"kind": "int", "text": str(3450000 + i)}]} for i in range(300)]
+        took = MB.select_synthetic(tts, real, "nl", {"int": 9.0})
+        self.assertEqual(len(took), 170)  # 170 / 200 = 0.85; a 171st would be 0.851
+        chk = MB.post_build_check(real, took, "nl")
+        self.assertEqual(chk["synthetic_over"], {})
+        self.assertEqual(set(chk["waived_long_synthetic"]), {"int_big"})
+        self.assertEqual(MB.trim_synthetic(took, real, "nl")[1], 0)
+        # bg keeps the gate's cap; a short class (int_small) keeps 30%
+        self.assertEqual(len(MB.select_synthetic(tts, real, "bg", {"int": 9.0})), 12)  # 12 / 42 = 0.286
+        small = [dict(x, spans=[{"kind": "int", "text": "45"}]) for x in tts]
+        self.assertEqual(len(MB.select_synthetic(small, [dict(x, spans=[{"kind": "int", "text": "45"}]) for x in real],
+                                                 "nl", {"int": 9.0})), 12)
+
+
+    def test_long_sets_degraded_more(self):
+        # red-on-base: every set had the same 0.6 degraded share
+        self.assertEqual(MB.aug_frac({"_set": "ttsLNw"}), MB.TTS_AUG_FRAC_LONG)
+        self.assertEqual(MB.TTS_AUG_FRAC_LONG, 0.75)
+        self.assertEqual(MB.aug_frac({"_set": "tts2"}), MB.TTS_AUG_FRAC)
+        self.assertEqual(MB.aug_frac({}), 0.6)
+        for t in MB.TTS_LONG_SETS:
+            self.assertIn((t, f"{t}_judge"), MB.TTS_SETS)
+            self.assertIn(t, MB.TTS_TARGETED)
+        src = open(MB.__file__).read()
+        self.assertIn("rng.random() < aug_frac(x)", src)
+        self.assertIn('x.pop("_set", None)', src)
+
+
+class LongGenerators(unittest.TestCase):
+    def test_counts_read_as_one_number(self):
+        # red-on-base: "191362 klanten" could be read "één negen één drie tweeënzestig" (digit chunks)
+        sp = M.spans("Het bureau noemt 191362 klanten.", "nl")[0]
+        ok = [c for c in sp.cands if X.reading_ok("nl", "QTY", "count", None, sp, c, 0, "Het bureau noemt 191362 klanten.")]
+        self.assertEqual(ok, ["honderdeenennegentigduizenddriehonderdtweeënzestig"])
+
+    def test_multi_big_fragment(self):
+        # red-on-base: ml_tts_multi had no long-number class
+        import ml_tts_multi as B
+
+        rng = random.Random(3)
+        vals = [int(B.fragment("big", "pl", rng)["written"].replace(" ", "")) for _ in range(400)]
+        self.assertFalse([v for v in vals if 1100 <= v <= 2099])
+        self.assertGreater(max(vals), 10 ** 9)
+        self.assertGreater(len(set(vals)), 350)
+        self.assertIn("never first", B.HINTS["big"])
+
+    def test_ru_phone_is_a_phone_span(self):
+        # red-on-base: ru phones were "chain" spans (no census phone class)
+        import ml_tts_ru as R
+
+        rows = R.plan(6, 3, {}, ("phone_sp",), "x")
+        self.assertEqual(len(rows), 6)
+        for r in rows:
+            self.assertEqual([CC.gate_class(r, sp, "ru") for sp in r["spans"]], ["phone"])
+
+
 class Census(unittest.TestCase):
     def test_sentence_final_cardinal_is_not_an_ordinal(self):
         # red-on-base: "Punkt 10." read "zehn" and "2008." read "zweitausendacht" counted as ordinals

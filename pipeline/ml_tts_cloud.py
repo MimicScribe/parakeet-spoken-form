@@ -137,6 +137,8 @@ def main():
     ap.add_argument("--count-quota", help="json {lang: {value: rows}}: weights the count values (ml_tts.COUNT_QUOTA)")
     ap.add_argument("--normal-rates", action="store_true", help="normal speaking rates only (SPEEDS_YEAR)")
     ap.add_argument("--natural-dates", action="store_true", help="with --class-n: dates read with a month name only")
+    ap.add_argument("--voice-cycle", action="store_true", help="every voice in turn (round robin per split) instead of "
+                    "a random voice per row: the most voices for a small set")
     a = ap.parse_args()
     auth = Auth()
     total_chars = 0
@@ -177,12 +179,18 @@ def main():
         w = os.path.join(a.work, lang)
         os.makedirs(w, exist_ok=True)
         speeds, wts = zip(*(SPEEDS_YEAR if (yq or lang in ("uk", "ru") or a.normal_rates) else SPEEDS))  # uk / ru: normal rates only
+        turn = {"dev": 0, "train": 0}
         for r in rows:
             pool = dev_v if r["split"] == "dev" else train_v
             if lang == "en":  # accent weights, then a voice of that accent
                 loc = rng.choices(sorted({l for _, l in pool}), [EN_LOCALE_W[l] for l in sorted({l for _, l in pool})])[0]
                 pool = [v for v in pool if v[1] == loc]
-            name, loc = rng.choice(pool)
+            if a.voice_cycle and lang != "en":
+                k = "dev" if r["split"] == "dev" else "train"
+                name, loc = pool[turn[k] % len(pool)]
+                turn[k] += 1
+            else:
+                name, loc = rng.choice(pool)
             r.update(engine="presynth", voice=name, voice_license="Google Cloud Text-to-Speech output", voice_path=None,
                      speaker=None, speed=rng.choices(speeds, wts)[0], locale=loc,
                      presynth=f"/vol/ml/{a.tag}/{lang}/presynth/{r['id']}.wav")

@@ -641,6 +641,20 @@ def _gender_ok(lang, cls, gender, span, reading):
     return True
 
 
+def _whole_number_reading(lang, span, reading) -> bool:
+    """A count of >= 1000 read as one number (the grammar's reading or its gender / apocope variants), not in digit
+    chunks; smaller counts and values the grammar table lacks are left to the other rules."""
+    n = _digits_int(span.text)
+    if n is None or n < 1000 or not re.fullmatch(r"\s*\d[\d.  ]*\s*", span.text):
+        return True
+    try:
+        base = M.g(lang, "card", n)
+    except M.Missing:
+        return True
+    ok = {" ".join(base)} | {" ".join(v) for v in M._card_variants(base, lang, n, year=False)}
+    return reading.strip() in ok or reading.strip() == span.cands[0].strip()
+
+
 def reading_ok(lang, grp, cls, gender, span, reading, date_pos, written=""):
     """May this candidate reading be spoken in this clause?"""
     want = T.WANT.get((lang, grp if grp != "ORD" else ("ORD_M" if gender == "m" else "ORD_F")), {})
@@ -667,6 +681,8 @@ def reading_ok(lang, grp, cls, gender, span, reading, date_pos, written=""):
             return False
     if cls in ("large", "dec") and span.kind == "dec" and HALF_BAD.search(reading):
         return False
+    if span.kind == "int" and cls in ("count", "large") and not _whole_number_reading(lang, span, reading):
+        return False  # "191362 klanten" read "één negen één drie tweeënzestig": a count is said as one number
     # the known generator slips (grammar_rules: "el primera de octubre", "dois e trinta", "pesos ... céntimos",
     # "achtundvierzig und zehn", "½ de litro", "en één half", ...): the same rules that took the old rows out
     if G.span_errors(lang, {"text": span.text, "kind": span.kind, "reading": reading},

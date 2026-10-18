@@ -852,7 +852,10 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
             ("ttsFT5", "ttsFT5_judge"), ("ttsFT5c", "ttsFT5c_judge"), ("ttsFT5d", "ttsFT5d_judge"),
             # ttsFT6c / ttsFT6r / ttsFT6rd: grammar-checked replacements for excluded rows (grammar_scan): it 24 h
             # clock times, ro prices, ro dates (judge rejects left out of the sets)
-            ("ttsFT6c", "ttsFT6c_judge"), ("ttsFT6r", "ttsFT6r_judge"), ("ttsFT6rd", "ttsFT6rd_judge"))
+            ("ttsFT6c", "ttsFT6c_judge"), ("ttsFT6r", "ttsFT6r_judge"), ("ttsFT6rd", "ttsFT6rd_judge"),
+            # ttsLNw / ttsLNr / ttsLNm (2026-10-17): long numbers (int_big, prices with cents, phones) placed mid / late
+            # in the sentence, for wave-1 (ml_tts), uk / ru (ml_tts_uk / ru) and the LLM-written languages (ml_tts_multi)
+            ("ttsLNw", "ttsLNw_judge"), ("ttsLNr", "ttsLNr_judge"), ("ttsLNm", "ttsLNm_judge"))
 # sets planned against the census's per-value gaps (tts5y: thin year values, normal speaking rates): the share cap
 # applies, the "real speech has enough of this class" cut-off does not (synthetic years and counts
 # are fine within the cap)
@@ -866,8 +869,16 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
 # below its real span count so the per-class share cap holds
 TTS_TARGETED = {"tts5y", "tts6uk", "tts7", "tts8", "tts9nl", "tts9ru", "tts9ru2", "ttsm2", "ttsm1", "ttsL0", "ttsL1", "ttsL2p", "ttsL2", "ttsES1",
                 "ttsFT1", "ttsFT2", "ttsFT3", "ttsFT4", "ttsFT5", "ttsFT5c", "ttsFT5d",
-                "ttsFT6c", "ttsFT6r", "ttsFT6rd"}
+                "ttsFT6c", "ttsFT6r", "ttsFT6rd", "ttsLNw", "ttsLNr", "ttsLNm"}
 TTS_AUG_FRAC = 0.6  # share of chosen synthetic rows given a degraded copy instead of the clean audio
+# the long-number top-up sets (owner 2026-10-17): up to 85% synthetic in their classes, so more of them are degraded
+TTS_LONG_SETS = {"ttsLNw", "ttsLNr", "ttsLNm"}
+TTS_AUG_FRAC_LONG = 0.75
+
+
+def aug_frac(row: dict) -> float:
+    """The degraded share for a chosen synthetic row, by its set (row["_set"])."""
+    return TTS_AUG_FRAC_LONG if row.get("_set") in TTS_LONG_SETS else TTS_AUG_FRAC
 TTS_ENOUGH_H = 0.25  # h of real speech in a class above which no synthetic rows of that class are used
 # a gate class real speech (almost) never has (de / it / nl "&", fractions, roman numerals, versions; the moderate
 # tier's dates / phones) may hold up to TTS_FLOOR_H hours of synthetic rows whatever its synthetic share (the floor
@@ -879,10 +890,25 @@ GRAMMAR_REJECTS = "grammar_reject_ids.txt"  # per language in ml/p3v2/<lang>/: s
 # grammar slip of an old generator (grammar_scan.py); they never train
 
 
+# long-number waiver (owner 2026-10-17): numbers must survive window seams, and real speech has few long numbers, so
+# in these classes the synthetic share may reach LONG_SYN_SHARE in every language but LONG_WAIVER_EXCEPT; real rows of
+# these classes are never dropped for it (only synthetic rows are selected / trimmed); every other class keeps its cap.
+# The gate's share check fails there by design; post_build_check reports it as "waived_long_synthetic"
+LONG_CLASSES = {"int_big", "cur", "phone", "date"}
+LONG_SYN_SHARE = 0.85
+LONG_WAIVER_EXCEPT = {"bg"}
+
+
+def long_waiver_ok(lang: str, c: str, syn: int, real: int) -> bool:
+    """The long-number waiver: class c of `lang` may hold `syn` synthetic spans beside `real` real ones."""
+    return c in LONG_CLASSES and lang not in LONG_WAIVER_EXCEPT and syn <= LONG_SYN_SHARE * (real + syn) + 1e-9
+
+
 def syn_room(lang: str, c: str, syn: int, real: int, syn_h: float) -> bool:
     """May class c hold `syn` synthetic spans (in rows of `syn_h` hours) beside `real` real spans: the gate's rule
-    (syn_ok), or the rare-class floor (real <= RARE_REAL_MAX and syn_h <= TTS_FLOOR_H)."""
-    return syn_ok(lang, c, syn, real + syn) or (real <= RARE_REAL_MAX and syn_h <= TTS_FLOOR_H + 1e-9)
+    (syn_ok), the rare-class floor (real <= RARE_REAL_MAX and syn_h <= TTS_FLOOR_H), or the long-number waiver."""
+    return (syn_ok(lang, c, syn, real + syn) or (real <= RARE_REAL_MAX and syn_h <= TTS_FLOOR_H + 1e-9)
+            or long_waiver_ok(lang, c, syn, real))
 
 
 def _syn_hours(rows: list, lang: str) -> Counter:
@@ -1622,9 +1648,11 @@ def post_build_check(rows: list, syn: list, lang: str, before: dict | None = Non
     syn_bad = {c: round(cls_s[c] / cls_n[c], 3) for c in cls_n if not syn_ok(lang, c, cls_s[c], cls_n[c])}
     # classes with no real speech held at the rare-class floor: the gate's share check fails there by design
     syn_h = _syn_hours(syn, lang)
+    waived_long = {c: {"synthetic": cls_s[c], "real": cls_n[c] - cls_s[c], "share": v} for c, v in syn_bad.items()
+                   if long_waiver_ok(lang, c, cls_s[c], cls_n[c] - cls_s[c])}
     waived = {c: {"synthetic": cls_s[c], "real": cls_n[c] - cls_s[c], "synthetic_h": round(syn_h[c], 3)}
-              for c in syn_bad if syn_room(lang, c, cls_s[c], cls_n[c] - cls_s[c], syn_h[c])}
-    syn_bad = {c: v for c, v in syn_bad.items() if c not in waived}
+              for c in syn_bad if c not in waived_long and syn_room(lang, c, cls_s[c], cls_n[c] - cls_s[c], syn_h[c])}
+    syn_bad = {c: v for c, v in syn_bad.items() if c not in waived and c not in waived_long}
     tmpl = sum(c - TEMPLATE_CAP for c in g["templates"].values() if c > TEMPLATE_CAP)
     grp = sum(1 for k, c in g["groups"].items() if not k.startswith("id:") and c > group_cap(lang, k))
     top = top_year_share(g["years"])
@@ -1641,6 +1669,7 @@ def post_build_check(rows: list, syn: list, lang: str, before: dict | None = Non
         if t0 <= GATE_TOP_YEAR < top:
             reg.append(f"top year {t0:.3f} -> {top:.3f}")
     return {"ext_share": ext, "synthetic_over": syn_bad, "waived_synthetic_floor": waived,
+            "waived_long_synthetic": waived_long,
             "rows_over_template_cap": tmpl, "groups_over_cap": grp, "top_year": round(top, 4), "fail": fail, "regressions": reg}
 
 
@@ -1927,7 +1956,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
             if os.path.exists(f"{vol}/ml/{tag}/{lang}/rows.jsonl"):
                 # synthetic rows are judged too (the judge step writes judged_<marker>.json)
                 assert allow_no_judge or os.path.exists(f"{base}/judged_{marker}.json"), f"{lang}: {tag} rows never judged"
-                tts += [dict(x, _targeted=tag in TTS_TARGETED) for x in _rows(f"{vol}/ml/{tag}/{lang}/rows.jsonl")]
+                tts += [dict(x, _targeted=tag in TTS_TARGETED, _set=tag) for x in _rows(f"{vol}/ml/{tag}/{lang}/rows.jsonl")]
         for x in tts:
             assert "num_chars" in x and not WF_LABEL.search(x["text"]), f"{lang}: bad synthetic row {x.get('id')}"
         all_tts_ids = {x["id"] for x in tts}  # every synthetic id, before the reject / dedupe / split filters
@@ -1999,12 +2028,13 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         deg = Degrader(f"{vol}/slr28/RIRS_NOISES", seed + 7)
         os.makedirs(f"{vol}/{mix_dir}/tts_aug/{lang}", exist_ok=True)
         for i, x in enumerate(took):
-            if rng.random() < TTS_AUG_FRAC:
+            if rng.random() < aug_frac(x):
                 o = f"{vol}/{mix_dir}/tts_aug/{lang}/{i}_{os.path.basename(x['audio_filepath'])}"
                 x["aug"] = deg(x["audio_filepath"], o)
                 x["audio_filepath"] = o
         for x in took:
             x.pop("_targeted", None)
+            x.pop("_set", None)
         _write(f"{vol}/{mix_dir}/tts_{lang}.jsonl", took)
         seam = []
         for k, on in (("seam", seam_h > 0), ("plain", plain_share > 0)):  # a part this build does not make must not

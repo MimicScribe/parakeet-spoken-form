@@ -69,8 +69,10 @@ def _group(n: int, sep: str) -> str:
 
 
 # the source sentence of each class comes from parliament captions of a related kind, so the shape fits its topic
-SOURCE_KIND = {"price": "cur", "clock": "clock", "date": "years", "phone": None, "code": None, "version": None, "temp": None}
+SOURCE_KIND = {"big": "cur", "price": "cur", "clock": "clock", "date": "years", "phone": None, "code": None, "version": None, "temp": None}
 HINTS = {
+    "big": "a large amount (people, euros, tonnes, households, jobs, kilometres); put it in the middle or near the end "
+           "of the sentence, never first",
     "price": "the price or cost of a concrete thing (a ticket, a product, a fee, a meal)",
     "clock": "a clock time at which something happens (a meeting, a vote, a train); read it as hour and minutes",
     "phone": "a phone number that people are asked to call",
@@ -84,6 +86,14 @@ HINTS = {
 def fragment(cls: str, lang: str, rng: random.Random) -> dict:
     """One written fragment of class `cls` and its value check: {"written", "check": "values"|"digits", "hint"}."""
     dec, th, curs, phones = FMT[lang]
+    if cls == "big":
+        while True:  # thousands to billions; never a 4-digit 1100-2099 (a year to the census)
+            a = rng.choice([rng.randint(1000, 9999), rng.randint(10000, 999999), rng.randint(1000000, 999999999),
+                            rng.randint(1, 999) * 10 ** 6,
+                            rng.randint(1, 99) * 10 ** 9 + rng.choice([0, 0, rng.randint(1, 999) * 10 ** 6])])
+            if not 1100 <= a <= 2099:
+                break
+        return {"written": _group(a, th), "check": "values", "hint": "a large number"}
     if cls == "price":
         a = rng.choice([rng.randint(1, 99), rng.randint(100, 999), rng.randint(1000, 99999)])
         c = rng.choice([rng.randint(1, 99), 50, 99, 5, 90])
@@ -278,7 +288,9 @@ def in_language(sent: str, lang: str) -> bool:
 
 
 # ------------------------------------------------------------------ voices
-def synth_rows(rows: list, lang: str, wav_dir: str, seed: int = 1, threads: int = 8) -> list:
+def synth_rows(rows: list, lang: str, wav_dir: str, seed: int = 1, threads: int = 8, cycle: bool = False) -> list:
+    """Voice rows with the language's cloud voices (3 held out for dev rows); cycle: every voice in turn (round robin
+    per split) instead of a random one per row."""
     import ml_tts_cloud as C
     from concurrent.futures import ThreadPoolExecutor
 
@@ -290,9 +302,13 @@ def synth_rows(rows: list, lang: str, wav_dir: str, seed: int = 1, threads: int 
     dev_v, train_v = vs[:DEV_VOICES], vs[DEV_VOICES:]
     os.makedirs(wav_dir, exist_ok=True)
     speeds, wts = zip(*SPEEDS)
+    turn = {"dev": 0, "train": 0}
     for i, r in enumerate(rows):
         r["split"] = "dev" if i % 10 == 9 else "train"
-        r.update(voice=rng.choice(dev_v if r["split"] == "dev" else train_v), speed=rng.choices(speeds, wts)[0],
+        pool = dev_v if r["split"] == "dev" else train_v
+        v = pool[turn[r["split"]] % len(pool)] if cycle else rng.choice(pool)
+        turn[r["split"]] += 1
+        r.update(voice=v, speed=rng.choices(speeds, wts)[0],
                  locale=LOCALE[lang], engine="presynth", origin="tts", wav=os.path.join(wav_dir, r["id"] + ".wav"))
 
     def one(r):
