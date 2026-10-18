@@ -908,7 +908,7 @@ def _window_kinds(stream: list, w: dict) -> list:
 def windows2_lang(lang: str, per_stream: int = 3, max_rows: int = 8, seed: int = 1, allow_no_judge: bool = False,
                   include_tts: bool = True, seam: bool = False, seam_positions: int = 0, seam_limit: int = 0,
                   seam_tag: str = "", ctc_model: str = "", win_max_h: float = 0.0, heldout: bool = False,
-                  heldout_tts: str = "", seam_min_words: int = 0) -> dict:
+                  heldout_tts: str = "", seam_min_words: int = 0, syn_sets: str = "", heldout_voice: str = "") -> dict:
     """Streaming-geometry windows (ml_p3_core.build_windows) over stitched streams of this language's labelled rows. Held-out
     ids (/vol/ml/p3v2/heldout_<lang>.txt) and judge-rejected ids (<lang>/reject_ids.txt) never enter a stream. Each window
     is re-decoded: kept when CER(label, CTC greedy) <= WIN_MAX_CER and its first and last words match. per_stream = random
@@ -919,7 +919,11 @@ def windows2_lang(lang: str, per_stream: int = 3, max_rows: int = 8, seed: int =
     their videos / days, val_* passes; minus judge rejects and second-recognizer rows; no synthetic rows) ->
     /vol/ml/p3v2/heldout_win_<lang>.jsonl (windows) or heldout_seam_<lang>.jsonl (seam=True). Eval only.
     seam_min_words > 0 (seam=True, 2026-10-17): only cuts INSIDE a reading of >= that many words (gap / in-word
-    positions; no before / after) -- the long-number seam part (seam_long)."""
+    positions; no before / after) -- the long-number seam part (seam_long).
+    syn_sets ("tag:judge_marker,..."; syn_seam_crops): the pass reads ONLY those synthetic sets' train-split rows
+    (ml_p3_core.synthetic_train_rows: no dev split, no held-out voice `heldout_voice` in any split, no judge / grammar
+    reject; a set present for the language must carry its judge marker) and writes NEW files under seam_tag:
+    <lang>/seam<tag>.jsonl (seam=True) or <lang>/windows<tag>.jsonl; an existing output is never overwritten."""
     import random
     from collections import Counter
 
@@ -956,6 +960,26 @@ def windows2_lang(lang: str, per_stream: int = 3, max_rows: int = 8, seed: int =
     ext_ids = {r["id"] for r in rows_all if ext_row(r)}
     skip |= ext_ids
     wave2 = lang in WAVE2
+    syn_drop = None
+    if syn_sets:  # synthetic seam / window pass: these sets' train rows only, no real rows, own output files
+        assert not heldout and seam_tag and heldout_voice, f"{lang}: the synthetic pass needs a tag and the held-out voice"
+        dest_ = f"{out}/{'seam' if seam else 'windows'}{seam_tag}.jsonl"
+        assert not os.path.exists(dest_), f"{dest_} exists: give the new pass its own tag"
+        rej_syn = _id_set(f"{out}/reject_ids.txt")  # judge rejects + every grammar-scan list (mix_build.GRAMMAR_REJECTS)
+        for gp in sorted(_g.glob(f"{out}/grammar_reject_ids.txt") + _g.glob(f"{out}/grammar_reject_ids_*.txt")):
+            rej_syn |= _id_set(gp)
+        sets = {}
+        for tm in [t for t in syn_sets.split(",") if t]:
+            tag, marker = tm.split(":")
+            tts_p = f"{VOL}/ml/{tag}/{lang}/rows.jsonl"
+            if os.path.exists(tts_p):
+                assert allow_no_judge or os.path.exists(f"{out}/judged_{marker}.json"), f"{lang}: {tag} rows never judged"
+                sets[tag] = [json.loads(l) for l in open(tts_p) if l.strip()]
+        if not sets:
+            return {"lang": lang, "seam": seam, "syn_sets": "none for this language"}
+        rows_all, syn_drop = C.synthetic_train_rows(sets, rej_syn, heldout_voice)
+        syn_drop["sets"] = {t: len(v) for t, v in sets.items()}
+        include_tts = False  # tts1 / tts2 / WAVE2_TTS stay in the real-row pass (windows.jsonl)
     if heldout:  # eval windows: the held-out side of the same split (val_* rows included), never training rows
         val_rows = [json.loads(l) for p in sorted(_g.glob(f"{out}/val_*.jsonl")) for l in open(p)]
         ext_ids |= {r["id"] for r in val_rows if ext_row(r)}
@@ -997,6 +1021,9 @@ def windows2_lang(lang: str, per_stream: int = 3, max_rows: int = 8, seed: int =
     else:
         rows = [r for r in rows_all if r["id"] not in skip and r.get("word_times") and all(t is not None for t in r["word_times"])]
     assert not {r["id"] for r in rows} & skip, "held-out / rejected row in the stream rows"
+    if syn_sets:
+        assert all(r.get("split", "train") == "train" and r.get("voice") != heldout_voice for r in rows), \
+            f"{lang}: dev-split / held-out-voice row in the synthetic stream rows"
     solo = []
     if wave2 and SOLO_SRCS.get(lang):
         rows, solo = C.split_solo(rows, SOLO_SRCS[lang])
@@ -1011,9 +1038,11 @@ def windows2_lang(lang: str, per_stream: int = 3, max_rows: int = 8, seed: int =
     if seam:  # 2026-10-16 balance: mirrored cut-number crops (ml_balance); windows.jsonl is not touched
         return _seam_pass(lang, out, rows, rng, ctc, read, cache, max_rows, seam_positions, seam_limit,
                           "_heldout" if heldout else seam_tag, len(skip), solo=solo, n_aligned=n_aligned,
-                          dest=f"{OUT2}/heldout_seam_{lang}.jsonl" if heldout else "", heldout=heldout, min_words=seam_min_words)
+                          dest=f"{OUT2}/heldout_seam_{lang}.jsonl" if heldout else "", heldout=heldout, min_words=seam_min_words,
+                          syn_drop=syn_drop)
     st = Counter()
-    win_dest, win_dir = (f"{OUT2}/heldout_win_{lang}.jsonl", f"{out}/heldout_win") if heldout else (f"{out}/windows.jsonl", f"{out}/win")
+    win_dest, win_dir = (f"{OUT2}/heldout_win_{lang}.jsonl", f"{out}/heldout_win") if heldout else \
+        (f"{out}/windows{seam_tag}.jsonl", f"{out}/win{seam_tag}") if syn_sets else (f"{out}/windows.jsonl", f"{out}/win")
     os.makedirs(win_dir, exist_ok=True)
     streams = C.group_streams(rows, rng, max_rows=max_rows)
     if win_max_h:
@@ -1046,7 +1075,8 @@ def windows2_lang(lang: str, per_stream: int = 3, max_rows: int = 8, seed: int =
                     wav = f"{win_dir}/{wid}.wav"
                     sf.write(wav, x, 16000, subtype="PCM_16")
                     f.write(json.dumps({"audio_filepath": wav, "duration": round(len(x) / 16000, 3), "text": w["text"],
-                                        "lang": lang, "id": f"{lang}_{wid}", "origin": "window",
+                                        "lang": lang, "id": f"{lang}_win{seam_tag}_{wid}" if syn_sets else f"{lang}_{wid}",
+                                        "origin": "window",
                                         "num_tokens": w["num_tokens"], "cut_words": w["cut_words"],
                                         "kept_cut_words": w["kept_cut_words"], "edge_fracs": w["edge_fracs"],
                                         "cut_number": w["cut_number"], "edge_number": w["edge_number"],
@@ -1070,7 +1100,10 @@ def windows2_lang(lang: str, per_stream: int = 3, max_rows: int = 8, seed: int =
     if wave2:
         st["rows_aligned"], st["solo_rows_not_windowed"] = n_aligned, len(solo)
     st["heldout"] = heldout
-    json.dump(st, open(f"{out}/{'heldout_' if heldout else ''}windows_stats.json", "w"), indent=1)
+    if syn_drop is not None:
+        st["syn_rows_dropped"] = syn_drop
+    json.dump(st, open(f"{out}/{'heldout_' if heldout else ''}windows_stats{seam_tag if syn_sets else ''}.json", "w"),
+              indent=1)
     vol.commit()
     return {"lang": lang, **st}
 
@@ -1132,14 +1165,15 @@ def _long_pairs(stream, rng, positions, num_keep, min_words):
 
 
 def _seam_pass(lang, out, rows, rng, ctc, read, cache, max_rows, positions, limit, tag, n_skip, solo=(), n_aligned=0,
-               dest: str = "", heldout: bool = False, min_words: int = 0):
+               dest: str = "", heldout: bool = False, min_words: int = 0, syn_drop: dict | None = None):
     """Mirrored cut-number crops (ml_balance.seam_crops) over the same streams windows2 uses (held-out / rejected / ext
     rows already out; rows of passes without a judge marker are skipped too). Each half is re-decoded: CER <= WIN_MAX_CER
     and ml_balance.seam_edges_ok (the windows2 edge check with the cut edge read as a cut: a piece of the dropped word
     may show, a kept cut word may come out shortened, the whole dropped word may not); a pair is kept only when both
     halves pass. Writes <lang>/seam<tag>.jsonl (two rows
     per pair, same pair id) + seam<tag>/*.wav + seam_stats<tag>.json.
-    min_words > 0: only pairs cut inside a reading of >= min_words words (long numbers); the others are not decoded."""
+    min_words > 0: only pairs cut inside a reading of >= min_words words (long numbers); the others are not decoded.
+    syn_drop (windows2_lang syn_sets): the rows are synthetic train rows only, judged as whole sets (marker checked)."""
     import time
     from collections import Counter
 
@@ -1154,7 +1188,7 @@ def _seam_pass(lang, out, rows, rng, ctc, read, cache, max_rows, positions, limi
     for p in sorted(glob.glob(f"{out}/rows*.jsonl")) + (sorted(glob.glob(f"{out}/val_*.jsonl")) if heldout else []):
         if os.path.exists(f"{out}/judged_{os.path.basename(p)[:-6]}.json"):
             judged |= {json.loads(l)["id"] for l in open(p) if l.strip()}
-    if heldout:  # held-out synthetic voices (heldout_tts): their sets are judged as a whole, rejects already out
+    if heldout or syn_drop is not None:  # synthetic sets are judged as a whole (marker checked), rejects already out
         judged |= {r["id"] for r in rows if r.get("origin") == "tts"}
     n_unjudged = sum(r["id"] not in judged for r in rows) + sum(s[0]["id"] not in judged for s in solo)
     rows = [r for r in rows if r["id"] in judged]
@@ -1239,6 +1273,8 @@ def _seam_pass(lang, out, rows, rng, ctc, read, cache, max_rows, positions, limi
     st["rows_used"], st["rows_skipped_heldout_or_rejected"] = len(rows) + len(solo), n_skip
     if lang in WAVE2:
         st["rows_aligned"], st["solo_rows"] = n_aligned, len(solo)
+    if syn_drop is not None:
+        st["syn_rows_dropped"] = syn_drop
     json.dump(st, open(f"{out}/seam_stats{tag}.json", "w"), indent=1)
     vol.commit()
     return {"lang": lang, "seam": True, **st}
@@ -1254,6 +1290,43 @@ def seam_crops(langs: str = ",".join(LANGS), positions: int = 0, limit: int = 0,
              min_words) for l in langs.split(",")]
     for r in windows2_lang.starmap(args):
         print(json.dumps(r))
+
+
+# synthetic sets that train only as whole sentences (2026-10-17): long numbers (int_big, prices, phones) and years.
+# syn_seam_crops builds seam pairs / windows from their train rows; patterns over mix_build.TTS_SETS (build4 reads only
+# those sets, so a pair from another set could never keep its parents)
+SYN_SEAM_SETS = "ttsLNw,ttsLNr,ttsLNm,ttsYR*"
+
+
+@app.local_entrypoint()
+def syn_seam_crops(langs: str, sets: str = SYN_SEAM_SETS, tag: str = "_long_syn", min_words: int = 3, positions: int = 0,
+                   limit: int = 0, seed: int = 1, windows: bool = False, win_tag: str = "_syn",
+                   allow_no_judge: bool = False):
+    """Long-number seam pairs (and, with --windows, windows) from the synthetic sets' TRAIN rows only:
+    <lang>/seam<tag>.jsonl (+ seam<tag>/*.wav, seam_stats<tag>.json) and <lang>/windows<win_tag>.jsonl (+ win<win_tag>/,
+    windows_stats<win_tag>.json), the same code paths as seam_crops / windows2 (windows2_lang syn_sets). min_words: the
+    long-number rule of seam_crops --min-words (only cuts inside a reading of >= that many words, the 0.9 edge rule).
+    The language's held-out voice (mix_build.HELDOUT_VOICES) and dev-split rows never enter; an existing output file
+    stops the language. build4 reads them as part of seam_long (mix_build.SYN_SEAM_LONG_FILES) / windows (WIN_FILES).
+      modal run ml_p3.py::syn_seam_crops --langs ru,de"""
+    import ml_p3_core as C
+
+    tts_sets, heldout_voices = C.mix_build_consts()  # read from mix_build.py's source (its imports need numpy)
+    tm = ",".join(C.syn_set_markers(sets, tts_sets))
+    assert tm, f"no build4 synthetic set matches {sets}"
+    print("sets:", tm)
+    calls = []
+    for l in langs.split(","):
+        hv = heldout_voices.get(l, "")
+        assert hv, f"{l}: no held-out voice (mix_build.HELDOUT_VOICES): its synthetic rows have no held-out split"
+        kw = dict(lang=l, per_stream=3, max_rows=8, seed=seed, allow_no_judge=allow_no_judge, include_tts=False,
+                  ctc_model=_reader_model(l), syn_sets=tm, heldout_voice=hv)
+        calls.append(windows2_lang.spawn(**kw, seam=True, seam_tag=tag, seam_positions=positions, seam_limit=limit,
+                                         seam_min_words=min_words))
+        if windows:
+            calls.append(windows2_lang.spawn(**kw, seam_tag=win_tag))
+    for c in calls:
+        print(json.dumps(c.get()))
 
 
 @app.function(image=scan_image, volumes={VOL: vol}, secrets=[modal.Secret.from_name("hf")], cpu=2, memory=8192,

@@ -1745,9 +1745,10 @@ def trim_synthetic(took: list, real: list, lang: str) -> tuple:
 SEAM_FILES = ("seam", "seam_b")  # seam_crops outputs build4 reads: tag "" and the top-up run (tag "_b", seed 2)
 
 
-def _seam_rows(base: str, files=SEAM_FILES) -> list:
-    """Seam halves of every listed seam_crops output: pair ids namespaced by file (each run numbers its pairs from s0),
-    a half whose (side, text, parents) another file already gave is dropped with its pair."""
+def _seam_rows(base: str, files=SEAM_FILES, bare_first: bool = False) -> list:
+    """Seam halves of every listed seam_crops output: pair ids namespaced by file (each run numbers its pairs from s0;
+    bare_first: the first file's ids stay as they are), a half whose (side, text, parents) another file already gave is
+    dropped with its pair."""
     out, seen = [], set()
     for name in files:
         rows = _rows(f"{base}/{name}.jsonl")
@@ -1759,9 +1760,42 @@ def _seam_rows(base: str, files=SEAM_FILES) -> list:
             if any(k in seen for k in keys):  # an earlier file has it (within one file pairs are distinct cuts)
                 continue
             mine.update(keys)
-            out += [dict(h, pair=f"{name}:{pid}") for h in hs]
+            out += [dict(h, pair=pid if bare_first and name == files[0] else f"{name}:{pid}") for h in hs]
         seen |= mine
     return out
+
+
+# long-number seam pairs build4 reads into mix4/seam_long_<lang> (seam_long_h): the first seam_crops --min-words 3 run,
+# real top-up runs under new tags (other seeds / the full stream set; ml_p3._seen_pair_keys skips cuts an earlier file
+# has), and the synthetic sets' train rows (ml_p3.syn_seam_crops, SYN_SEAM_LONG_FILES: their own parent rule,
+# keep_syn_pairs). Synthetic-set windows (windows_syn) join the synthetic windows (TTS_SHARE of win_h). Every synthetic
+# pair / window row carries synthetic=True.
+SEAM_LONG_FILES = ("seam_long", "seam_long_b")
+SYN_SEAM_LONG_FILES = ("seam_long_syn",)
+WIN_FILES = ("windows", "windows_syn")
+
+
+def keep_syn_pairs(rows: list, bad: set, cap_out: set, took_ids: set) -> tuple[list, dict]:
+    """Whole synthetic seam pairs whose every parent is a synthetic row this build trains on (took_ids: the chosen
+    synthetic rows; the rule synthetic windows follow), none held out / rejected / ext (bad) or capped out (cap_out).
+    A pair missing a half leaves too. Returns (rows, {reason: pairs dropped})."""
+    by = {}
+    for x in rows:
+        by.setdefault(x["pair"], []).append(x)
+    out, st = [], Counter()
+    for hs in by.values():
+        ps = [set(h.get("parents") or []) for h in hs]
+        if len(hs) != 2 or not all(ps) or not all(h.get("synthetic") for h in hs):
+            st["incomplete_or_not_synthetic"] += 1
+        elif any(p & bad for p in ps):
+            st["unsafe_parent"] += 1
+        elif any(p & cap_out for p in ps):
+            st["cap_out"] += 1
+        elif not all(p <= took_ids for p in ps):
+            st["parent_not_chosen"] += 1
+        else:
+            out += hs
+    return out, dict(st)
 
 
 def build_d2_phonefmt(vol: str, langs=None, mix_dir: str = "mix4", accept=None) -> dict:
@@ -1816,6 +1850,10 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
     - seam_long_h > 0: mix4/seam_long_<lang>.jsonl, long-number seam pairs (<lang>/seam_long.jsonl: same row format and
       the same parent filters as seam pairs, whole pairs, <= seam_long_h hours; its weight is the listing's
       seam_long_repeat in modal_app.retrain3_mix_v4).
+      Its files (2026-10-17): SEAM_LONG_FILES (real; the first file's pair ids unchanged, top-ups namespaced) plus
+      SYN_SEAM_LONG_FILES (synthetic-set pairs: whole pairs whose parents are all chosen synthetic rows of this build,
+      keep_syn_pairs); seam_long_h caps each LANGUAGE's part (not a total). Synthetic-set windows (windows_syn) join
+      the synthetic windows (WIN_FILES).
     Always (2026-10-17): a window / seam pair with a parent row decided by a second recognizer (EXT_BY), a parent a cap
     took out of training (cap_out: rows_h, the ext allowance and per-class ext cap, the top-year trims, the balance caps,
     dedupe; stats cap_out_dropped) or a parent that is held out NOW (the held-out carve can move after windows were
@@ -1961,7 +1999,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         # windows / seam pairs: no parent decided by a second recognizer (census_common.EXT_BY), no parent held out now
         ext_all = {x["id"] for x in rows if ext_row(x)}
         unsafe = ext_all | held | rej  # rej: a reject that landed after windows2 built the windows
-        win = _rows(f"{base}/windows.jsonl") if os.path.exists(f"{base}/windows.jsonl") else []
+        win = [w for name in WIN_FILES for w in _rows(f"{base}/{name}.jsonl")]  # + synthetic-set windows (windows_syn)
         n_w0 = len(win)
         win = [w for w in win if not set(w.get("parents", [])) & unsafe]
         stats.setdefault("win_unsafe_parent_dropped", {})[lang] = n_w0 - len(win)
@@ -2051,7 +2089,14 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         # seam adversarial cases first: a number cut by an
         # edge, then a number at an edge, then the rest (the shuffle above keeps the order random inside each group)
         seam_first = lambda ws: sorted(ws, key=lambda w: (not w.get("cut_number"), not w.get("edge_number")))  # noqa: E731
+        syn_pool_h = _h(syn_win)
+        n_wsyn_set = sum(1 for w in syn_win if "_win_syn_" in w["id"])  # windows_syn (synthetic-set windows) in the pool
         win = _take(seam_first(real_win), win_h * (1 - TTS_SHARE)) + _take(seam_first(syn_win), win_h * TTS_SHARE)
+        stats.setdefault("syn_set_windows", {})[lang] = {
+            "pool": n_wsyn_set, "pool_h": round(_h([w for w in syn_win if "_win_syn_" in w["id"]]), 3),
+            "taken": sum(1 for w in win if "_win_syn_" in w["id"]),
+            "taken_h": round(_h([w for w in win if "_win_syn_" in w["id"]]), 3),
+            "syn_pool_h": round(syn_pool_h, 3), "syn_cap_h": round(win_h * TTS_SHARE, 3)}
         # research 2026-10-15 + the TTS-prior lesson: synthetic speech is too clean; 60% of the chosen synthetic rows are
         # degraded (room reverb, noise 5-20 dB SNR, phone band, Opus) with the same Degrader as the real rows
         deg = Degrader(f"{vol}/slr28/RIRS_NOISES", seed + 7)
@@ -2091,9 +2136,10 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         seam_long = []
         if os.path.exists(f"{vol}/{mix_dir}/seam_long_{lang}.jsonl") and not seam_long_h:
             os.remove(f"{vol}/{mix_dir}/seam_long_{lang}.jsonl")  # a part this build does not make must not survive
-        if seam_long_h > 0 and os.path.exists(f"{base}/seam_long.jsonl"):
+        if seam_long_h > 0 and any(os.path.exists(f"{base}/{n}.jsonl") for n in SEAM_LONG_FILES + SYN_SEAM_LONG_FILES):
             bad = held | rej | held_dup | ext_all
-            seam_long = [x for x in _rows(f"{base}/seam_long.jsonl") if not set(x.get("parents", [])) & bad]
+            seam_long = [x for x in _seam_rows(base, SEAM_LONG_FILES, bare_first=True)
+                         if not set(x.get("parents", [])) & bad and not x.get("synthetic")]
             n_l0, n_ly = len(seam_long), sum(1 for x in seam_long if set(x.get("parents", [])) & year_out)
             seam_long = [x for x in seam_long if not set(x.get("parents", [])) & cap_out]
             cap_drop.update(seam_long_dropped=n_l0 - len(seam_long), seam_long_year_rule=n_ly)
@@ -2103,12 +2149,26 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
             dup = {x["pair"] for x in seam_long if (tuple(x.get("parents", [])), x.get("pos")) in have}
             seam_long = [x for x in seam_long if x["pair"] not in dup]
             stats.setdefault("seam_long_dup_pairs", {})[lang] = len(dup)
+            # synthetic-set pairs: every parent a synthetic row this build trains on (none held out / rejected / grammar
+            # rejected / capped out), whole pairs
+            syn_long = _seam_rows(base, SYN_SEAM_LONG_FILES)
+            n_sl0 = len({x["pair"] for x in syn_long})
+            syn_long, sl_drop = keep_syn_pairs(syn_long, bad | gram_rej, cap_out, took_ids)
+            seam_long += syn_long
             for x in seam_long:
                 assert "num_tokens" in x and not WF_LABEL.search(x["text"]), f"{lang}: bad long seam crop {x['id']}"
             if dedupe:
                 seam_long, lrep = B.dedupe(seam_long, protect[lang], within=False, part_of=lambda x: "seam_long")
                 stats["dedupe"][lang]["seam_long"] = lrep["counts"]
+            n_syn_ok = len({x["pair"] for x in seam_long if x.get("synthetic")})
             seam_long = B.take_seam(seam_long, seam_long_h, rng)
+            sl_syn = [x for x in seam_long if x.get("synthetic")]
+            stats.setdefault("seam_long_synthetic", {})[lang] = {
+                "pairs_in": n_sl0, "dropped": sl_drop, "pairs_eligible": n_syn_ok,
+                "pairs_taken": len({x["pair"] for x in sl_syn}), "taken_h": round(_h(sl_syn), 3),
+                "real_taken_h": round(_h(seam_long) - _h(sl_syn), 3)}
+            if n_sl0 and not sl_syn:
+                print(f"WARNING {lang}: synthetic long seam pairs on disk but none kept: {stats['seam_long_synthetic'][lang]}")
             _write(f"{vol}/{mix_dir}/seam_long_{lang}.jsonl", seam_long)
         if plain_share > 0:
             pool = _rows(f"{vol}/{plain_glob.format(lang=lang)}")

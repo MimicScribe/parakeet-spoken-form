@@ -752,3 +752,45 @@ def split_solo(rows: list[dict], solo_srcs) -> tuple[list[dict], list[list[dict]
     stitched with other rows: a seam pair is cut inside the one clip."""
     solo = set(solo_srcs or ())
     return [r for r in rows if r.get("src") not in solo], [[r] for r in rows if r.get("src") in solo]
+
+
+def synthetic_train_rows(sets: dict, reject: set, heldout_voice: str = "") -> tuple[list[dict], dict]:
+    """Rows of synthetic sets ({tag: rows}) that may build TRAINING windows / seam pairs: split "train" only (a row
+    without a split is train, as build4 reads it), never the language's held-out voice (any split), never a judge or
+    grammar reject. Returns (rows tagged origin "tts", {reason: rows dropped})."""
+    out, drop = [], {"dev_split": 0, "heldout_voice": 0, "rejected": 0}
+    for rows in sets.values():
+        for r in rows:
+            if r.get("split", "train") != "train":
+                drop["dev_split"] += 1
+            elif heldout_voice and r.get("voice") == heldout_voice:
+                drop["heldout_voice"] += 1
+            elif r["id"] in reject:
+                drop["rejected"] += 1
+            else:
+                out.append(dict(r, origin="tts", src="tts"))
+    return out, drop
+
+
+def syn_set_markers(patterns: str, tts_sets) -> list[str]:
+    """["tag:judge_marker"] of the build4 synthetic sets (tts_sets: mix_build.TTS_SETS) matching the comma-separated
+    fnmatch patterns; the held-out voice's decision sets (ttsHO*) never match."""
+    import fnmatch
+
+    pats = [p for p in patterns.split(",") if p]
+    return [f"{t}:{m}" for t, m in tts_sets if not t.startswith("ttsHO") and any(fnmatch.fnmatch(t, p) for p in pats)]
+
+
+def mix_build_consts(path: str | None = None) -> tuple[tuple, dict]:
+    """(mix_build.TTS_SETS, mix_build.HELDOUT_VOICES) read from mix_build.py's source with ast.literal_eval, for a local
+    entrypoint whose Python has no numpy (mix_build imports it)."""
+    import ast
+    import os
+
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "mix_build.py")
+    found = {}
+    for node in ast.parse(open(path, encoding="utf-8").read()).body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) \
+                and node.targets[0].id in ("TTS_SETS", "HELDOUT_VOICES"):
+            found[node.targets[0].id] = ast.literal_eval(node.value)
+    return tuple(found["TTS_SETS"]), dict(found["HELDOUT_VOICES"])
