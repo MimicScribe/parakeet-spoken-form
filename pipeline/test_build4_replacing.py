@@ -60,5 +60,44 @@ class Replacing(unittest.TestCase):
         self.assertTrue(CS.IT_SPLIT_ELIDED)  # default: always split
 
 
+class Inputs(unittest.TestCase):
+    """extra_passes (judged, read with the language's passes), relabel_rows (source rows replaced by id), relabel_parts_dir
+    (written windows replaced by id) and relabel_tts (letter+digit policy on the chosen synthetic rows)."""
+
+    def setUp(self):
+        aug, MB.TTS_AUG_FRAC = MB.TTS_AUG_FRAC, 0.0
+        self.addCleanup(setattr, MB, "TTS_AUG_FRAC", aug)
+        self.vol = _fixture(n_win=2)
+
+    def test_inputs(self):
+        v = self.vol
+        rows = rj(f"{v}/ml/p3v2/de/rows.jsonl")
+        new = dict(rows[5], id="de100_00000009_V9VVVVVVVVV_10_00_5_00", caption="Es waren 9 % iota Leute da.")
+        wj(v, "ml/l1conv/de/rows_l1conv.jsonl", [new])
+        with self.assertRaises(AssertionError):  # an extra pass is judged like every pass
+            MB.build4(v, ("de",), rows_h=99, win_h=1, extra_passes=("ml/l1conv/{lang}/rows_l1conv.jsonl",))
+        wj(v, "ml/l1conv/de/judged_rows_l1conv.json", [])
+        rl = dict(rows[6], text="Es waren fünfzig Prozent da!")
+        wj(v, "ml/alnumA/de/rows_alnumA.jsonl", [rl])
+        win = rj(f"{v}/ml/p3v2/de/windows.jsonl")
+        wj(v, "m8a/de/changed_win_de.jsonl", [dict(win[0], text="FÜNFZIG Prozent da")])
+        alnum = _syn(v, "tts1", 0, text="Werte von ge zwanzig heute", num_chars=[[10, 20]],
+                     spans=[{"kind": "alnum", "text": "G20", "reading": "ge zwanzig"}])
+        wj(v, "ml/tts1/de/rows.jsonl", [alnum])
+        for f in ("judged_rows.json", "judged_tts_judge.json"):
+            wj(v, f"ml/p3v2/de/{f}", [])
+        st = MB.build4(v, ("de",), rows_h=99, win_h=1, extra_passes=("ml/l1conv/{lang}/rows_l1conv.jsonl",),
+                       relabel_rows="ml/alnumA/{lang}/rows_alnumA.jsonl", relabel_parts_dir="m8a", relabel_tts=True)
+        p3 = {x["id"]: x for x in rj(f"{v}/mix4/p3_de.jsonl")}
+        self.assertIn(new["id"], p3)
+        self.assertEqual(st["extra_passes"]["de"], {"rows_l1conv.jsonl": 1})
+        self.assertEqual(st["relabel_rows"]["de"], {"file": 1, "replaced": 1})
+        self.assertTrue(p3[rl["id"]]["text"].endswith("!"))
+        w = {x["id"]: x for x in rj(f"{v}/mix4/win_de.jsonl")}
+        self.assertEqual(w[win[0]["id"]]["text"], "FÜNFZIG Prozent da")
+        tts = rj(f"{v}/mix4/tts_de.jsonl")
+        self.assertTrue(tts and tts[0]["text"] == "Werte von G zwanzig heute", tts[:1])
+
+
 if __name__ == "__main__":
     unittest.main()

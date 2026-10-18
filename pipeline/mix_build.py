@@ -875,7 +875,7 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
             # reading-variety fill (2026-10-18, ml_tts_variety): the same numbers read the other ways people say them
             # (relative clock times, natural phone groupings, paired years, prices without the unit, ...); its rows
             # REPLACE the older synthetic rows they name (TTS_REPLACING)
-            ("ttsRV1b", "ttsRV1b_judge"))
+            ("ttsRV1b", "ttsRV1b_judge"), ("ttsRV1r", "ttsRV1r_judge"))
 # sets planned against the census's per-value gaps (tts5y: thin year values, normal speaking rates): the share cap
 # applies, the "real speech has enough of this class" cut-off does not (synthetic years and counts
 # are fine within the cap)
@@ -890,18 +890,18 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
 TTS_TARGETED = {"tts5y", "tts6uk", "tts7", "tts8", "tts9nl", "tts9ru", "tts9ru2", "ttsm2", "ttsm1", "ttsL0", "ttsL1", "ttsL2p", "ttsL2", "ttsES1",
                 "ttsFT1", "ttsFT2", "ttsFT3", "ttsFT4", "ttsFT5", "ttsFT5c", "ttsFT5d",
                 "ttsFT6c", "ttsFT6r", "ttsFT6rd", "ttsLNw", "ttsLNr", "ttsLNm", "ttsYRm", "ttsYRr",
-                "ttsYRs", "ttsYRn", "ttsCNm", "ttsLTw", "ttsLTr", "ttsNL1", "ttsNL2", "ttsW1", "ttsRV1b"}
+                "ttsYRs", "ttsYRn", "ttsCNm", "ttsLTw", "ttsLTr", "ttsNL1", "ttsNL2", "ttsW1", "ttsRV1b", "ttsRV1r"}
 # sets whose rows replace older synthetic rows (2026-10-18, B2): a row's "supersedes" lists the ids it replaces (rows of
 # the same class and value spread, read one convention; ml_tts_variety picked them). order_synthetic drops those ids
 # and puts the set's rows first, so they take the room the dropped rows leave (a class at its fill-to-bar or share cap
 # would otherwise admit none of them)
-TTS_REPLACING = {"ttsRV1b"}
+TTS_REPLACING = {"ttsRV1b", "ttsRV1r"}  # ttsRV1r: ttsRV1b rows the fixed judge passes on re-judging
 REPLACE_ROUNDS = 3  # build4 reruns of the synthetic selection when a replacing row is refused (then fatal)
 TTS_AUG_FRAC = 0.6  # share of chosen synthetic rows given a degraded copy instead of the clean audio
 # the long-number top-up sets (2026-10-17): mostly synthetic in their classes (fill-to-bar), so more of them are degraded
 # ttsRV1 (2026-10-18): its cells are synthetic-heavy too (clock / phone / price rows mostly synthetic), and it replaces
 # rows of the long sets, so it keeps their degraded share
-TTS_LONG_SETS = {"ttsLNw", "ttsLNr", "ttsLNm", "ttsLTw", "ttsLTr", "ttsNL2", "ttsW1", "ttsRV1b"}
+TTS_LONG_SETS = {"ttsLNw", "ttsLNr", "ttsLNm", "ttsLTw", "ttsLTr", "ttsNL2", "ttsW1", "ttsRV1b", "ttsRV1r"}
 TTS_AUG_FRAC_LONG = 0.75
 
 
@@ -1995,7 +1995,8 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
            dedupe: bool = False, seam_h: float = 0.0, plain_share: float = 0.0,
            plain_glob: str = "ml/plain/{lang}/plain*.jsonl", protected_globs: tuple = (), balance: bool = False,
            seam_files: tuple = SEAM_FILES, mix_dir: str = "mix4", seam_long_h: float = 0.0,
-           split_langs: tuple = (), win15_share: float = 0.0, win15_dir: str = "ml/win15b", edge_fix_dir: str = "") -> dict:
+           split_langs: tuple = (), win15_share: float = 0.0, win15_dir: str = "ml/win15b", edge_fix_dir: str = "",
+           extra_passes: tuple = (), relabel_rows: str = "", relabel_parts_dir: str = "", relabel_tts: bool = False) -> dict:
     """mix4/ manifests for the wave-1 run (all CPU, idempotent):
     - mix4/d2.jsonl: mix3/d2 (Greek restore applied) WITHOUT wave-1 languages: their digit rows were relabelled by P3
       (origin d2) and would otherwise teach digits through the stock token KL;
@@ -2042,7 +2043,14 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
     - edge_fix_dir (2026-10-18): the real rows' clipped / missing edge words (edge_fix.py records,
       <edge_fix_dir>/<lang>/fixes_*.jsonl): the p3 part is written with those rows' labels trimmed or their edge word
       masked (label + audio cut; edge_fix.apply_fixes, sha-gated, never a row dropped). Applied at WRITE time like the
-      split: every selection, cap, window parent and pair runs on the unfixed labels; consistency pairs skip fixed rows."""
+      split: every selection, cap, window parent and pair runs on the unfixed labels; consistency pairs skip fixed rows.
+    - extra_passes (2026-10-18): more labelling passes outside ml/p3v2 ("ml/l1conv/{lang}/rows_l1conv.jsonl"), read
+      with the language's passes (_one_per_id) and judged like them (judged_<name>.json beside the file).
+    - relabel_rows / relabel_parts_dir / relabel_tts (2026-10-18, letter+digit policy, alnum_relabel.py): relabel_rows
+      ("ml/alnumA/{lang}/rows_alnumA.jsonl") replaces source rows by id before any selection; relabel_parts_dir
+      ("mix4final8_alnumA") holds <lang>/changed_<part>_<lang>.jsonl rows that replace win / seam / seam_long rows by id
+      at write time (the same source rows, re-labelled); relabel_tts applies the policy to the chosen synthetic rows at
+      write time (alnum_relabel.relabel_row; synthetic rows still spoke the letter names)."""
     import compound_split as CS
     import ml_balance as B
 
@@ -2058,7 +2066,9 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         stats["italian_split_elided"] = CS.IT_SPLIT_ELIDED if it_mode is None else it_mode
 
     def S(rows_, lang_, part, pairs=False):
-        """rows_ as written: split (a copy) when lang_ is a split language, else unchanged (Italian: it_mode above)."""
+        """rows_ as written: re-labelled (relabel_parts_dir / relabel_tts, counted), then split (a copy) when lang_ is
+        a split language, else unchanged (Italian: it_mode above)."""
+        rows_ = relabel_written(rows_, lang_, part)
         if lang_ not in split_set:
             return rows_
         out_, st_ = CS.split_rows(rows_, lang_, pairs=pairs, it_elided=it_mode if lang_ == "it" else None)
@@ -2066,6 +2076,28 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         if part in ("p3", "win", "win15", "tts", "seam", "seam_long"):
             unsplit_targets.update(x["text"] for x in rows_)
         return out_
+    def relabel_written(rows_, lang_, part):
+        n = 0
+        if relabel_parts_dir and part in ("win", "seam", "seam_long"):
+            ch = {x["id"]: x for x in _rows(f"{vol}/{relabel_parts_dir}/{lang_}/changed_{part}_{lang_}.jsonl")}
+            if ch:
+                n = sum(x["id"] in ch for x in rows_)
+                rows_ = [ch.get(x["id"], x) for x in rows_]
+        elif relabel_tts and part == "tts":
+            import alnum_relabel as AR
+
+            out_ = []
+            for x in rows_:
+                y, tm = AR.relabel_row({k: v for k, v in x.items() if k != "synthetic"}, lang_)
+                if tm is not None:
+                    n += 1
+                    x = dict(y, synthetic=x["synthetic"]) if "synthetic" in x else y
+                out_.append(x)
+            rows_ = out_
+        if n:
+            stats.setdefault("relabel_written", {}).setdefault(lang_, {})[part] = n
+        return rows_
+
     # a language's D2 digit rows leave only when it has labelled spoken-form rows (rows*.jsonl) to replace them
     no_rows = tuple(l for l in langs if not glob.glob(f"{vol}/ml/p3v2/{l}/rows*.jsonl"))
     stats["langs_without_rows"] = list(no_rows)
@@ -2120,10 +2152,17 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
             assert allow_no_judge or os.path.exists(f"{base}/judged_{name}.json"), f"{lang}: {name} was never judged"
         held |= {x["id"] for x in val}
         # every pass must have been judged (marker written by the judge step)
-        for pth in sorted(glob.glob(f"{base}/rows*.jsonl")):
+        passes = sorted(glob.glob(f"{base}/rows*.jsonl"))
+        extra = [f"{vol}/{p_.format(lang=lang)}" for p_ in extra_passes if os.path.exists(f"{vol}/{p_.format(lang=lang)}")]
+        for pth in passes + extra:
             name = os.path.basename(pth)[:-6]
-            assert allow_no_judge or os.path.exists(f"{base}/judged_{name}.json"), f"{lang}: {name} was never judged"
-        rows, dup = _one_per_id(sorted(glob.glob(f"{base}/rows*.jsonl")))
+            assert allow_no_judge or os.path.exists(f"{os.path.dirname(pth)}/judged_{name}.json"), f"{lang}: {name} was never judged"
+        rows, dup = _one_per_id(passes + extra)
+        stats.setdefault("extra_passes", {})[lang] = {os.path.basename(p_): len(_rows(p_)) for p_ in extra}
+        if relabel_rows:  # letter+digit relabel: the re-labelled copy of a source row replaces it (same id)
+            rl = {x["id"]: x for x in _rows(f"{vol}/{relabel_rows.format(lang=lang)}")}
+            stats.setdefault("relabel_rows", {})[lang] = {"file": len(rl), "replaced": sum(x["id"] in rl for x in rows)}
+            rows = [rl.get(x["id"], x) for x in rows]
         stats.setdefault("dup_ids", {})[lang] = dup
         sfx = lambda i: (re.search(r"_(\d{8}-\d{2}:\d{2}:\d{2}_\d+)$", str(i)) or [None, None])[1]  # noqa: E731
         held_sfx = {sfx(i) for i in held} - {None}

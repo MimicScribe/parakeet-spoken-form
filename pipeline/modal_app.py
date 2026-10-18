@@ -1043,7 +1043,7 @@ mix_image = (
     .add_local_python_source("common", "mix_build", "census_common", "ml_cands", "ml_balance", "ml_p3_core",
                              "score_retrain", "labeller", "readings",  # score_retrain: en_balance's number reader
                              "compound_split",  # build4 split_langs
-                             "win15", "edge_fix")  # build4 win15_share (15 s windows) / edge_fix_dir (edge-word fixes)
+                             "win15", "edge_fix", "alnum_relabel")  # build4 win15_share (15 s windows) / edge_fix_dir (edge-word fixes)
     .add_local_file("ml_grammar_table.json", "/root/ml_grammar_table.json")  # build4's number-word lexicon
 )
 
@@ -1264,7 +1264,8 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
                en_bal: bool = False, repeat: int = 1, win_repeat: int = 0, anchor18: int = 0, en_plain_h: float = 0.0,
                en_win_repeat: int = 1, mix_dir: str = "mix4", seam_long_h: float = 0.0, seam_long_repeat: int = 0, en_free_repeat: int = 1, final: bool = False,
                split_compounds: str = "", win15_share: float = 0.0, win15_dir: str = "ml/win15b", win15_repeat: int = 1,
-               en_win15: bool = True, edge_fix_dir: str = ""):
+               en_win15: bool = True, edge_fix_dir: str = "", extra_passes: str = "", relabel_rows: str = "",
+               relabel_parts_dir: str = "", relabel_tts: bool = False):
     """Greek ς restore (idempotent) + mix_build.build4 + the number share of the v4 mix (total and English-only).
     Run 2 (2026-10-17): balance = build4 template / session caps; en_bal = mix_build.en_balance on the English real
     parts (writes their _bcap copies: caps, then the YouTube top-up trim into the 35-40% band); repeat / win_repeat /
@@ -1275,7 +1276,8 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
     morphemes (mix_build.build4 split_langs; compound_split).
     win15_share > 0 (2026-10-18): the 15 s windows (mix_build.build4 win15_share / win15_dir) and, with en_win15, the
     English windows (<win15_dir>/en, held-out videos / days of the CURRENT lists out: en_win15_part), listed
-    win15_repeat times. edge_fix_dir: the real rows' edge-word fixes (edge_fix.py; mix_build.build4 edge_fix_dir)."""
+    win15_repeat times. edge_fix_dir: the real rows' edge-word fixes (edge_fix.py; mix_build.build4 edge_fix_dir).
+    extra_passes ("a,b": patterns with {lang}) / relabel_rows / relabel_parts_dir / relabel_tts: mix_build.build4."""
     import json
 
     import mix_build
@@ -1287,7 +1289,9 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
                                       dedupe=dedupe, seam_h=seam_h, plain_share=plain_share, balance=balance,
                                       mix_dir=mix_dir, seam_long_h=seam_long_h,
                                       split_langs=tuple(l for l in split_compounds.split(",") if l),
-                                      win15_share=win15_share, win15_dir=win15_dir, edge_fix_dir=edge_fix_dir)}
+                                      win15_share=win15_share, win15_dir=win15_dir, edge_fix_dir=edge_fix_dir,
+                                      extra_passes=tuple(p for p in extra_passes.split(",") if p), relabel_rows=relabel_rows,
+                                      relabel_parts_dir=relabel_parts_dir, relabel_tts=relabel_tts)}
     out["en_win15"] = en_win15_part(mix_dir, win15_dir, write=win15_share > 0 and en_win15)
     dry = mix_dir != "mix4" and not final  # final: a candidate mix in its own dir, English copies under it
     kw = dict(repeat=repeat, anchor18=anchor18, win_repeat=win_repeat, en_plain_h=en_plain_h, en_win_repeat=en_win_repeat,
