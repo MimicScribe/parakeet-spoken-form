@@ -44,7 +44,7 @@ class TrainRows(unittest.TestCase):
         src = P3[P3.index("def windows2_lang("):P3.index("def windows2(")]
         for s in ("C.synthetic_train_rows(sets, rej_syn, heldout_voice)", 'grammar_reject_ids_*.txt',
                   'judged_{marker}.json', "assert not os.path.exists(dest_)", "include_tts = False",
-                  'r.get("voice") != heldout_voice'):
+                  'C.same_persona(r.get("voice"), heldout_voice)'):
             self.assertIn(s, src)
         ep = P3[P3.index("def syn_seam_crops("):]
         self.assertIn("heldout_voices.get(l", ep)
@@ -59,6 +59,33 @@ class TrainRows(unittest.TestCase):
         self.assertIn("ttsLNw:ttsLNw_judge", tm)
         self.assertIn("ttsYRm:ttsYRm_judge", tm)
         self.assertFalse([t for t in tm if t.startswith("ttsHO") or t.startswith("tts1:")])
+
+
+class HeldoutPersona(unittest.TestCase):
+    def test_persona_in_any_locale_never_enters_train_pairs(self):
+        # red-on-base: the pass matched the held-out voice exactly, so "nl-BE-...-Iapetus" (persona of the held-out
+        # "nl-NL-...-Iapetus") could stitch into train seam pairs / windows
+        for lang, hv in MB.HELDOUT_VOICES.items():
+            other = "xx-YY-" + hv.split("-", 2)[2]  # same persona, another locale
+            self.assertTrue(MB.is_heldout_voice(lang, other))
+            self.assertEqual(C.same_persona(other, hv), MB.is_heldout_voice(lang, other))
+            self.assertFalse(C.same_persona(hv.rsplit("-", 1)[0] + "-Puck", hv))  # another persona trains
+        hv = MB.HELDOUT_VOICES["nl"]
+        row = {"id": "x", "split": "train", "voice": "nl-BE-" + hv.split("-", 2)[2]}
+        kept, drop = C.synthetic_train_rows({"t": [row, dict(row, id="y", voice="nl-NL-Chirp3-HD-Puck")]}, set(), hv)
+        self.assertEqual([r["id"] for r in kept], ["y"])
+        self.assertEqual(drop["heldout_voice"], 1)
+
+    def test_seam_crops_and_windows_filter_the_persona(self):
+        # red-on-base: windows2_lang took every train-split tts1 / tts2 / WAVE2_TTS row (held-out voice included) and
+        # neither seam_crops nor windows2 passed a held-out voice
+        src = P3[P3.index("def windows2_lang("):P3.index("def windows2(")]
+        self.assertIn('not C.same_persona(r.get("voice"), heldout_voice)]', src)
+        self.assertIn('C.same_persona(r.get("voice"), heldout_voice))]', src)  # the stream-rows assert
+        for ep in ("def windows2(", "def seam_crops("):
+            body = P3[P3.index(ep):P3.index("\n\n\n", P3.index(ep))]
+            self.assertIn("mix_build_consts()[1]", body)
+            self.assertIn('hvs.get(l, "")', body)
 
 
 class Build4(unittest.TestCase):

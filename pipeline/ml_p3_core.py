@@ -754,16 +754,22 @@ def split_solo(rows: list[dict], solo_srcs) -> tuple[list[dict], list[list[dict]
     return [r for r in rows if r.get("src") not in solo], [[r] for r in rows if r.get("src") in solo]
 
 
+def same_persona(voice: str | None, heldout_voice: str | None) -> bool:
+    """mix_build.is_heldout_voice's rule (mix_build.heldout_persona): the held-out voice is its PERSONA in every locale
+    ("nl-BE-...-Iapetus" is held out with "nl-NL-...-Iapetus")."""
+    return bool(heldout_voice and voice and voice.rsplit("-", 1)[-1] == heldout_voice.rsplit("-", 1)[-1])
+
+
 def synthetic_train_rows(sets: dict, reject: set, heldout_voice: str = "") -> tuple[list[dict], dict]:
     """Rows of synthetic sets ({tag: rows}) that may build TRAINING windows / seam pairs: split "train" only (a row
-    without a split is train, as build4 reads it), never the language's held-out voice (any split), never a judge or
-    grammar reject. Returns (rows tagged origin "tts", {reason: rows dropped})."""
+    without a split is train, as build4 reads it), never the language's held-out voice persona in any locale or split
+    (same_persona), never a judge or grammar reject. Returns (rows tagged origin "tts", {reason: rows dropped})."""
     out, drop = [], {"dev_split": 0, "heldout_voice": 0, "rejected": 0}
     for rows in sets.values():
         for r in rows:
             if r.get("split", "train") != "train":
                 drop["dev_split"] += 1
-            elif heldout_voice and r.get("voice") == heldout_voice:
+            elif same_persona(r.get("voice"), heldout_voice):
                 drop["heldout_voice"] += 1
             elif r["id"] in reject:
                 drop["rejected"] += 1

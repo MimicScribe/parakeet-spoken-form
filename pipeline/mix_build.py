@@ -1902,9 +1902,9 @@ def _seam_rows(base: str, files=SEAM_FILES, bare_first: bool = False) -> list:
 # has), and the synthetic sets' train rows (ml_p3.syn_seam_crops, SYN_SEAM_LONG_FILES: their own parent rule,
 # keep_syn_pairs). Synthetic-set windows (windows_syn) join the synthetic windows (TTS_SHARE of win_h). Every synthetic
 # pair / window row carries synthetic=True.
-SEAM_LONG_FILES = ("seam_long", "seam_long_b")
-SYN_SEAM_LONG_FILES = ("seam_long_syn",)
-WIN_FILES = ("windows", "windows_syn")
+SEAM_LONG_FILES = ("seam_long", "seam_long_b", "seam_long_c")  # _b: the full stream set (seed 1), _c: seed 2
+SYN_SEAM_LONG_FILES = ("seam_long_syn", "seam_long_syn2")  # syn2: the second-batch sets (ttsYRs / YRn / LTw / LTr)
+WIN_FILES = ("windows", "windows_syn", "windows_syn2")
 
 
 def keep_syn_pairs(rows: list, bad: set, cap_out: set, took_ids: set) -> tuple[list, dict]:
@@ -2249,12 +2249,12 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         # edge, then a number at an edge, then the rest (the shuffle above keeps the order random inside each group)
         seam_first = lambda ws: sorted(ws, key=lambda w: (not w.get("cut_number"), not w.get("edge_number")))  # noqa: E731
         syn_pool_h = _h(syn_win)
-        n_wsyn_set = sum(1 for w in syn_win if "_win_syn_" in w["id"])  # windows_syn (synthetic-set windows) in the pool
+        n_wsyn_set = sum(1 for w in syn_win if "_win_syn" in w["id"])  # windows_syn (synthetic-set windows) in the pool
         win = _take(seam_first(real_win), win_h * (1 - TTS_SHARE)) + _take(seam_first(syn_win), win_h * TTS_SHARE)
         stats.setdefault("syn_set_windows", {})[lang] = {
-            "pool": n_wsyn_set, "pool_h": round(_h([w for w in syn_win if "_win_syn_" in w["id"]]), 3),
-            "taken": sum(1 for w in win if "_win_syn_" in w["id"]),
-            "taken_h": round(_h([w for w in win if "_win_syn_" in w["id"]]), 3),
+            "pool": n_wsyn_set, "pool_h": round(_h([w for w in syn_win if "_win_syn" in w["id"]]), 3),
+            "taken": sum(1 for w in win if "_win_syn" in w["id"]),
+            "taken_h": round(_h([w for w in win if "_win_syn" in w["id"]]), 3),
             "syn_pool_h": round(syn_pool_h, 3), "syn_cap_h": round(win_h * TTS_SHARE, 3)}
         # research 2026-10-15 + the TTS-prior lesson: synthetic speech is too clean; 60% of the chosen synthetic rows are
         # degraded (room reverb, noise 5-20 dB SNR, phone band, Opus) with the same Degrader as the real rows
