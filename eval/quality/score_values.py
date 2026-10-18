@@ -5,8 +5,11 @@ A sentence's slots are matched IN ORDER against one reading's parsed numbers and
 most one slot: a slot searches from just past the previous slot's match, so two slots of 5 need two parsed 5s.
 Strict rules (the headline):
   PH   a run of consecutive parsed numbers whose digits, joined, EQUAL the phone number;
-  P    one number equal to the price, or whole and cents as two numbers next to each other in the parsed list;
-  T    h.mm or hmm as one number, h and m next to each other in the parsed list, or the hour alone when m = 0;
+  P    one number equal to the price, or whole and cents as two numbers next to each other in the parsed list (the cents
+       as 25 or as 0.25: "78 euro en 25 cent" reads 78 and 0.25);
+  T    h.mm or hmm as one number, h and m next to each other in the parsed list, or the hour alone when m = 0; a parsed
+       hour whose own words end in minutes the parser dropped ("negentien uur vijf" parsed as 19) counts when those
+       words read as m;
   else one number equal to the value.
 Lenient (a sensitivity row only: parser-limit forgiveness, never model errors; needs the parse's word spans):
   L    mantissa x 10^k when the scale word for 10^k follows the mantissa in the text; the mantissa is one number or a
@@ -80,6 +83,28 @@ def _digits(s):
     return re.sub(r"\D", "", str(s))
 
 
+CLOCK_WORDS = {"uur": "nl"}  # hour word -> language of the minutes that follow it inside the parser's span
+
+
+def _clock_tail(r, i):
+    """The minutes written after the hour word inside parsed number i's own words ("negentien uur vijf" -> 5), or None.
+    The parser keeps only the hour of such a span; the words after the hour word are read here with the public reader."""
+    if r.spans is None:
+        return None
+    a, b = r.spans[i]
+    ws = [w.lower() for w in r.words[a:b + 1]]
+    for k, w in enumerate(ws):
+        if w in CLOCK_WORDS and 0 < k < len(ws) - 1:
+            try:
+                import number_outcomes as N
+                ns = N.extract_numbers(" ".join(ws[k + 1:]), CLOCK_WORDS[w], keep_weak=False)
+            except Exception:  # noqa: BLE001  (reader not importable: no extra credit)
+                return None
+            if len(ns) == 1 and len(ns[0].vals) == 1:
+                return int(min(ns[0].vals)) if min(ns[0].vals) == int(min(ns[0].vals)) else None
+    return None
+
+
 def _strict(b, v, r, i):
     """indices consumed when slot base b with value v matches reading r starting AT parsed number i, else None"""
     n = r.nums
@@ -100,7 +125,7 @@ def _strict(b, v, r, i):
         a, c = int(f), round((f - int(f)) * 100)
         if _eq(n[i], f):
             return [i]
-        if c and nxt is not None and _eq(n[i], a) and _eq(n[nxt], c):
+        if c and nxt is not None and _eq(n[i], a) and (_eq(n[nxt], c) or _eq(n[nxt], c / 100)):
             return [i, nxt]
         return None
     if b == 'T':
@@ -108,6 +133,8 @@ def _strict(b, v, r, i):
         if m and nxt is not None and _eq(n[i], h) and _eq(n[nxt], m):
             return [i, nxt]
         if _eq(n[i], h + m / 100) or _eq(n[i], h * 100 + m) or (m == 0 and _eq(n[i], h)):
+            return [i]
+        if m and _eq(n[i], h) and _clock_tail(r, i) == m:
             return [i]
         return None
     return [i] if _eq(n[i], float(v)) else None

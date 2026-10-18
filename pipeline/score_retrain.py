@@ -756,6 +756,17 @@ def _run_to_nums(lang, run):
 
 def _merge(lang, nums, toks):
     """Currency "12 euros 50" -> 12.50; English years "twenty twenty-three" -> 2023."""
+    if lang == "it":
+        # "venti euro e settanta cinque centesimi": the reader takes "centesimi" as the ordinal hundredth and fuses it into
+        # the number (7500); the amount is the words before it, followed by the minor unit
+        fixed = []
+        for x in nums:
+            if x.form == "words" and x.ordinal and x.end > x.start and toks[x.end] in ("centesimo", "centesimi"):
+                sub = extract_numbers(" ".join(toks[x.start:x.end]), lang)
+                if len(sub) == 1 and not sub[0].ordinal and sub[0].form == "words":
+                    x = Num(sub[0].vals, "words", start=x.start, end=x.end - 1)
+            fixed.append(x)
+        nums = fixed
     out, i = [], 0
     while i < len(nums):
         a = nums[i]

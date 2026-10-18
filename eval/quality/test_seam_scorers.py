@@ -181,6 +181,24 @@ class SlotOk(unittest.TestCase):
         self.assertFalse(S.slot_ok("Y", 1997, R(["19", "97"], [[0, 0], [2, 2]], ["nineteen", "and", "ninety"]), lenient=True))
         self.assertFalse(S.slot_ok("Y", 1997, ["19", "97"], lenient=True))  # no spans: never concatenated
 
+    def test_minor_unit_and_clock_minutes_the_parser_reads_differently(self):
+        # red-on-base: a price read "78" + "0.25" (nl "achtenzeventig euro en vijfentwintig cent") and a time whose
+        # parsed span kept only the hour ("negentien uur vijf" parsed 19) scored wrong
+        import score_values as S
+        R = S.Reading
+        self.assertTrue(S.slot_ok("P", "78.25", R(["78", "0.25"], [[3, 4], [6, 7]], ["a"] * 8)))
+        self.assertTrue(S.slot_ok("P", "78.25", ["78", "25"]))  # unchanged
+        self.assertFalse(S.slot_ok("P", "78.25", ["78", "0.26"]))
+        self.assertFalse(S.slot_ok("P", "78.25", ["79", "0.25"]))
+        w = "de vergadering begint om negentien uur vijf en duurt acht minuten".split()
+        hour = R(["19", "8"], [[4, 6], [9, 9]], w)
+        self.assertTrue(S.slot_ok("T", "19:05", hour))
+        self.assertFalse(S.slot_ok("T", "19:06", hour))
+        self.assertFalse(S.slot_ok("T", "19:05", R(["19", "8"], [[4, 5], [9, 9]], w)))  # no minutes in the span
+        self.assertFalse(S.slot_ok("T", "19:05", ["19"]))  # no words: no extra credit
+        w2 = "begint om negentien uur vijf en veertig".split()
+        self.assertTrue(S.slot_ok("T", "19:45", R(["19"], [[2, 6]], w2)))
+
 
 if __name__ == "__main__":
     unittest.main()

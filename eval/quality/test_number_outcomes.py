@@ -384,5 +384,12 @@ class SplitFormValues(unittest.TestCase):  # red-on-base: control (the reader al
         self.assertEqual([r["outcome"] for r in N.number_outcomes("es kostet 270 euro", "es kostet zwei hundert siebzig euro", "de")], ["WORDS_RIGHT_VALUE"])
 
 
+    def test_italian_minor_unit_is_not_an_ordinal(self):
+        # red-on-base: "settantacinque centesimi" read as the ordinal 7500 (WRONG_VALUE for 20,75)
+        for hyp in ("venti euro e settantacinque centesimi", "venti euro e settanta cinque centesimi"):
+            self.assertEqual([r["outcome"] for r in N.number_outcomes("costa 20,75 euro", "costa " + hyp, "it")], ["WORDS_RIGHT_VALUE"], hyp)
+        self.assertEqual([r["outcome"] for r in N.number_outcomes("costa 20,75 euro", "costa venti euro e settantasei centesimi", "it")], ["WRONG_VALUE"])
+
+
 if __name__ == "__main__":
     unittest.main()
