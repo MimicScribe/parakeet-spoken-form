@@ -1,0 +1,240 @@
+"""Generator grammar fixes (grammar_rules) and the build's exclusion of synthetic rows that spoke the old slips.
+Every test is red on the commit before them. Needs the modal + numpy packages for the build4 part:
+uv run --no-project --with modal==1.6.1 --with numpy python test_grammar_fix.py"""
+import json
+import random
+import unittest
+
+import census_common as CC
+import grammar_rules as G
+import mix_build as MB
+import ml_cands as M
+import ml_tts as X
+from test_census_common import _fixture, _tts_fixture, rj
+
+
+def cands(text, lang):
+    sp = M.spans(text, lang)
+    assert sp, (text, lang)
+    return sp[0].cands
+
+
+def errs(lang, text, kind, reading, cls="", caption="", spoken=""):
+    return G.span_errors(lang, {"text": text, "kind": kind, "reading": reading},
+                         {"cls": cls, "caption": caption, "text": spoken})
+
+
+class Rules(unittest.TestCase):
+    """Each rule fires on the slip the review found and not on the right form."""
+
+    def test_rules(self):
+        # red-on-base: control (grammar_rules is new; the generator tests below are red on base)
+        cases = [  # (lang, written piece, kind, cls, caption, spoken sentence, bad reading, good reading, code)
+            ("es", "1º", "ord", "date_txt", "el 1º de octubre de 2020", "", "primera", "primero", "date_ord_gender"),
+            ("es", "1º", "ord", "date_txt", "el 1º de octubre de 2020", "", "primer", "primero", "date_ord_apocope"),
+            ("pt", "1º", "ord", "date_txt", "o 1º de março", "", "primeira", "primeiro", "date_ord_gender"),
+            ("it", "1º", "ord", "date_txt", "il 1º febbraio", "", "prima", "primo", "date_ord_gender"),
+            ("fr", "1er", "ord", "date_txt", "le 1er octobre", "", "première", "premier", "date_ord_gender"),
+            ("pt", "2:30 pm", "clock", "clock12", "", "", "dois e trinta", "duas e trinta", "pt_clock_hour_masc"),
+            ("pt", "21h15", "clock", "clock24", "", "", "vinte e um e quinze", "vinte e uma e quinze",
+             "pt_clock_hour_masc"),
+            ("fr", "16h15", "clock", "clock24", "", "", "seize heures et quinze", "seize heures quinze", "fr_clock_et"),
+            ("fr", "12:45 a. m.", "clock", "clock12", "", "", "douze heures quarante cinq", "minuit quarante cinq",
+             "fr_12am_douze"),
+            ("fr", "21h05", "clock", "clock24", "", "", "vingt et un heures cinq", "vingt et une heures cinq",
+             "fr_clock_hour_un"),
+            ("fr", "18h45", "clock", "clock24", "", "", "dix huit heure quarante cinq", "dix huit heures quarante cinq",
+             "hour_noun_number"),
+            ("es", "$ 29,10", "cur", "price", "", "", "veintinueve pesos con diez céntimos",
+             "veintinueve pesos con diez centavos", "cents_word"),
+            ("pt", "R$ 91,99", "cur", "price", "", "", "noventa e um reais e noventa e nove cêntimos",
+             "noventa e um reais e noventa e nove centavos", "cents_word"),
+            ("de", "48,10 €", "cur", "price", "", "", "achtundvierzig und zehn", "achtundvierzig Euro und zehn",
+             "price_two_numbers"),
+            ("nl", "€ 83,10", "cur", "price", "", "", "drieëntachtig en tien", "drieëntachtig euro en tien",
+             "price_two_numbers"),
+            ("es", "½", "frac", "frac", "La receta lleva ½ de litro.", "", "medio", None, "frac_half_unit"),
+            ("nl", "6 1/2", "frac", "frac", "", "", "zes en één half", "zes en een half", "nl_een_half"),
+            ("it", "26º", "ord", "ord", "", "", "ventiseesimo", "ventiseiesimo", "it_spelling"),
+            ("it", "2003", "int", "year", "", "", "duemilatre", "duemilatré", "it_spelling"),
+            ("it", "16:15", "clock", "clock24", "", "", "sedici ore e un quarto", "sedici e un quarto", "it_clock_ore"),
+            ("pt", "51000", "int", "count", "", "", "cinco dez zero zero", "cinquenta e um mil", "count_digit_chunks"),
+            ("uk", "1 грн.", "cur", "price", "", "Цей товар коштує одна гривня.", "одна гривня", "одну гривню",
+             "slav_cost_acc"),
+            ("ro", "49,50 lei", "cur", "price", "", "", "patruzeci și nouă lei și cincizeci de bani",
+             "patruzeci și nouă de lei și cincizeci de bani", "ro_de_linker"),
+            ("ro", "1990", "int", "year", "", "", "mie nouă sute nouăzeci", "o mie nouă sute nouăzeci", "ro_o_mie"),
+            ("ro", "592,99 €", "cur", "price", "", "", "cinci sute nouăzeci și două de euro",
+             "cinci sute nouăzeci și doi de euro", "ro_noun_gender"),
+            ("ro", "2002", "int", "year", "", "", "doi mii doi", "două mii doi", "ro_gender"),
+            ("pl", "18.55", "clock", "clock", "", "", "osiemnastej pięćdziesiątej piątej", "osiemnastej pięćdziesiąt pięć",
+             "pl_clock_minute"),
+            ("pl", "2 680", "int", "big", "", "Zabrakło nam dwa tysiące sześćset osiemdziesiąt euro.",
+             "dwa tysiące sześćset osiemdziesiąt", "dwóch tysięcy sześciuset osiemdziesięciu", "pl_gen_case"),
+        ]
+        for lang, st, kind, cls, cap, spoken, bad, good, code in cases:
+            sb = spoken.replace("одна гривня", bad) if spoken else ""
+            sg = spoken.replace(bad, good) if spoken and good else ""
+            self.assertIn(code, errs(lang, st, kind, bad, cls, cap, sb), (lang, bad))
+            if good is not None:  # "½ de litro": no reading is right, the written form is never drawn now
+                self.assertNotIn(code, errs(lang, st, kind, good, cls, cap, sg), (lang, good))
+        # right forms the rules must leave alone
+        self.assertEqual(errs("fr", "21h05", "clock", "vingt et une heures cinq", "clock24"), [])
+        self.assertEqual(errs("fr", "1:15", "clock", "une heure et quart", "clock12"), [])
+        self.assertEqual(errs("es", "¼", "frac", "un cuarto", "frac", "La receta lleva ¼ de litro."), [])
+        self.assertEqual(errs("ro", "19,50 lei", "cur", "nouăsprezece lei și cincizeci de bani", "price"), [])
+        self.assertEqual(errs("ro", "105 lei", "cur", "o sută cinci lei", "price"), [])
+        self.assertEqual(errs("ro", "3.510.000", "int", "trei milioane cinci sute zece mii de euro", "big"), [])
+        self.assertEqual(errs("pl", "2003", "int", "dwa tysiące trzeciego", "year", spoken="od dwa tysiące trzeciego"), [])
+
+
+class Generators(unittest.TestCase):
+    """The fixed candidate machinery and planners never produce the slips (red on base: each did)."""
+
+    def test_clock_hours(self):
+        self.assertEqual(cands("às 1h05 hoje", "pt")[0], "uma e cinco")  # table + code: "um e cinco" before
+        self.assertFalse([c for c in cands("às 2:30 pm hoje", "pt") if c.split()[0] == "dois"])
+        self.assertFalse([c for c in cands("às 21:15 hoje", "pt") if c.startswith("vinte e um ")])
+        self.assertEqual(cands("à 21h05 demain", "fr")[0], "vingt et une heures cinq")
+        self.assertFalse([c for c in cands("à 16h15 demain", "fr") if G.FR_ET_BAD.search(c)])
+        am = cands("Rendez-vous à 12:45 a. m. demain.", "fr")
+        self.assertTrue(am and not [c for c in am if c.startswith("douze")], am)
+        self.assertIn("minuit quarante cinq", am)
+        self.assertFalse([c for c in cands("a las 21:40 h hoy", "es") if c.startswith("veintiuno")])
+        self.assertFalse([c for c in cands("alle 16:15 oggi", "it") if " ore" in c])
+        self.assertFalse([c for c in cands("alle 0:55 oggi", "it") if c.startswith("dodici")])
+
+    def test_prices(self):
+        for text, lang, bad in [("Cuesta $ 29,10 hoy.", "es", "céntimo"), ("Custa R$ 91,99 hoje.", "pt", "cêntimo"),
+                                ("Custa US$ 1,55 hoje.", "pt", "cêntimo")]:
+            self.assertFalse([c for c in cands(text, lang) if bad in c], text)
+        self.assertTrue([c for c in cands("Custa 12,50 € hoje.", "pt") if "cêntimos" in c])  # the euro keeps them
+        for text, lang in [("Es kostet 48,10 € heute.", "de"), ("Het kost € 83,10 vandaag.", "nl")]:
+            self.assertEqual([c for c in cands(text, lang) if not G.UNIT_WORDS[lang].search(c)], [], text)
+
+    def test_fractions_and_spelling(self):
+        self.assertNotIn("vijf en één half", cands("Het is 5 1/2 kilo.", "nl"))
+        self.assertIn("vijf en een half", cands("Het is 5 1/2 kilo.", "nl"))
+        self.assertTrue(X.HALF_BAD.search("zes en één half"))
+        self.assertEqual(cands("il 26º posto", "it")[0], "ventiseiesimo")
+        self.assertEqual(cands("Nel 2003 siamo andati.", "it")[0], "duemilatré")
+        self.assertEqual(cands("Costa $ 1003 oggi.", "it")[0], "milletré dollari")
+        rng = random.Random(0)
+        for lang in X.LANGS:
+            for _ in range(200):
+                self.assertNotIn("½", X.g_frac(lang, rng, {}, 0, True, None))
+
+    def test_date_ordinal_reading_ok(self):
+        sp = M.spans("El contrato se firmó el 1º de octubre de 2020.", "es")[0]
+        ok = [c for c in sp.cands if X.reading_ok("es", "QTY", "date_txt", None, sp, c, 0, "el 1º de octubre de 2020")]
+        self.assertEqual(ok, ["primero"])
+
+    def test_plans_have_no_slips(self):
+        for lang in X.LANGS:
+            rows = X.plan(lang, 400, 11, classes=("date_txt", "clock12", "clock24", "price", "frac", "count"))
+            self.assertTrue(rows, lang)
+            bad = [(r["text"], G.row_errors(lang, r)) for r in rows if G.row_errors(lang, r)]
+            self.assertEqual(bad, [], lang)
+
+    def test_llm_rows_checked(self):
+        # red-on-base: check_row only checked values, so "patruzeci și nouă lei" / "pięćdziesiątej piątej" were voiced
+        import ml_tts_multi as B
+
+        def row(w, s, frag, cls):
+            return {"text_written": w, "text": s, "check": "values", "written": frag, "cls": cls}
+
+        bad = [("ro", row("Biletul costă 49,50 lei pentru adulți.", "Biletul costă patruzeci și nouă lei și cincizeci de "
+                          "bani pentru adulți.", "49,50 lei", "price"), "ro_de_linker"),
+               ("pl", row("Spotkanie o 18.55 w sali.", "Spotkanie o osiemnastej pięćdziesiątej piątej w sali.", "18.55",
+                          "clock"), "pl_clock_minute")]
+        for lang, r, code in bad:
+            ok, why = B.check_row(dict(r), lang)
+            self.assertFalse(ok)
+            self.assertIn(f"grammar:{code}", why)
+        good = [("ro", row("Biletul costă 49,50 lei pentru adulți.", "Biletul costă patruzeci și nouă de lei și cincizeci "
+                           "de bani pentru adulți.", "49,50 lei", "price")),
+                ("pl", row("Spotkanie o 18.55 w sali.", "Spotkanie o osiemnastej pięćdziesiąt pięć w sali.", "18.55",
+                           "clock"))]
+        for lang, r in good:
+            self.assertEqual(B.check_row(dict(r), lang), (True, []))
+
+    def test_slav_price_after_cost_verb(self):
+        import ml_tts_ru as R
+        import ml_tts_uk as U
+
+        for mod, verb in ((U, "коштує"), (R, "стоит")):
+            rng = random.Random(5)
+            seen = 0
+            for i in range(2000):
+                try:
+                    w, rd, _ = mod.g_price(rng, i, None)
+                except M.Missing:
+                    continue
+                if verb in w and ("одна" in rd[0].split() or "одну" in rd[0].split()):
+                    self.assertNotIn("одна", rd[0].split(), (w, rd))
+                    seen += 1
+            self.assertGreater(seen, 0, verb)
+
+
+class Build(unittest.TestCase):
+    def test_grammar_rejects_leave_the_mix(self):
+        # red-on-base: build4 never read grammar_reject_ids.txt, so a row speaking an old slip trained
+        vol = _fixture(n_win=0)
+        tts, _ = _tts_fixture(vol)
+        open(f"{vol}/ml/p3v2/de/{MB.GRAMMAR_REJECTS}", "w").write(f"# list\n{tts[0]['id']}\n")
+        aug, MB.TTS_AUG_FRAC = MB.TTS_AUG_FRAC, 0.0
+        self.addCleanup(setattr, MB, "TTS_AUG_FRAC", aug)
+        st = MB.build4(vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True)
+        self.assertNotIn(tts[0]["id"], {x["id"] for x in rj(f"{vol}/mix4/tts_de.jsonl")})
+        self.assertNotIn("de_x0", {w["id"] for w in rj(f"{vol}/mix4/win_de.jsonl")})  # its window leaves too
+        self.assertEqual(st["grammar_rejected"]["de"], 1)
+
+    def test_ft5_sets_wired(self):
+        # red-on-base: ttsFT5 / 5c / 5d were not read by build4
+        tags = {t for t, _ in MB.TTS_SETS}
+        for t in ("ttsFT5", "ttsFT5c", "ttsFT5d"):
+            self.assertIn(t, tags)
+            self.assertIn(t, MB.TTS_TARGETED)
+            self.assertIn((t, f"{t}_judge"), MB.TTS_SETS)
+
+    def test_rare_class_floor(self):
+        # red-on-base: a class real speech never has got no synthetic rows at all (share 1.0 > 0.30)
+        real = [{"id": f"r{i}", "text": "es waren fünfzig Prozent", "spans": [{"kind": "pct", "text": "50 %"}]}
+                for i in range(40)]
+        tts = [{"id": f"t{i}", "text": "AT und T", "src": "tts", "_targeted": False, "duration": 6.5,
+                "spans": [{"kind": "amp", "text": "AT&T"}]} for i in range(120)]
+        took = MB.select_synthetic(tts, real, "de", {"pct": 1.0})
+        self.assertEqual(len(took), int(MB.TTS_FLOOR_H * 3600 / 6.5))  # 83 rows = 0.15 h
+        chk = MB.post_build_check(real, took, "de")
+        self.assertEqual(chk["synthetic_over"], {})
+        self.assertEqual(set(chk["waived_synthetic_floor"]), {"amp"})
+        self.assertEqual(chk["waived_synthetic_floor"]["amp"]["real"], 0)
+        self.assertFalse([f for f in chk["fail"] if "amp" in f])
+        self.assertEqual(MB.trim_synthetic(took, real, "de")[1], 0)  # the floor holds after the later caps too
+        # a class WITH real speech keeps the share rule
+        self.assertIn("year", MB.post_build_check(
+            [{"id": "r", "text": "x", "spans": [{"kind": "int", "text": "2015"}]} for _ in range(40)],
+            [{"id": f"y{i}", "text": "x", "duration": 1.0, "spans": [{"kind": "int", "text": "2016"}]} for i in range(40)],
+            "de")["synthetic_over"])
+
+
+class Census(unittest.TestCase):
+    def test_sentence_final_cardinal_is_not_an_ordinal(self):
+        # red-on-base: "Punkt 10." read "zehn" and "2008." read "zweitausendacht" counted as ordinals
+        self.assertEqual(CC.gate_class_value({"text": "um Punkt zehn."}, {"kind": "ord", "text": "10.",
+                                                                          "reading": "zehn."}, "de"), ("int_small", 10))
+        self.assertEqual(CC.gate_class_value({"text": "Das war zweitausendacht."},
+                                             {"kind": "ord", "text": "2008.", "reading": "zweitausendacht."}, "de"),
+                         ("year", 2008))
+        self.assertEqual(CC.gate_class({"text": "Het is precies tien."}, {"kind": "ord", "text": "10.",
+                                                                           "reading": "tien"}, "nl"), "int_small")
+        # real ordinals stay ordinals; a span with no reading is unchanged
+        self.assertEqual(CC.gate_class({"text": "Er wurde Zehnter."}, {"kind": "ord", "text": "10.",
+                                                                        "reading": "Zehnter"}, "de"), "ord")
+        self.assertEqual(CC.gate_class({"text": "Hij werd tiende."}, {"kind": "ord", "text": "10.",
+                                                                       "reading": "tiende"}, "nl"), "ord")
+        self.assertEqual(CC.year_of({"text": "x"}, {"kind": "ord", "text": "2015."}, "de"), None)
+
+
+if __name__ == "__main__":
+    unittest.main()

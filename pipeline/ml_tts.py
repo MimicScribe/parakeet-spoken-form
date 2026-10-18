@@ -28,6 +28,7 @@ import random
 import re
 import sys
 
+import grammar_rules as G
 import ml_cands as M
 import ml_p3_core as C
 import ml_tts_templates as T
@@ -233,11 +234,10 @@ def g_frac(lang, rng, P, ci, broad, gender):
     r = rng.random()
     if lang in ("de", "nl") and r < 0.4:
         return f"{rng.randint(2, 9)} 1/2 {rng.choice(T.FRAC_NOUN_PL[lang])}"
-    half_ok = noun not in ("hora", "heure", "ora")  # "½ hora" would need the feminine "media"
     if r < 0.45:
-        sym = rng.choice(["½", "¼", "¾"] if half_ok else ["¼", "¾"])
-        if sym == "½" and not half_ok:
-            sym = "¾"
+        # never "½" before a unit: "½ de litro" has no natural reading ("medio litro" takes no "de", "un medio de
+        # litro" / "een half liter" read the half as a noun); "¼ de litro" / "¾ Liter" are fine
+        sym = rng.choice(["¼", "¾"])
         return f"{sym} {noun}" if lang in ("de", "nl") else f"{sym} {_of(lang, noun)}"
     while True:
         nb = rng.choice([3, 4, 5, 8, 10])  # not /2: "1/2 hora" reads "mitad de hora"
@@ -480,7 +480,8 @@ GEN = {"count": g_count, "large": g_large, "dec": g_dec, "pct": g_pct, "permille
 # --------------------------------------------------------------------------- reading filters
 
 FEM_RE = {"es": r"(?:ientas|\buna|una$)", "pt": r"(?:entas$|\buma$|uma$|\bduas$|duas$)", "de": r"^eine?r?$"}
-HALF_BAD = re.compile(r"\b(?:e meia?|y media?|et demie?|et demi|e mezzo|und (?:ein )?halb\w*|en (?:een )?half)\b|anderhalf|anderthalb")
+HALF_BAD = re.compile(r"\b(?:e meia?|y media?|et demie?|et demi|e mezzo|und (?:ein )?halb\w*|"
+                      r"en (?:(?:een|één) )?half)\b|anderhalf|anderthalb")
 
 
 def _digits_int(text: str):
@@ -535,16 +536,16 @@ def _clock_ok(lang, span, reading):
         cw = M.g(lang, "card", h)
     except M.Missing:
         cw = []
+    if lang == "fr" and G.FR_ET_BAD.search(reading):
+        return False  # "seize heures et quinze", "cinq et vingt deux" are not French; "et quart" / "et demie" are
     if h > 12 and not ap:
-        return ws[:len(cw)] == cw  # 24 h written: the 24 h number
+        return ws[:len(cw)] == cw or ws[:len(cw)] == M._fem_hour(cw, lang, h)  # 24 h written: the 24 h number
     if lang in ("es", "pt", "it") and re.search(r"\b(?:horas?|ore)\b", reading) and h <= 12:
         return False  # "tres horas treinta" sounds like a duration
     if SING_HOUR.search(reading) and not (ws and ws[0] in ONE_WORDS):
         return False
     if lang in ("de", "nl") and h <= 12 and not ap and not re.search(r"\b(?:Uhr|uur)\b", reading):
         return False
-    if lang == "fr" and re.search(r"\bet (?!quart|demie|demi)", reading):
-        return False  # "cinq et vingt deux" is not French; "et quart" / "et demie" are
     if ap:
         pm = bool(re.search(r"p\.?\s?m", span.text, re.I))
         aft, eve = DP_AFT.search(reading), DP_EVE.search(reading)
@@ -665,6 +666,11 @@ def reading_ok(lang, grp, cls, gender, span, reading, date_pos, written=""):
         if not _clock_ok(lang, span, reading):
             return False
     if cls in ("large", "dec") and span.kind == "dec" and HALF_BAD.search(reading):
+        return False
+    # the known generator slips (grammar_rules: "el primera de octubre", "dois e trinta", "pesos ... céntimos",
+    # "achtundvierzig und zehn", "½ de litro", "en één half", ...): the same rules that took the old rows out
+    if G.span_errors(lang, {"text": span.text, "kind": span.kind, "reading": reading},
+                     {"cls": cls, "caption": written}):
         return False
     if YEAR_QUOTA and cls == "year" and re.fullmatch(r"(19|20)\d\d", span.text) and reading.strip() != span.cands[0].strip():
         return False  # a year top-up trains the full reading; the clipped "'55" and pair forms add no year value
@@ -905,7 +911,8 @@ if _MODAL:
              .pip_install("torch==2.4.1", "torchaudio==2.4.1", "transformers==4.44.2", "soundfile", "scipy", "numpy<2",
                           "huggingface_hub", "kokoro==0.9.4", "misaki[en]>=0.9.4", "piper-tts==1.2.0")
              .env({"HF_HOME": "/root/hf"})
-             .add_local_python_source("ml_cands", "ml_decide", "ml_p3_core", "ml_tts", "ml_tts_templates")
+             .add_local_python_source("grammar_rules", "ml_cands", "ml_decide", "ml_p3_core", "ml_tts",
+                                      "ml_tts_templates")
              .add_local_file(os.path.join(HERE, "ml_grammar_table.json"), "/root/ml_grammar_table.json"))
     app = modal.App("parakeet-ml-tts", image=image)
     _fn = app.function(gpu="L4", cpu=4, memory=16384, volumes={VOL: vol}, timeout=3 * 3600, max_containers=6)

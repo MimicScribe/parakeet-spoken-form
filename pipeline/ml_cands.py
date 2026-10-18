@@ -471,6 +471,8 @@ MILLION = {"millón", "millones", "million", "millions", "milione", "milioni", "
            "Million", "Millionen", "billón", "billones", "milliard", "milliards", "miliardo", "miliardi", "bilhão",
            "bilhões", "miljard", "miljarden", "Milliarde", "Milliarden"}
 OF = {"es": "de", "pt": "de", "it": "di", "fr": "d'"}
+# no unit-less "<units> und <cents>" in German / Dutch: "achtundvierzig und zehn" is heard as two numbers
+NO_BARE_JOIN = {"de", "nl"}
 
 
 FEM_UNITS = {"libra", "libras", "livre", "livres", "sterlina", "sterline"}
@@ -512,7 +514,9 @@ def _cur_cands(d: dict, lang: str) -> list[str]:
     if sym not in UNIT[lang]:
         return _uniq(out)
     units = [UNIT[lang][sym]] + ([ALT_UNIT[(lang, sym)]] if (lang, sym) in ALT_UNIT else [])
-    cents = [CENT[lang]] + ([ALT_CENT[(lang, sym)]] if (lang, sym) in ALT_CENT else [])
+    # the cents word belongs to the currency: dollars, pesos and reais have centavos, never the euro's céntimos /
+    # cêntimos ("veintinueve pesos con diez céntimos" was a unit x cents-word cross product)
+    cents = [ALT_CENT[(lang, sym)]] if (lang, sym) in ALT_CENT else [CENT[lang]]
     cents_n = int(frac) if frac and len(frac) == 2 else 0
     if frac and len(frac) != 2:
         return _uniq(out)
@@ -533,7 +537,7 @@ def _cur_cands(d: dict, lang: str) -> list[str]:
                     jw = [j] if j else []
                     out.append(a + [unit] + jw + cw + [cu])
                     out.append(a + [unit] + jw + cw)
-            if n:
+            if n and lang not in NO_BARE_JOIN:
                 for j in JOIN[lang]:
                     if j:  # "doze e cinquenta" (no unit)
                         out.append(a + [j] + cw)
@@ -548,9 +552,27 @@ def _cur_cands(d: dict, lang: str) -> list[str]:
 
 
 # clock: hour unit word(s), the "and" joiner, and the half / quarter words (hh:30, hh:15)
-HOUR_UNIT = {"de": ["Uhr"], "es": ["horas"], "fr": ["heures", "heure"], "it": ["ore"], "nl": ["uur"], "pt": ["horas", "hora"]}
+# Italian has no hour word after the hour: "sedici ore e un quarto" is a duration ("le sedici e un quarto")
+HOUR_UNIT = {"de": ["Uhr"], "es": ["horas"], "fr": ["heures", "heure"], "it": [], "nl": ["uur"],
+             "pt": ["horas", "hora"]}
 SING_HOUR_UNIT, PLUR_HOUR_UNIT = {"hora", "heure"}, {"horas", "heures"}
-CLOCK_JOIN = {"de": [""], "es": ["y", ""], "fr": ["", "et"], "it": ["e", ""], "nl": [""], "pt": ["e", ""]}
+# French joins hour and minutes with no word: "seize heures quinze" ("seize heures et quinze" is not French; "et quart"
+# / "et demie" come from QUARTER_PAST / HALF_PAST)
+CLOCK_JOIN = {"de": [""], "es": ["y", ""], "fr": [""], "it": ["e", ""], "nl": [""], "pt": ["e", ""]}
+# the hour is feminine in es / fr / pt ("la una", "une heure", "vingt et une heures", "às duas", "vinte e duas"): the
+# masculine last word of an hour number -> the feminine one
+FEM_HOUR = {"es": {"uno": "una", "un": "una", "veintiuno": "veintiuna", "veintiún": "veintiuna"},
+            "fr": {"un": "une"}, "pt": {"um": "uma", "dois": "duas"}}
+MIDNIGHT = {"fr": "minuit"}  # 12:xx a.m. ("douze heures" is noon)
+NO_NOON_MIDNIGHT = {"it"}  # 0:55 is "zero e cinquantacinque", never "dodici ..." (12:55)
+
+
+def _fem_hour(ws: list[str], lang: str, hh: int) -> list[str]:
+    """The hour words of hour hh with the hour's feminine form (FEM_HOUR); other languages / hours unchanged."""
+    fh = FEM_HOUR.get(lang)
+    if not fh or not ws or ws[-1] not in fh:
+        return ws
+    return ws[:-1] + [fh[ws[-1]]]
 HALF_PAST = {"es": ["y", "media"], "fr": ["et", "demie"], "it": ["e", "mezza"], "pt": ["e", "meia"]}
 QUARTER_PAST = {"es": ["y", "cuarto"], "fr": ["et", "quart"], "it": ["e", "un", "quarto"], "pt": ["e", "um", "quarto"]}
 
@@ -565,11 +587,26 @@ def _clock_cands(d: dict, lang: str) -> list[str]:
 
 def _clock_core(d: dict, lang: str) -> list[str]:
     h, m = d["h"], d["m"]
-    out = [g(lang, "clock", h=h, m=m)]
-    hours = {h} | ({h % 12 or 12} if h > 12 or h == 0 else set())
+    canon = g(lang, "clock", h=h, m=m)
+    hw0 = g(lang, "card", h)
+    if canon[:len(hw0)] == hw0:  # the table's own hour words, feminine where the hour is ("um e dez" -> "uma e dez")
+        canon = _fem_hour(hw0, lang, h) + canon[len(hw0):]
+    out = [canon]
+    hours = {h} | ({h % 12 or 12} if h > 12 or (h == 0 and lang not in NO_NOON_MIDNIGHT) else set())
+    if lang in MIDNIGHT and d.get("ap") == "a" and h == 12:
+        hours, out = set(), []  # 12:xx a.m.: midnight, not "douze heures"
+        mw = [MIDNIGHT[lang]]
+        out.append(mw if m == 0 else mw + g(lang, "card", m))
+        out.append(g(lang, "card", 0) + ["heure"] + (g(lang, "card", m) if m else []))  # "zéro heure quarante cinq"
+        if m == 30 and lang in HALF_PAST:
+            out.append(mw + HALF_PAST[lang])
+        if m == 15 and lang in QUARTER_PAST:
+            out.append(mw + QUARTER_PAST[lang])
     for hh in sorted(hours):
         hw = g(lang, "card", hh)
-        hvs = [hw] + _card_variants(hw, lang, hh, year=False)  # "una", "uma", "duas"
+        # "una", "uma", "duas"; a masculine hour form is never one of them (FEM_HOUR)
+        hvs = [_fem_hour(v, lang, hh) for v in [hw] + _card_variants(hw, lang, hh, year=False)]
+        hvs = [v for i, v in enumerate(hvs) if v not in hvs[:i]]
         for hv in hvs:
             # the hour word agrees with the hour: singular "hora" / "heure" for 1 (and 0, "zero hora", "zéro heure"),
             # plural otherwise ("quinze hora e meia", "une heures" were generator slips, judge audit 2026-10-17)
@@ -1448,7 +1485,9 @@ def _frac_cands(d: dict, lang: str) -> list[str]:
     if w is None:
         return _uniq(fr)
     cw = g(lang, "card", w)
-    out = [cw + [AND_WORD[lang]] + f for f in _frac_words(lang, na, nb, alone_ok=False)]
+    # Dutch "vijf en één half" stresses the numeral ("five and ONE half"): after a whole number it is "en een half"
+    out = [cw + [AND_WORD[lang]] + f for f in _frac_words(lang, na, nb, alone_ok=False)
+           if not (lang == "nl" and f == ["één", "half"])]
     if na == 1 and nb == 2 and w > 0:
         out += _half_variants(lang, w)
         if lang in ("es", "pt", "it", "fr"):

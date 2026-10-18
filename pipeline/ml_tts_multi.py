@@ -210,6 +210,12 @@ def check_row(r: dict, lang: str) -> tuple:
         why.append("fragment_missing")
     if not s or re.search(r"\d", s):
         why.append("digit_in_spoken")
+    if not why and lang == "ro":
+        import ro_gender
+
+        # a synthetic reading must be the standard form ("două mii", not the colloquial "doi mii"): the LLM's
+        # masculine slips are repaired before labelling; whatever grammar_errors still finds below rejects the row
+        s = ro_gender.repair(s)
     if not why:
         lab = MM.label_row(w, [{"w": t, "s": i, "e": i} for i, t in enumerate(s.split())], lang, max_extra=1)
         if lab["masked"]:
@@ -224,7 +230,27 @@ def check_row(r: dict, lang: str) -> tuple:
         for sp in lab["spans"]:
             if not cents_ok(sp["cap"], sp["words"], lang):
                 why.append(f"cents_bare:{sp['cap']}->{sp['words']}")
+        why += [f"grammar:{c}" for c in grammar_errors(r, lang)]
     return (not why), why
+
+
+CLS_KIND = {"price": "cur", "clock": "clock", "phone": "phone", "date": "date", "code": "code", "version": "version",
+            "temp": "unit"}
+
+
+def grammar_errors(r: dict, lang: str) -> list:
+    """The deterministic grammar checks (grammar_rules: ro "de" linker, "o mie", number gender incl. ro_gender; pl
+    clock minutes, genitive after a governing word, "dwie tysiące") on a checked row's spans: the value check alone
+    lets "patruzeci și nouă lei" or "osiemnastej pięćdziesiątej piątej" through."""
+    import grammar_rules as G
+
+    out = []
+    for sp in r.get("spans") or []:
+        g = {"text": sp.get("cap", sp.get("text", "")), "reading": sp.get("words", sp.get("reading", "")),
+             "kind": sp.get("kind") or CLS_KIND.get(r.get("cls"), r.get("cls"))}
+        ctx = {"cls": r.get("cls"), "text": r.get("text", ""), "text_written": r.get("text_written", "")}
+        out += G.span_errors(lang, g, ctx)
+    return sorted(set(out))
 
 
 def cents_ok(written: str, spoken: str, lang: str) -> bool:

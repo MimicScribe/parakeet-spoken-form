@@ -191,14 +191,15 @@ def g_big(rng, i, ctx):
     return tpl.format(n=w), [card(n, case)], KINDS["big"]
 
 
-PRICE_FRAMES = [  # (template, case)
-    ("Квиток на концерт коштує {p}, і це недорого.", "nom"),
+PRICE_FRAMES = [  # (template, case); only the "paid" frame (WHOLE_ONLY) takes whole amounts only
+    ("Квиток на концерт коштує {p}, і це недорого.", "acc"),  # the verb takes the accusative: "коштує одну гривню"
     ("Ціна однієї порції без знижки становить {p}.", "nom"),
     ("За комунальні послуги ми заплатили {p} цього місяця.", "acc"),
     ("Вартість доставки становить {p} по всій країні.", "nom"),
-    ("Цей товар у магазині біля дому коштує {p}.", "nom"),
+    ("Цей товар у магазині біля дому коштує {p}.", "acc"),
     ("Разом до сплати {p}, оплата карткою або готівкою.", "nom"),
 ]
+WHOLE_ONLY = {t for t, c in PRICE_FRAMES if "заплатили" in t}
 CUR_W = [("грн", "гривня", 6), ("$", "долар", 2), ("€", "євро", 2)]
 
 
@@ -212,7 +213,7 @@ def g_price(rng, i, ctx):
     r = rng.random()
     n = rng.randint(1, 20) if r < 0.35 else rng.randint(21, 999) if r < 0.85 else rng.randint(1000, 9999)
     cents = rng.choice([0, 0, rng.randint(1, 99), rng.randint(1, 99), 50, 99, rng.randint(1, 9)])
-    if case == "acc":  # the accusative frame takes whole amounts only ("заплатили одну гривню")
+    if tpl in WHOLE_ONLY:  # the "paid" frame takes whole amounts only ("заплатили одну гривню")
         cents = 0
     a = _group(n) if n >= 1000 else str(n)
     a = f"{a},{cents:02d}" if cents else a

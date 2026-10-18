@@ -3,8 +3,12 @@
 The scale nouns "mii", "sute", "milioane" and "miliarde" take the feminine "două" / "douăsprezece" ("două mii", never
 "doi mii"); clock hours after "ora" / "orele" are feminine too ("ora douăsprezece", "ora douăzeci și două"); so are
 the feminine count nouns below ("două minute"). A reading that breaks one of these is repaired by swapping the one
-token; `violations` lists them, `repair` swaps them, `grammatical` is the test the labelling path uses.
+token; `violations` lists them, `repair` swaps them, `grammatical` is the test.
 "unu" before "ora" is left alone: "ora unu" is standard.
+
+For SYNTHETIC / generated readings only (ml_tts_multi.check_row, grammar_rules): a real clip keeps the reading the
+speaker said, and "doi mii" is common colloquial speech, so real-row candidates (ml_multi_ctc.expand_cands) are not
+repaired.
 """
 
 import re

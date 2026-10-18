@@ -182,6 +182,10 @@ def morph_class(text, sp, c, v, lang):
     return c, v
 
 
+# ordinal word endings: de "zehnte(n|r|s|m)", "erste", "dritte", "zwanzigste"; nl "tiende", "eerste", "twintigste"
+ORD_WORD = {"de": re.compile(r"(?:te|ten|ter|tes|tem)$"), "nl": re.compile(r"(?:de|ste)$")}
+
+
 def spoken_shape(text, sp, c, v, lang):
     """The class of an int span from the label words around it (SPOKEN_DATE / SPOKEN_CLOCK / SPOKEN_CUR), else c."""
     rd0 = (sp.get("reading") or "").lower()
@@ -266,7 +270,22 @@ def gate_class_value(r: dict, sp: dict, lang: str) -> tuple:
     spoken_shape. The one year definition: a span is a year of value v iff this returns ("year", v)."""
     t = r.get("text", "")
     c, v = morph_class(t, sp, *span_class(sp), lang)
+    c, v = cardinal_ord(sp, c, v, lang)
     return spoken_shape(t, sp, c, v, lang), v
+
+
+def cardinal_ord(sp, c, v, lang):
+    """A de / nl "ord" span that is a sentence-final cardinal ("Punkt 10." read "zehn", "2008." read
+    "zweitausendacht"): the period made it look like an ordinal, the reading says it is not one, so it is classified
+    by its value. Counts only: the label is not touched. Any other span unchanged."""
+    rd = (sp.get("reading") or "").split()
+    if c != "ord" or lang not in ORD_WORD or not rd or not isinstance(v, str):
+        return c, v
+    m = re.fullmatch(r"\s*(\d{1,4})\s*\.\s*", v)
+    last = re.sub(r"[^\w]+$", "", rd[-1].lower())
+    if not m or not last or ORD_WORD[lang].search(last):
+        return c, v
+    return by_value(int(m.group(1)))
 
 
 def gate_class(r: dict, sp: dict, lang: str) -> str:
