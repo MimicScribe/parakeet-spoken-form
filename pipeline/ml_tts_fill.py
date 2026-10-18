@@ -251,7 +251,7 @@ try:
 
     if _T._MODAL:
         vol = _T.vol
-        app = modal.App("parakeet-tts-fill", image=_T.image.add_local_python_source("mix_build", "common", "ml_tts_fill"))
+        app = modal.App("parakeet-tts-fill", image=_T.image.add_local_python_source("mix_build", "census_common", "common", "ml_tts_fill"))
 
         @app.function(gpu="L4", cpu=4, memory=16384, volumes={VOL: vol}, timeout=2 * 3600)
         def kokoro_en_fn(tag: str) -> dict:

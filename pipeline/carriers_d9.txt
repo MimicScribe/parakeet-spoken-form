@@ -1,4 +1,4 @@
-# 2026-10-12 supplement: far years and disfluent numbers. No E21/E22/eval phrasing.
+# 2026-10-12 supplement: far years and disfluent numbers. No evaluation-set phrasing.
 The lease runs until {year_far}.
 By {year_far} the fleet should be fully electric.
 They set a net zero target for {year_far}.

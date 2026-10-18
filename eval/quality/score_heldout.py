@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Score the held-out probe (modal_app.py::probe_heldout) with the four-outcome number scorer.
 
-usage: score_heldout.py <run>[,<run>...] [--langs de,es,fr,it,nl,pt] [--work DIR] [--json out.json]
+usage: score_heldout.py <run>[,<run>...] [--langs de,es,fr,it,nl,pt] [--work DIR] [--json out.json] [--mix-dir mix4]
+--mix-dir: the build the probe decoded (probe_heldout --mix-dir; a candidate build such as mix4final): its
+heldout_<lang> / tts_dev_<lang> rows are the references. The dec18 sets live in mix4 only (DEC18_DIR).
+A caption / validation list that exists on the volume but cannot be fetched is an error (volume_io.read_shared); a
+language the run or the baseline has no scores for FAILS the no-damage rule.
 Fetches hyps/<run>/heldout_<lang>.jsonl from the Modal volume and prints per language: numbers, words-right (the
 spoken-form target, "exact"), digits-right, wrong value, dropped. Primary mode scores each caption span against
 ALL its candidate readings (the value parser split valid variants such as "negentien zestig"
@@ -19,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import number_outcomes as N  # noqa: E402
+import volume_io as V  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))
 import ml_cands as M  # noqa: E402
@@ -28,20 +33,34 @@ PIPE = Path(__file__).resolve().parents[2] / "pipeline"
 VOLUME = "parakeet-spoken-form"
 
 
-def _captions(lang: str, work: Path, set_: str = "heldout") -> dict:
-    """id -> evaluation row (mix4/heldout_<lang>.jsonl, mix4/tts_dev_<lang>.jsonl or mix4/dec18_<lang>.jsonl)."""
-    src = f"mix4/{ {'ttsdev': 'tts_dev', 'dec18': 'dec18'}.get(set_, 'heldout') }_{lang}.jsonl"
-    p = (work / f"{set_}_{lang}.jsonl").resolve()
-    if True:  # review M3: always re-fetch (the held-out set changes with every rebuild)
-        subprocess.run(["modal", "volume", "get", "--force", VOLUME, src, str(p)], cwd=PIPE, capture_output=True)
-    return {r["id"]: r for r in map(json.loads, open(p, encoding="utf-8"))} if p.exists() else {}
+DEC18_DIR = "mix4"  # the dec18 sets (FLEURS-dev digit rows of untrained languages) are built into mix4 only
+
+
+def caption_src(lang: str, set_: str = "heldout", mix_dir: str = "mix4") -> str:
+    """The volume path of a set's reference rows: <mix_dir>/heldout_<lang>.jsonl, <mix_dir>/tts_dev_<lang>.jsonl, or
+    mix4/dec18_<lang>.jsonl (DEC18_DIR, whatever the build)."""
+    d = DEC18_DIR if set_ == "dec18" else mix_dir
+    return f"{d}/{ {'ttsdev': 'tts_dev', 'dec18': 'dec18'}.get(set_, 'heldout') }_{lang}.jsonl"
+
+
+def _captions(lang: str, work: Path, set_: str = "heldout", mix_dir: str = "mix4") -> dict:
+    """id -> evaluation row of caption_src. Always re-fetched (the held-out set changes with every rebuild); a missing
+    or unreadable file is an error, never an empty reference set."""
+    src = caption_src(lang, set_, mix_dir)
+    p = (work / mix_dir / f"{set_}_{lang}.jsonl").resolve()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if not V.read_shared(src, p):
+        raise V.VolumeReadError(f"{src} is not on the volume: no references to score {lang} against")
+    return {r["id"]: r for r in map(json.loads, open(p, encoding="utf-8"))}
 
 
 def _val_vox_ids(lang: str, work: Path) -> set:
+    """Ids of the VoxPopuli dev/test validation pass; empty when the language has none (not on the volume), an error
+    when it exists but cannot be fetched."""
     p = (work / f"val_vox_{lang}.jsonl").resolve()
-    subprocess.run(["modal", "volume", "get", "--force", VOLUME, f"ml/p3v2/{lang}/val_vox.jsonl", str(p)], cwd=PIPE,
-                   capture_output=True)
-    return {json.loads(l)["id"] for l in open(p, encoding="utf-8")} if p.exists() else set()
+    if not V.read_shared(f"ml/p3v2/{lang}/val_vox.jsonl", p):
+        return set()
+    return {json.loads(l)["id"] for l in open(p, encoding="utf-8") if l.strip()}
 
 
 def fetch(run: str, lang: str, work: Path, set_: str = "heldout") -> list:
@@ -245,15 +264,21 @@ def score(rows: list, lang: str) -> tuple[dict, list]:
 NO_DAMAGE_PP = 2.0  # next / moderate tiers ship only when no worse than the baseline by > 2 pp
 
 
-def no_damage(run: dict, base: dict, pp: float = NO_DAMAGE_PP) -> dict:
+def no_damage(run: dict, base: dict, pp: float = NO_DAMAGE_PP, langs=None) -> dict:
     """Per-language no-damage rule (run 2, next / moderate tiers) on the positional span outcomes of the same held-out
     rows: value-right (words OR digits with the right value) >= baseline - pp, and wrong + dropped <= baseline + pp
     (percentage points of the spans). WER non-inferiority is the paired FLEURS bootstrap of score_retrain.py
-    (fleurs_bootstrap_vs_<stock>), read next to this. {lang: {pass, value_right [run, base], wrong_dropped [...]}}."""
+    (fleurs_bootstrap_vs_<stock>), read next to this. {lang: {pass, value_right [run, base], wrong_dropped [...]}}.
+    langs: the languages that must pass (default: every language either side scored); a language without span scores on
+    either side FAILS ({"pass": False, "missing": "run" / "base" / "both"}), it is never skipped."""
     out = {}
-    for lang, r in run.items():
-        b = base.get(lang)
-        if not b or "spans" not in r or "spans" not in b:
+    if langs is None:
+        langs = sorted({l for l in list(run) + list(base) if not str(l).startswith("_")})
+    for lang in langs:
+        r, b = run.get(lang) or {}, base.get(lang) or {}
+        if "spans" not in r or "spans" not in b:
+            miss = "both" if "spans" not in r and "spans" not in b else "run" if "spans" not in r else "base"
+            out[lang] = {"pass": False, "missing": miss}
             continue
 
         def pct(sc):
@@ -281,8 +306,8 @@ def pick_most_converted(out: dict, base: str) -> dict:
     for run, res in out.items():
         if run == base:
             continue
-        nd = res.get("_no_damage") or no_damage(res, out[base])
-        bad = [l for l in langs if l in nd and not nd[l]["pass"]]
+        nd = res.get("_no_damage") or no_damage(res, out[base], langs=langs)
+        bad = [l for l in langs if not (nd.get(l) or {}).get("pass")]  # not scored = not passed
         failed[run] = bad
         sh = {l: N.form_shares(res[l].get("forms") or {}) for l in langs if l in res and res[l].get("forms")}
         for l, s in sh.items():
@@ -305,9 +330,12 @@ def main(argv=None):
                          "else (VoxPopuli dev/test + carved + original held-out), read once on the selected model")
     ap.add_argument("--set", default="heldout", choices=["heldout", "ttsdev", "dec18"],
                     help="heldout = real held-out + VoxPopuli dev/test rows; ttsdev = held-out synthetic voices")
+    ap.add_argument("--mix-dir", default="mix4", help="the build the probe decoded (probe_heldout --mix-dir)")
     ap.add_argument("--no-damage-vs", default="",
                     help="baseline run (B or ultra): per-language no-damage rule for every other run (next / moderate tiers)")
     a = ap.parse_args(argv)
+    if a.no_damage_vs and a.set == "dec18":
+        ap.error("--no-damage-vs needs span scores: not available for --set dec18")
     out = {}
     if a.no_damage_vs and a.no_damage_vs not in a.runs.split(","):
         a.runs = a.no_damage_vs + "," + a.runs
@@ -332,7 +360,7 @@ def main(argv=None):
             if not rows:
                 print(f"{run:24s} {lang:4s}  (no hyps)")
                 continue
-            caps = _captions(lang, Path(a.work), a.set)
+            caps = _captions(lang, Path(a.work), a.set, a.mix_dir)
             fm = {}
             sc, check = score_spans(rows, lang, caps, forms=fm)
             c, wrong = score(rows, lang)
@@ -351,8 +379,11 @@ def main(argv=None):
         for run in out:
             if run == a.no_damage_vs:
                 continue
-            nd = out[run]["_no_damage"] = no_damage(out[run], out[a.no_damage_vs])
+            nd = out[run]["_no_damage"] = no_damage(out[run], out[a.no_damage_vs], langs=a.langs.split(","))
             for lang, v in nd.items():
+                if "missing" in v:
+                    print(f"NO-DAMAGE {run} {lang}: FAIL (no scores: {v['missing']})")
+                    continue
                 print(f"NO-DAMAGE {run} {lang}: {'PASS' if v['pass'] else 'FAIL (stays on stock digits)'} "
                       f"value-right {v['value_right'][0]}% vs {v['value_right'][1]}%, wrong+dropped "
                       f"{v['wrong_dropped'][0]}% vs {v['wrong_dropped'][1]}% (n={v['spans']})")

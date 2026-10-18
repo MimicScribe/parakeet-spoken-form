@@ -222,7 +222,7 @@ def e21x(vol: str, chunk_s: float = 20.0) -> dict:
     return {"files": len(ids), "chunks": len(rows), "hours": round(sum(r["duration"] for r in rows) / 3600, 1)}
 
 
-# ---- retrain-3 bed rebuild (R3.12.5 E-2, R3.15 #2, R3.17 M1/M2) --------------------------------------------------
+# ---- retrain-3 bed rebuild --------------------------------------------------
 
 EN_STOP = set("the and of to is that we in it this for are have be not on with you our i was they what so but".split())
 

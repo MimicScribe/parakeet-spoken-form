@@ -1,6 +1,6 @@
-# 2026-10-13 retrain-3 R3.31 minimal pairs: every carrier is voiced twice, once "twenty X" and once "two thousand X",
+# 2026-10-13 retrain-3 minimal pairs: every carrier is voiced twice, once "twenty X" and once "two thousand X",
 # same voice and speed, so the words around a year cannot predict its reading. Mid-sentence year slots after the words
-# that carried the prior (in, by, since, of, through, until, fiscal, quarter, a date). No E21/E22/eval phrasing.
+# that carried the prior (in, by, since, of, through, until, fiscal, quarter, a date). No evaluation-set phrasing.
 We have been working with that supplier since {yr}, and it has gone well.
 By {yr} most of the old hardware should be retired.
 The policy changed in {yr} after the audit.

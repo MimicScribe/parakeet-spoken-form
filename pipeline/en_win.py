@@ -373,7 +373,7 @@ if modal is not None:
     image = (modal.Image.debian_slim(python_version="3.11")
              .apt_install("ffmpeg", "libsndfile1")
              .pip_install("torch==2.4.1", "torchaudio==2.4.1", "transformers==4.44.2", "soundfile", "librosa", "numpy<2")
-             .add_local_python_source("ml_cands", "ml_decide", "ml_p3_core", "ml_slav", "ml_balance", "label_gpu",
+             .add_local_python_source("ml_cands", "ml_decide", "ml_p3_core", "ml_slav", "ml_balance", "census_common", "label_gpu",
                                       "labeller", "readings")
              .add_local_file("ml_grammar_table.json", "/root/ml_grammar_table.json"))
     app = modal.App("parakeet-en-win")

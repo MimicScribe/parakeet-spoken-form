@@ -11,7 +11,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 
 
-def run(lang, rows, ext):
+def run(lang, rows, ext, full=False):
     name = f"test_{uuid.uuid4().hex[:8]}"
     root = Path(tempfile.mkdtemp(prefix="judge_plro_test_"))
     w = root / lang / name
@@ -21,13 +21,20 @@ def run(lang, rows, ext):
         (w / "ext.jsonl").write_text("".join(json.dumps({"id": i, "text": t}, ensure_ascii=False) + "\n" for i, t in ext.items()))
         subprocess.run([sys.executable, str(HERE / "judge_plro.py"), lang, name], check=True, capture_output=True,
                        env=dict(os.environ, SPOKEN_FORM_JUDGE_ROOT=str(root)))
-        return {json.loads(l)["id"]: json.loads(l)["reason"] for l in open(w / "jr/judge_rows.jsonl")}
+        out = {json.loads(l)["id"]: json.loads(l) for l in open(w / "jr/judge_rows.jsonl")}
+        return out if full else {k: v["reason"] for k, v in out.items()}
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
 
 def row(i, text, spans):
-    return {"id": i, "text": text, "spans": spans}
+    """A synthetic row (the value rules; its transcript is of the whole clip, no slice WER check)."""
+    return {"id": i, "text": text, "spans": spans, "src": "tts", "origin": "tts"}
+
+
+def real_row(i, text, spans, cer_ext=0.0):
+    """A real (tightened) row: cer_ext present, no synthetic marker."""
+    return {"id": i, "text": text, "spans": spans, "src": "vox", "cer_ext": cer_ext}
 
 
 def test_uk_values():
@@ -105,16 +112,61 @@ def test_clock_adjacent_forms_and_real_phone_groups():
     ext = {"a": "о 14 і 15 біля входу", "b": "було 9 0 6 коли", "c": "було 15-20 коли", "d": "о 14 біля входу і 15 хвилин"}
     assert run("uk", rows, ext) == {"a": "kept", "b": "kept", "c": "kept", "d": "span_missing"}
     # a real (tightened) row: the same digits in other groups is another reading, not a pass
-    real = lambda i: dict(row(i, "regulamentului șaisprezece nouăzeci și opt două mii cinci în",  # noqa: E731
+    real = lambda i: dict(real_row(i, "regulamentului șaisprezece nouăzeci și opt două mii cinci în",  # noqa: E731
                               [{"text": "16-98-2005", "kind": "phone", "reading": "șaisprezece nouăzeci și opt două mii cinci"}]), cer_ext=0.0)
     got = run("ro", [real("r1"), real("r2")], {"r1": "regulamentului 1698-2005 în", "r2": "regulamentului 16 98 2005 în"})
     assert got == {"r1": "span_missing", "r2": "kept"}, got
 
 
-def test_tightened_row_slice_rule_unchanged():
-    # control: a tightened row (cer_ext present) with a slice that does not line up is still not value-checked
-    r = dict(row("t", "zupełnie inne słowa tutaj siedem", [{"text": "7", "kind": "int", "reading": "siedem"}]), cer_ext=0.02)
-    assert run("pl", [r], {"t": "no to jest coś 5"}) == {"t": "kept"}
+def test_real_row_slice_wer_and_values():
+    # red-on-base: a real row whose slice disagrees with the label (WER > 0.25) skipped every span check and was KEPT,
+    # whatever its value: now its values are checked, and a row whose values pass is kept FLAGGED (wer_flag)
+    sp = [{"text": "7", "kind": "int", "reading": "siedem"}]
+    rows = [real_row("t", "zupełnie inne słowa tutaj siedem", sp, 0.02),  # wrong value, bad slice
+            real_row("w", "zupełnie inne słowa tutaj siedem", sp, 0.02),  # right value, bad slice
+            real_row("k", "zupełnie inne słowa tutaj siedem", sp, 0.02)]  # right value, slice lines up
+    got = run("pl", rows, {"t": "no to jest coś 5", "w": "no to jest coś 7", "k": "zupełnie inne słowa tutaj 7"}, full=True)
+    assert {k: v["reason"] for k, v in got.items()} == {"t": "span_missing", "w": "kept", "k": "kept"}, got
+    assert got["w"].get("wer_flag") is True and "wer_flag" not in got["k"], got
+
+
+def test_synthetic_marker_is_explicit():
+    # red-on-base: a real row without a cer_ext field was treated as synthetic (no slice check); a synthetic row is
+    # one that says so (src / origin "tts" or synthetic=True)
+    sp = [{"text": "7", "kind": "int", "reading": "siedem"}]
+    real = {"id": "r", "text": "zupełnie inne słowa tutaj siedem", "spans": sp, "src": "vox"}
+    syn = dict(row("s", "zupełnie inne słowa tutaj siedem", sp))
+    flag = {"id": "f", "text": "zupełnie inne słowa tutaj siedem", "spans": sp, "synthetic": True}
+    got = run("pl", [real, syn, flag], {i: "no to jest coś 7" for i in "rsf"}, full=True)
+    assert [got[i].get("wer_flag", False) for i in "rsf"] == [True, False, False], got
+
+
+def test_scale_only_with_a_written_scale_word():
+    # red-on-base: any transcript number times / over 1000 matched (a caption "4" passed on a transcript "4000", a
+    # caption "4000" on a transcript "4"); now only with a scale word written next to it
+    b = lambda i, t, rd: row(i, rd, [{"text": t, "kind": "int", "reading": rd}])  # noqa: E731
+    rows = [b("x1", "4", "cztery"), b("x2", "4000", "cztery tysiące"), b("ok1", "4000", "cztery tysiące"),
+            b("ok2", "4 tys.", "cztery tysiące")]
+    got = run("pl", rows, {"x1": "mamy 4000 osób", "x2": "mamy 4 osoby", "ok1": "mamy 4 tysiące osób",
+                           "ok2": "mamy 4000 osób"})
+    assert got == {"x1": "span_missing", "x2": "span_missing", "ok1": "kept", "ok2": "kept"}, got
+    # red-on-base: control (the blind x1000 passed these too): Romanian "de" before the scale word, comma-grouped figures
+    ro = [b("r1", "900.000.000", "nouă sute de milioane"), b("r2", "29.660.000.000", "douăzeci și nouă de miliarde"),
+          b("r3", "900.000.000", "nouă sute de milioane")]
+    got = run("ro", ro, {"r1": "s-au investit 900 de milioane de euro", "r2": "bugetul este de 29,660,000,000 lei",
+                         "r3": "s-au investit 900 de mii de euro"})
+    assert got == {"r1": "kept", "r2": "kept", "r3": "span_missing"}, got
+
+
+def test_reading_words_need_their_place_count():
+    # red-on-base: a span with an empty reading passed unchecked, and a reading word anywhere in the transcript passed
+    # however often the label says it
+    rows = [row("e", "jest tutaj", [{"text": "7", "kind": "int", "reading": ""}]),
+            row("twice", "jeden plus jeden", [{"text": "1", "kind": "int", "reading": "jeden"},
+                                               {"text": "1", "kind": "int", "reading": "jeden"}]),
+            row("onceok", "mam jeden dom", [{"text": "1", "kind": "int", "reading": "jeden"}])]
+    got = run("pl", rows, {"e": "jest tutaj 5", "twice": "jeden plus 2", "onceok": "mam jeden dom"})
+    assert got == {"e": "span_missing", "twice": "span_missing", "onceok": "kept"}, got
 
 
 def test_pl_sv_month_names_and_cents_gap():
@@ -207,6 +259,9 @@ if __name__ == "__main__":
     test_uk_said_forms()
     test_review_negatives()
     test_clock_adjacent_forms_and_real_phone_groups()
-    test_tightened_row_slice_rule_unchanged()
+    test_real_row_slice_wer_and_values()
+    test_synthetic_marker_is_explicit()
+    test_scale_only_with_a_written_scale_word()
+    test_reading_words_need_their_place_count()
     test_pl_sv_month_names_and_cents_gap()
     print("ok")

@@ -1,20 +1,27 @@
 """pl / ro judge (next tier, like the ru judge): the second transcript (sliced to the row span; it writes digits) must
-(1) hold every span's VALUE (caption digits) as a number, or the span's reading as words, and (2) agree with the label's
-non-number words at WER <= 0.25. Writes jr/judge_stats.json + reject_ids; with --upload merges the rejects into
+(1) hold every span's VALUE (caption digits) as a number, or the span's reading as words, checked on EVERY row, and (2)
+for real speech, the tightening's run-scoped cer_ext <= 0.10. The slice's word agreement with the label (WER of the
+non-number words) is a cross-check only: a real row over 0.25 is kept but FLAGGED ("wer_flag" in judge_rows, counted in
+judge_stats "kept_wer_flagged"): on the local sample those rows were slicing / scale-word artefacts of the WER, not label
+errors, and rejecting them dropped ~6% of the real rows. Synthetic rows (census_common.synthetic: the transcript is of
+the whole clip) get the value check only. Writes jr/judge_stats.json + reject_ids; with --upload merges the rejects into
 ml/p3v2/<lang>/reject_ids.txt and writes the judged_<pass>.json marker build4 requires.
 A re-judge with --upload replaces the pass's own rejects in the merged list (other passes keep theirs).
 Work dir: $SPOKEN_FORM_JUDGE_ROOT (default /tmp/spoken_form_judge)/<lang>/<pass>/ with <pass>.jsonl and ext.jsonl.
 usage: judge_plro.py <lang> <pass> [--upload]"""
-import difflib, json, re, subprocess, sys
+import difflib, json, re, sys
 from pathlib import Path
+import os  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import volume_io as V  # noqa: E402
+sys.path.insert(0, str(V.PIPE))
+from census_common import synthetic  # noqa: E402
 lang, name = sys.argv[1], sys.argv[2]
 up = "--upload" in sys.argv
-import os  # noqa: E402
 W = Path(os.environ.get("SPOKEN_FORM_JUDGE_ROOT", "/tmp/spoken_form_judge")) / lang / name
 # this pass's rejects from its previous judge run: a re-judge takes back only these (ids can repeat across passes)
 _OLD_OWN = ({x.strip() for x in open(W / "jr/reject_ids.txt") if x.strip()}
             if (W / "jr/reject_ids.txt").exists() else set())
-PIPE = Path(__file__).resolve().parents[2] / "pipeline"
 ext = {json.loads(l)["id"]: json.loads(l) for l in open(W / "ext.jsonl")}
 WORD = re.compile(r"[^\W\d_]+(?:['’][^\W\d_]+)?", re.U)
 
@@ -56,14 +63,14 @@ def nums(s):
 SCALE_WORD = re.compile(r"(?:тисяч[аіу]?|тысяч[аиу]?|мільйон(?:а|и|ів|у)?|миллион(?:а|ы|ов)?|мільярд(?:а|и|ів|у)?|"
                         r"миллиард(?:а|ы|ов)?|"
                         # 2026-10-17 long-number sets: pl ro sv cs sk hu fi hr bg ("23 miliárd", "600 tisíc", "817 tysięcy")
-                        r"tysi[ąę]c\w*|tisíc\w*|tisuć\w*|tisuć|хиляд\w*|mii|tusen|ezer|tuhat\w*|"
+                        r"tysi[ąę]c\w*|tys|tisíc\w*|tisuć\w*|tisuć|хиляд\w*|mii|tusen|ezer|tuhat\w*|"
                         r"milion\w*|milión\w*|milioan\w*|milijun\w*|милион\w*|miljon\w*|millió\w*|miljoon\w*|mln|"
                         r"miliard\w*|miliárd\w*|milijard\w*|милиард\w*|miljard\w*|milliárd\w*|mld)")
 SCALE_OF = (("мільярд", 1e9), ("миллиард", 1e9), ("мільйон", 1e6), ("миллион", 1e6), ("тисяч", 1e3), ("тысяч", 1e3),
             ("miliard", 1e9), ("miliárd", 1e9), ("milijard", 1e9), ("милиард", 1e9), ("miljard", 1e9), ("milliárd", 1e9), ("mld", 1e9),
             ("milion", 1e6), ("milión", 1e6), ("milioan", 1e6), ("milijun", 1e6), ("милион", 1e6), ("miljon", 1e6), ("millió", 1e6),
             ("miljoon", 1e6), ("mln", 1e6), ("tysi", 1e3), ("tisíc", 1e3), ("tisuć", 1e3), ("хиляд", 1e3), ("mii", 1e3),
-            ("tusen", 1e3), ("ezer", 1e3), ("tuhat", 1e3))
+            ("tusen", 1e3), ("ezer", 1e3), ("tuhat", 1e3), ("tys", 1e3))  # "tys": the Polish abbreviation "4 tys."
 CUR_WORD = re.compile(r"(?:грн|гривн\w*|гривен\w*|долар\w*|доллар\w*|євро|евро|центи?\w*|копій\w*|копе\w*|руб\w*|zł\w*|"
                       r"złot\w*|lei|leu|euro\w*|dolar\w*|\$|€|₴)", re.I)
 
@@ -210,12 +217,41 @@ def alt_ok(sp, et, en, scaled, row_phone="", synthetic=False, row_groups=()):
     return False
 
 
+def scaled_values(en, et, sp_text):
+    """The transcript numbers a span value may match, scale words taken into account only where one is written: x * k
+    when the transcript writes x right before a scale word of factor k ("4 tysięcy" for a caption "4000"; scale_sums,
+    or with the Romanian "de" between them), then / k when the caption span itself carries a scale word of factor k
+    ("4 tys." with a transcript "4000")."""
+    out = set(en)
+    fs = {next(f for st, f in SCALE_OF if w.startswith(st))
+          for w in re.findall(r"[^\W\d_]+", sp_text.lower()) if SCALE_WORD.fullmatch(w)}
+    # a number + scale word with the Romanian linker "de" between them ("900 de milioane"): x * k
+    for m in re.finditer(r"(\d+(?:,\d+)?)\s+de\s+([^\W\d_]+)", et):
+        w = m.group(2).lower()
+        if SCALE_WORD.fullmatch(w):
+            out.add(float(m.group(1).replace(",", ".")) * next(f for st, f in SCALE_OF if w.startswith(st)))
+    # a figure grouped by two or more commas ("29,660,000,000") is one whole number (no decimal has two commas)
+    out |= {float(m.group(0).replace(",", "")) for m in re.finditer(r"(?<![\d,.])\d{1,3}(?:,\d{3}){2,}(?![\d,])", et)}
+    out |= scale_sums(et)
+    return out | {x / f for x in out for f in fs}  # the span's own scale word: "20.000 de milioane" = 20 miliarde
+
+
+def reading_heard(rd, el, label_words):
+    """The span's reading, as whole words, at least as often in the transcript as in the label (a reading word that is
+    also an ordinary word elsewhere in the sentence does not stand in for the number); an empty reading never is."""
+    if not rd.strip():
+        return False
+    lab = " " + " ".join(label_words) + " "
+    return el.count(rd) >= max(1, lab.count(rd))
+
+
 def wer(a, b):
     sm = difflib.SequenceMatcher(None, a, b, autojunk=False)
     return sum(max(i2 - i1, j2 - j1) for t, i1, i2, j1, j2 in sm.get_opcodes() if t != "equal") / max(1, len(a))
 
 
-rej, reasons, rows_out, n = [], {"no_ext": 0, "span_missing": 0, "wer": 0}, [], 0
+rej, reasons, rows_out, n = [], {"no_ext": 0, "span_missing": 0, "cer_ext": 0}, [], 0
+n_wer_flag = 0
 ids_seen = []
 wers = []
 for l in open(W / f"{name}.jsonl"):
@@ -231,6 +267,7 @@ for l in open(W / f"{name}.jsonl"):
         spans = ast.literal_eval(spans)
     en, el = nums(et), " " + " ".join(WORD.findall(et.lower())) + " "
     lw = WORD.findall(r["text"].lower())
+    lab_words = list(lw)
     for s_ in spans:  # drop each span's reading words before the word check
         rw = WORD.findall((s_.get("reading") or "").lower())
         for k in range(len(lw) - len(rw) + 1):
@@ -240,35 +277,38 @@ for l in open(W / f"{name}.jsonl"):
     w = wer(lw, ew); wers.append(w)
     # words: the tightening already measured each kept run against this transcript (cer_ext, run-scoped); the slice
     # here is only a cross-check, and a slice that disagrees badly is a slicing error, not evidence against the row
+    syn = synthetic(r)  # an explicit marker (src / origin tts, synthetic=True), not a missing field
     ce = float(r.get("cer_ext") or 0)
     if ce > 0.10:
-        rej.append(r["id"]); reasons["wer"] += 1; rows_out.append({"id": r["id"], "reason": "cer_ext", "cer_ext": ce}); continue
+        rej.append(r["id"]); reasons["cer_ext"] += 1; rows_out.append({"id": r["id"], "reason": "cer_ext", "cer_ext": ce}); continue
     bad = None
-    # values: only where the slice lines up with the row; a row with no tightening (synthetic speech: the transcript
-    # is of the whole clip, no slice) is always value-checked
-    if w <= 0.25 or "cer_ext" not in r:
-        for s_ in spans:
-            v = nums(s_.get("text", ""))
-            rd = " " + " ".join(WORD.findall((s_.get("reading") or "").lower())) + " "
-            scaled = en | {x / k for x in en for k in (1e3, 1e6, 1e9)} | {x * k for x in en for k in (1e3, 1e6, 1e9)}  # "4 tys" / "4 tysięcy"
-            ph_sp = [x for x in spans if x.get("kind") in ("code", "chain", "phone")]
-            phone = "".join(re.sub(r"\D", "", x.get("text", "")) for x in ph_sp)
-            groups = [g_ for x in ph_sp for g_ in re.findall(r"\d+", x.get("text", ""))]
-            syn = "cer_ext" not in r
-            if strict(s_, phone):  # multi-part values: scattered numbers never count (only the adjacent forms or words)
-                ok = (rd.strip() and rd in el) or alt_ok(s_, et, en, scaled, phone, syn, groups)
-            else:
-                ok = not v or all(x in scaled for x in v) or not rd.strip() or rd in el or alt_ok(
-                    s_, et, en, scaled, phone, syn, groups)
-            if not ok:
-                bad = s_.get("text"); break
+    # values: every span of every row (a slice that disagrees with the row is no reason to skip the check)
+    for s_ in spans:
+        v = nums(s_.get("text", ""))
+        rd = " " + " ".join(WORD.findall((s_.get("reading") or "").lower())) + " "
+        scaled = scaled_values(en, et, s_.get("text", ""))  # "4 tys." / "4 tysięcy": only with a written scale word
+        ph_sp = [x for x in spans if x.get("kind") in ("code", "chain", "phone")]
+        phone = "".join(re.sub(r"\D", "", x.get("text", "")) for x in ph_sp)
+        groups = [g_ for x in ph_sp for g_ in re.findall(r"\d+", x.get("text", ""))]
+        heard = reading_heard(rd, el, lab_words)
+        if strict(s_, phone):  # multi-part values: scattered numbers never count (only the adjacent forms or words)
+            ok = heard or alt_ok(s_, et, en, scaled, phone, syn, groups)
+        else:
+            ok = (v and all(x in scaled for x in v)) or heard or alt_ok(s_, et, en, scaled, phone, syn, groups)
+        if not ok:
+            bad = s_.get("text"); break
     if bad is not None:
         rej.append(r["id"]); reasons["span_missing"] += 1; rows_out.append({"id": r["id"], "reason": "span_missing", "span": bad}); continue
-    rows_out.append({"id": r["id"], "reason": "kept", "wer": round(w, 3)})
+    # words (real speech): a slice that disagrees with the label (WER > 0.25) is flagged for a listen, not rejected (the
+    # values above were checked on it all the same; cer_ext already measured the words run by run)
+    flag = not syn and w > 0.25
+    n_wer_flag += flag
+    rows_out.append({"id": r["id"], "reason": "kept", "wer": round(w, 3)} | ({"wer_flag": True} if flag else {}))
 (W / "jr").mkdir(exist_ok=True)
 wers.sort()
 st = {"lang": lang, "rows": n, "rejected": len(rej), "reject_rate": round(len(rej) / max(1, n), 4), "reasons": reasons,
-      "judge": "plro: tightening cer_ext<=0.10 + value in the aligned slice", "wer_p50": wers[len(wers) // 2] if wers else None,
+      "judge": "plro: tightening cer_ext<=0.10 + every span value in the slice (slice WER > 0.25 flagged)",
+      "kept_wer_flagged": n_wer_flag, "wer_p50": wers[len(wers) // 2] if wers else None,
       "wer_p90": wers[int(.9 * len(wers))] if wers else None}
 json.dump(st, open(W / "jr/judge_stats.json", "w"), indent=1)
 with open(W / "jr/judge_rows.jsonl", "w") as f:
@@ -282,13 +322,13 @@ if up:
     lang_lock = open(W.parent / ".reject_ids.lock", "w")  # the same per-language lock run_judge takes
     fcntl.flock(lang_lock, fcntl.LOCK_EX)
     prev = set()
-    if subprocess.run(["modal", "volume", "get", "--force", "parakeet-spoken-form", f"ml/p3v2/{lang}/reject_ids.txt", str(merged)],
-                      cwd=PIPE, capture_output=True).returncode == 0:
+    # fail closed: a merged list that exists but cannot be read is an error (V.read_shared raises), never an empty start
+    if V.read_shared(f"ml/p3v2/{lang}/reject_ids.txt", merged):
         prev = {x.strip() for x in open(merged) if x.strip()}
     # a re-judge REPLACES this pass's own earlier rejects; other passes' rejects stay, even for an id this pass also
     # holds (ids can repeat across passes, e.g. a variety pass re-cutting a recovery pass's clip)
     allr = sorted((prev - (_OLD_OWN - set(rej))) | set(rej))
     merged.write_text("".join(x + "\n" for x in allr))
-    subprocess.run(["modal", "volume", "put", "--force", "parakeet-spoken-form", str(merged), f"ml/p3v2/{lang}/reject_ids.txt"], cwd=PIPE, check=True, capture_output=True)
-    subprocess.run(["modal", "volume", "put", "--force", "parakeet-spoken-form", str(W / "jr/judge_stats.json"), f"ml/p3v2/{lang}/judged_{name}.json"], cwd=PIPE, check=True, capture_output=True)
+    V.put(merged, f"ml/p3v2/{lang}/reject_ids.txt")
+    V.put(W / "jr/judge_stats.json", f"ml/p3v2/{lang}/judged_{name}.json")
     print(f"{lang}/{name}: uploaded; reject_ids.txt now {len(allr)}")

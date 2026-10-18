@@ -1,7 +1,7 @@
 """Data-balance pieces for the spoken-form mix (pure Python: no Modal, no torch). Three parts:
 
-1. Cut-number crops at every window offset (a GENERATOR). A streaming decoder reads 14.96 s windows every 9.44 s; a number that a
-   window edge cuts must come out as exactly the words audible on each side. From labelled rows with word times
+1. Cut-number crops at every window offset (a GENERATOR). A streaming decoder reads overlapping fixed-length windows; a
+   number that a window edge cuts must come out as exactly the words audible on each side. From labelled rows with word times
    (stitched into streams like ml_p3_core.build_windows), each number reading gets cut positions before it, in every gap
    between its words, inside each of its words (at 1/4 and 3/4 of the word's sound) and after it. Each position gives a
    MIRRORED pair: the window ending at the cut (left) and the window starting there (right), both WIN long where the
@@ -27,9 +27,8 @@ import re
 import unicodedata
 from collections import Counter, defaultdict
 
-EXT_BY = ("ext", "ext_pick")  # spans a second recognizer decided where the CTC did not agree
-
 import ml_p3_core as C
+from census_common import EXT_BY, ext_row, held_unit  # noqa: F401  (one definition, shared with the build and the gate)
 
 # ------------------------------------------------------------------------------------------------ 1. seam crops
 IN_WORD = (0.25, 0.75)  # cut points inside a word's sound span (1/4 -> right side keeps it, 3/4 -> left side keeps it)
@@ -578,7 +577,7 @@ def _read_prompt(r: dict) -> bool:
 
 def _rank(r: dict) -> tuple:
     """Which copy of a duplicate group training keeps: not decided by a second recognizer, then lower CTC CER, then id."""
-    ext = any(sp.get("by") in EXT_BY for sp in r.get("spans") or [])
+    ext = ext_row(r)
     return (ext, r.get("cer_ctc", 1.0) if r.get("cer_ctc") is not None else 1.0, str(r.get("id")))
 
 
@@ -693,16 +692,6 @@ def dedupe(train: list[dict], protected: list[dict] = (), near: bool = True, wit
     out.sort(key=lambda r: order[id(r)])
     rep["train_in"], rep["train_out"] = len(train), len(out)
     return out, {"counts": dict(rep), "removed": why}
-
-
-def held_unit(rid: str) -> str | None:
-    """The held-out unit of a row id (build4 / windows2): the VoxPopuli plenary day or the YODAS video."""
-    rid = str(rid)
-    m = re.match(r"(\d{8})-\d{4}-PLENARY", rid)
-    if m:
-        return "day:" + m.group(1)
-    m = re.match(r"[a-z]{2}\d+_\d+_(.{11})_", rid)
-    return "vid:" + m.group(1) if m else None
 
 
 def take_seam(rows: list[dict], hours: float, rng) -> list[dict]:

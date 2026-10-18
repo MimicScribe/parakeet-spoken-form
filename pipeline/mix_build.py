@@ -19,9 +19,13 @@ import random
 import re
 import subprocess
 import zlib
+from collections import Counter
 
 import numpy as np
 
+from census_common import (EXT_BY, GROUP_CAP, GROUP_CAP_LANG, TEMPLATE_CAP, TEMPLATE_MIN_WORDS, ext_row,  # noqa: F401
+                           ext_span, gate_class, group_cap, group_id, held_unit, span_class, template_key)
+from census_common import synthetic as _synthetic
 from common import NUMBER_WORDS, WRITTEN_FORM
 
 
@@ -363,6 +367,9 @@ _LANG_PART = re.compile(r"^mix4\w*/(p3|win|tts|seam|seam_long|d2anchor|d2_phonef
 def number_share_of(path: str, rows: list | None = None) -> float:
     """Number-bearing share of a mix part's hours. Seam-pair parts are measured on their rows (a half cut before or
     after a reading holds no number word); per-language mix4 parts of ANY language count 1.0; else NUMBER_PART."""
+    src = _bcap_source(path)
+    if src:  # an English capped copy carries its source part's number share
+        return NUMBER_PART.get(src, 1.0)
     path = re.sub(r"^mix4\w+/", "mix4/", path)  # a dry build's dir (build4 mix_dir) counts like mix4
     m = _LANG_PART.match(path)
     if rows is not None and rows and ((m and m.group(1) in ("seam", "seam_long")) or os.path.basename(path).startswith("seam_")) \
@@ -798,17 +805,18 @@ def build3c(vol: str, mp: str = "mp2", mp_repeat: int = 3) -> dict:
         keep = [x for x in src if "stock" not in x or _caption_deletions(x["text"], x["stock"]) == 0]
         _write(f"{vol}/mix3b/{name}_v.jsonl", keep)
         stats[f"{name}_v"] = {"rows": [len(src), len(keep)], "h": [round(_h(src), 2), round(_h(keep), 2)]}
-    json.dump(stats, open(f"{vol}/mix3b/stats_v.json", "w"), indent=1)
+    with open(f"{vol}/mix3b/stats_v.json", "w") as f:
+        json.dump(stats, f, indent=1)
     return stats
 
 
 # ---- wave-1 mix (2026-10-15): spoken-form numbers in de/es/fr/it/nl/pt -----------------------------------------------
 
 WAVE1 = ("de", "es", "fr", "it", "nl", "pt")
-EXT_BY = ("ext", "ext_pick")  # the second recognizer decided where the CTC did not agree (ext_pick: 10-16)
+# EXT_BY (census_common): the span kinds decided mainly by the second transcript, shared with the data gate
 EXT_SHARE = 0.25  # max share of a language's real row hours decided by a second recognizer
-# per class (cap_ext_per_class, fill): a point under the gate's 0.25 -- the gate's classes (scale words, spoken shapes)
-# differ slightly from ext_class (dry build 10-17: es dec 0.254 at a 0.25 build cap)
+# per class (cap_ext_per_class, fill): a point under the gate's 0.25; the classes are the gate's own (ext_class with the
+# row and language = census_common.gate_class), the point is margin for the rows later steps remove
 EXT_SHARE_CLASS = 0.24
 COMMON_KINDS = {"int", "pct", "dec", "ord"}  # number kinds real speech has plenty of; the rest are "rare"
 TTS_SHARE = 0.30  # synthetic speech: at most 30% of a class's (or the windows') hours
@@ -831,10 +839,14 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
             ("tts9ru", "tts9ru_judge"), ("tts9ru2", "tts9ru2_judge"),  # tts9ru/2 (2026-10-17): Russian coverage (ml_tts_ru)
             ("ttsm2", "ttsm2_judge"),  # ttsm2: sv / cs / hu / fi / sk clock times + prices (ml_tts_multi)
             ("ttsm1", "ttsm1_judge"),  # ttsm1: the pl / ro synthetic set
+            # ttsL0/1: LONG numbers (big, phone, price, date, year 1990-2060, big ranges) for pl ro sv cs hu fi sk bg hr;
+            # normal rates, dev by carrier template
             ("ttsL0", "ttsL0_judge"), ("ttsL1", "ttsL1_judge"),
-            ("ttsL2p", "ttsL2p_judge"), ("ttsL2", "ttsL2_judge"))  # ttsL2p/2: ro / bg / fi phones read digit by
-            # digit and hu dates, the reading built in code from the drawn value (not by the LLM)  # ttsL0/1: LONG numbers (big, phone, price, date,
-            # year 1990-2060, big ranges) for pl ro sv cs hu fi sk bg hr; normal rates, dev by carrier template
+            # ttsL2p/2: ro / bg / fi phones read digit by digit and hu dates, the reading built in code from the drawn
+            # value (not by the LLM)
+            ("ttsL2p", "ttsL2p_judge"), ("ttsL2", "ttsL2_judge"),
+            ("ttsES1", "ttsES1_judge"),  # ttsES1: es exact thin values (years 1993 / 1994 / 1998 / 2052, count 79)
+            ("ttsFT1", "ttsFT1_judge"), ("ttsFT2", "ttsFT2_judge"))  # ttsFT1/2: exact-value fills for fr / de / pt / it
 # sets planned against the census's per-value gaps (tts5y: thin year values, normal speaking rates): the share cap
 # applies, the "real speech has enough of this class" cut-off does not (synthetic years and counts
 # are fine within the cap)
@@ -846,7 +858,8 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
 # year values above the bar; like tts6uk its years and counts share the "int" cap, so the cut-off must not zero them
 # ttsm2 (2026-10-17, ml_tts_multi): clock times and prices for the moderate-tier languages, each class planned at or
 # below its real span count so the per-class share cap holds
-TTS_TARGETED = {"tts5y", "tts6uk", "tts7", "tts8", "tts9nl", "tts9ru", "tts9ru2", "ttsm2", "ttsm1", "ttsL0", "ttsL1", "ttsL2p", "ttsL2"}
+TTS_TARGETED = {"tts5y", "tts6uk", "tts7", "tts8", "tts9nl", "tts9ru", "tts9ru2", "ttsm2", "ttsm1", "ttsL0", "ttsL1", "ttsL2p", "ttsL2", "ttsES1",
+                "ttsFT1", "ttsFT2"}
 TTS_AUG_FRAC = 0.6  # share of chosen synthetic rows given a degraded copy instead of the clean audio
 TTS_ENOUGH_H = 0.25  # h of real speech in a class above which no synthetic rows of that class are used
 WF_LABEL = re.compile(r"[0-9$€£¥¢₹₩₽%#/+°²³¹½¼¾⅓⅔&‰]")  # ft_train.WF_CHARS (+ & ‰): never in a spoken-form label
@@ -910,6 +923,10 @@ def consistency_pairs(rows: list[dict], wins: list[dict], lang: str, rng, cap: i
 
 
 TOP_YEAR_SHARE = 0.03  # max share of one year value among a language's year spans in the mix (2026-10-17)
+# the second top-year trim (after the balance caps) aims this far under TOP_YEAR_SHARE: the per-class ext cap that runs
+# after it removes a few more real rows (each removal raises the other years' shares), and the gate reads the share on
+# the written rows, so the trim leaves 0.4 pp of room instead of landing exactly on 3%
+TOP_YEAR_MARGIN = 0.004
 _YEAR = re.compile(r"^(1[89]\d\d|20\d\d)\.?$")
 
 
@@ -918,7 +935,7 @@ def _year_of(sp):
     return int(m.group(1)) if m and sp.get("kind") in ("int", "year", "ord") else None
 
 
-def _cap_top_years(rows: list, share: float, rng) -> tuple:
+def _cap_top_years(rows: list, share: float, rng, mixed_ok=None) -> tuple:
     """Leave out rows whose every number span is an over-represented year value until no value exceeds `share` of the
     year spans (rows with any other number stay: they carry other classes)."""
     from collections import Counter
@@ -938,6 +955,12 @@ def _cap_top_years(rows: list, share: float, rng) -> tuple:
         only = [(x["id"], len(x["spans"])) for x in rows if x["id"] not in drop and x.get("spans")
                 and all(_year_of(sp) == y for sp in x["spans"])]
         rng.shuffle(only)
+        if mixed_ok is not None:  # then rows that hold the year next to other numbers, when mixed_ok(row) allows it
+            mixed = [(x["id"], sum(_year_of(sp) == y for sp in x["spans"])) for x in rows if x["id"] not in drop
+                     and x.get("spans") and any(_year_of(sp) == y for sp in x["spans"])
+                     and not all(_year_of(sp) == y for sp in x["spans"]) and mixed_ok(x)]
+            rng.shuffle(mixed)
+            only += mixed
         k = 0
         while n > t and k < len(only):
             i, per = only[k]
@@ -947,56 +970,20 @@ def _cap_top_years(rows: list, share: float, rng) -> tuple:
 
 # balance caps (the data gate's variety rules, applied in the build): <= TEMPLATE_CAP real number rows per digit-masked
 # caption template, <= GROUP_CAP per video / session (English YouTube: 30). Rows over a cap leave the MIX (they stay on
-# disk); within a template / group the rows with a rare number class are kept first. Mirrors data_gate.group_id /
-# group_cap / the template key.
-TEMPLATE_CAP = 3
-GROUP_CAP = 13
-GROUP_CAP_LANG = {"en": {"yt": 30}}
-
-
-def group_id(r: dict) -> str:
-    """Video (YODAS), parliament session, FLEURS sentence or Common Voice sentence: the unit of speaker / topic variety."""
-    i = str(r.get("id", ""))
-    m = re.match(r"^[a-z]{2}\d{3}_\d+_(.{11})_", i)
-    if m:
-        return "yt:" + m.group(1)
-    if "PLENARY" in i or re.match(r"^\d{8}-", i):
-        return "ep:" + i.split("_")[0]
-    m = re.match(r"^fleurs\w*?_(\d+)_", i)
-    if m:
-        return "fl:" + m.group(1)
-    if i.startswith("cv22_"):
-        t = str(r.get("caption") or r.get("text") or "")
-        return "cv:" + " ".join(re.findall(r"[^\W_]+", t.lower().replace("\u2019", "'")))
-    return "id:" + i
-
-
-def group_cap(lang: str, g: str) -> int:
-    return GROUP_CAP_LANG.get(lang, {}).get(g.split(":", 1)[0], GROUP_CAP)
-
-
-TEMPLATE_MIN_WORDS = 3  # a masked caption with fewer letter words ("#.", "# euro.") is a short answer, not a template
-
-
-def template_key(r: dict) -> str:
-    """data_gate's digit-masked caption template; "" (not capped) when it has < TEMPLATE_MIN_WORDS letter words."""
-    t = re.sub(r"\d+", "#", str(r.get("caption", "")).lower()).strip()
-    return t if len(re.findall(r"[^\W\d_]+", t)) >= TEMPLATE_MIN_WORDS else ""
-
-
-def _synthetic(r: dict) -> bool:
-    return r.get("src") == "tts" or str(r.get("origin", "")).startswith("tts") or bool(r.get("synthetic"))
+# disk); within a template / group the rows with a rare number class are kept first. group_id / group_cap /
+# template_key / TEMPLATE_CAP come from census_common, which the data gate imports too.
 
 
 def _rare(r: dict) -> bool:
     return any(sp.get("kind") not in COMMON_KINDS for sp in r.get("spans") or [])
 
 
-def _span_values(r: dict) -> list:
-    """("year", v) / ("int", v) keys of a row's integer spans (caption digits), for the thin-value protection."""
+def _span_values(r: dict, lang: str = "") -> list:
+    """("year", v) / ("int", v) keys of a row's integer spans (caption digits), for the thin-value protection; with
+    `lang` in the data gate's classes (a day number said with its month is a date, not a count)."""
     out = []
     for sp in r.get("spans") or []:
-        c = ext_class(sp)
+        c = ext_class(sp, r, lang)
         d = re.sub(r"\D", "", str(sp.get("text", "")))
         if c == "year" and d:
             out.append(("year", int(d)))
@@ -1022,20 +1009,23 @@ def _fill_floor(v) -> int:
     return FILL_FLOOR["int"]
 
 
-def _ext_ok(rows: list):
-    """A running per-class ext-share check for fill_thin: adding a row keeps every class's ext spans <= EXT_SHARE."""
+def _ext_ok(rows: list, lang: str = ""):
+    """A running per-class ext-share check for fill_thin: adding a row keeps every class's ext spans <= EXT_SHARE_CLASS
+    (classes as the data gate counts them when `lang` is given). Returns ok(row) -> bool; True also records the row."""
     from collections import Counter
     n, e = Counter(), Counter()
     for x in rows:
         for sp in x.get("spans") or []:
-            n[ext_class(sp)] += 1
-            e[ext_class(sp)] += sp.get("by") in EXT_BY
+            c = ext_class(sp, x, lang)
+            n[c] += 1
+            e[c] += ext_span(sp)
 
     def ok(x) -> bool:
         dn, de = Counter(), Counter()
         for sp in x.get("spans") or []:
-            dn[ext_class(sp)] += 1
-            de[ext_class(sp)] += sp.get("by") in EXT_BY
+            c = ext_class(sp, x, lang)
+            dn[c] += 1
+            de[c] += ext_span(sp)
         if any(de[c] and e[c] + de[c] > EXT_SHARE_CLASS * (n[c] + dn[c]) for c in dn):
             return False
         n.update(dn); e.update(de)
@@ -1043,31 +1033,67 @@ def _ext_ok(rows: list):
     return ok
 
 
-def fill_thin(rows: list, pool: list, rng, top_share: float = TOP_YEAR_SHARE, ok=None) -> tuple:
-    """Add pool rows (judged rows a cap took out) that hold a year (1990-2060) or 0-100 count still under its gate floor,
-    until it is met; a row is added only if no year value then exceeds `top_share` of the year spans."""
+def _caps_ok(rows: list, lang: str, template_cap: int = TEMPLATE_CAP):
+    """A running template / session cap check for fill_thin, counted as balance_caps and the data gate count (real rows
+    with number spans): adding a row keeps its template at <= template_cap rows and its video / session at <= its group
+    cap. Rows already over a cap (rare-class rows balance_caps kept) stay; nothing more joins them.
+    Returns (fits(row) -> bool, add(row))."""
     from collections import Counter
-    cnt = Counter(v for x in rows for v in _span_values(x))
+    nt, ng = Counter(), Counter()
+    counted = lambda r: r.get("spans") and not _synthetic(r)  # noqa: E731
+    for x in rows:
+        if counted(x):
+            nt[template_key(x)] += 1
+            ng[group_id(x)] += 1
+
+    def fits(x) -> bool:
+        if not counted(x):
+            return True
+        t, g = template_key(x), group_id(x)
+        return not ((t and nt[t] + 1 > template_cap) or (not g.startswith("id:") and ng[g] + 1 > group_cap(lang, g)))
+
+    def add(x):
+        if counted(x):
+            nt[template_key(x)] += 1
+            ng[group_id(x)] += 1
+    return fits, add
+
+
+def fill_thin(rows: list, pool: list, rng, top_share: float = TOP_YEAR_SHARE, ok=None, lang: str = "",
+              caps: bool = True) -> tuple:
+    """Add pool rows (judged rows a cap took out) that hold a year (1990-2060) or 0-100 count still under its gate floor,
+    until it is met; a row is added only if no year value then exceeds `top_share` of the year spans, ok(row) allows it
+    (the ext-share check) and, with `caps`, its template and video / session stay within the balance caps (_caps_ok)."""
+    from collections import Counter
+    cnt = Counter(v for x in rows for v in _span_values(x, lang))
+    cap_fits, cap_add = _caps_ok(rows, lang) if caps else (None, None)
     years = sum(c for (k, _), c in cnt.items() if k == "year")
     pool = list(pool)
     rng.shuffle(pool)
     added, out = 0, list(rows)
+    n_cap = 0
     for x in pool:
-        vs = _span_values(x)
+        vs = _span_values(x, lang)
         if not any(cnt[v] < _fill_floor(v) for v in vs):
             continue
         new = Counter(vs)
         ny = years + sum(c for (k, _), c in new.items() if k == "year")
         if any(cnt[v] + c > top_share * ny for v, c in new.items() if v[0] == "year"):
             continue  # one of its years would pass the 3% top-year share
+        if cap_fits is not None and not cap_fits(x):
+            n_cap += 1
+            continue  # it would put its template / session over the cap the gate checks
         if ok is not None and not ok(x):
             continue
+        if cap_add is not None:
+            cap_add(x)
         out.append(x)
         cnt.update(new)
         years = ny
         added += 1
     short = sorted(f"{k}{x}" for (k, x), c in cnt.items() if c < _fill_floor((k, x)) - 2 and k == "year")
-    return out, {"added": added, "still_short_years": short[:20]}
+    return out, {"added": added, "skipped_over_cap": n_cap, "still_short_years": short[:20]}
+
 
 
 def balance_caps(rows: list, lang: str, rng, template_cap: int = TEMPLATE_CAP, use_groups: bool = True) -> tuple:
@@ -1080,8 +1106,8 @@ def balance_caps(rows: list, lang: str, rng, template_cap: int = TEMPLATE_CAP, u
     # thin VALUES are protected like rare classes (dry build 10-17: the session cap cost es its "every 1990-2030 >= 40"):
     # a row holding a year value or a 0-100 count that the language has few of is never capped out
     from collections import Counter
-    vc = Counter(v for x in rows for v in _span_values(x))
-    thin = lambda r: any(vc[v] <= _thin_floor(v) for v in _span_values(r))  # noqa: E731
+    vc = Counter(v for x in rows for v in _span_values(x, lang))
+    thin = lambda r: any(vc[v] <= _thin_floor(v) for v in _span_values(r, lang))  # noqa: E731
     order.sort(key=lambda i: not _rare(rows[i]))
     counted = lambda r: r.get("spans") and not _synthetic(r)  # noqa: E731
     out_t, out_g, nt, ng = set(), set(), {}, {}
@@ -1127,8 +1153,20 @@ _EN_NUM = re.compile(r"\b(?:zero|oh|one|two|three|four|five|six|seven|eight|nine
                      r"twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|and|point))*\b", re.I)
 
 
-def en_bcap_path(path: str) -> str:
+def en_bcap_path(path: str, mix_dir: str = "mix4") -> str:
+    """Where en_balance writes a part's capped copy: next to the source for the mix4 build, under <mix_dir>/en_bcap/
+    for a build into another dir (a candidate mix never overwrites the copies the mix4 build uses)."""
+    if mix_dir and mix_dir != "mix4":
+        return f"{mix_dir}/en_bcap/{os.path.basename(path)[:-6]}_bcap.jsonl"
     return path[:-6] + "_bcap.jsonl"
+
+
+def _bcap_source(path: str) -> str | None:
+    """The EN_REAL_PARTS source of a _bcap copy path (either location), else None."""
+    for p in EN_REAL_PARTS:
+        if path == p[:-6] + "_bcap.jsonl" or (path.endswith("/en_bcap/" + os.path.basename(p)[:-6] + "_bcap.jsonl")):
+            return p
+    return None
 
 
 def _en_group(r: dict) -> str:
@@ -1192,6 +1230,55 @@ def _en_values(text: str) -> list:
     return out
 
 
+def _en_years(vals) -> list:
+    return [v for v in vals if 1800 <= v <= 2099]
+
+
+def en_top_year_trim(rows: dict, gone: set, flat: list, other_years, share: float, tparts=EN_TRIM_PARTS) -> tuple:
+    """The second top-year trim of the non-English build (build4 after the balance caps), for the English capped copies:
+    the caps and the share trim shrink the year spans, so a top year creeps back over 3%. Year values are counted over
+    the kept real crops (rows minus `gone`) plus `other_years` (a Counter: the other English parts of the listing, e.g.
+    the synthetic sets). While a year is over `share`, crops of the YouTube trim parts that hold it leave: crops whose
+    every number is that year first, then crops holding it beside other numbers; never a rare-class crop, never one
+    holding a value at its _en_floor. Returns (cut {(part, i)}, {year: {"before", "after", "rows_out"}})."""
+    from collections import Counter
+
+    rank = {p: k for k, p in enumerate(tparts)}
+    vals = {pi: _en_values(rows[pi[0]][pi[1]].get("text", "")) for pi in flat if pi not in gone}
+    cnt = Counter(other_years)
+    allv = Counter(other_years)
+    for v in vals.values():
+        cnt.update(_en_years(v))
+        allv.update(v)
+    total = sum(cnt.values())
+    cut, st = set(), {}
+    if not total:
+        return cut, st
+    over = sorted((y for y, n in cnt.items() if n > share * total), key=lambda y: -cnt[y])
+    # one fixed per-value limit t, solved so the capped values sit at `share` of the year spans left (as _cap_top_years):
+    # no cascade onto values that were under the share to begin with
+    t = share * total
+    for _ in range(5):
+        t = share * (total - sum(max(0, cnt[y] - t) for y in over))
+    for y in over:
+        n0 = cnt[y]
+        cand = [pi for pi, v in vals.items() if pi not in cut and pi[0] in rank and y in v and not _en_rare(rows[pi[0]][pi[1]])]
+        cand.sort(key=lambda pi: (not all(x == y for x in _en_years(vals[pi])), rank[pi[0]], pi))
+        k = 0
+        for pi in cand:
+            if cnt[y] <= t:
+                break
+            need = Counter(vals[pi])
+            if any(allv[v] - c < _en_floor(v) for v, c in need.items()):
+                continue
+            cut.add(pi)
+            k += 1
+            ny = _en_years(vals[pi])
+            cnt.subtract(Counter(ny)); allv.subtract(need)
+        st[y] = {"before": n0, "after": cnt[y], "rows_out": k}
+    return cut, st
+
+
 def _en_value_trim(rows: dict, out: set, flat: list, tparts: list, done, year_real_floor: int, chunk: int = 400):
     """Value-aware share trim: common-class crops of the YouTube parts leave, the most over-represented values first
     (and, inside a value, the videos with the most crops first; the top-up before the older mix3b crops), while every
@@ -1247,7 +1334,8 @@ def _en_value_trim(rows: dict, out: set, flat: list, tparts: list, done, year_re
 
 def en_balance(vol: str, mix: list, seed: int = 43, band: tuple = (0.35, 0.40), target: float = 0.39,
                non_en: tuple = (), write: bool = False, trim_parts: tuple = EN_TRIM_PARTS, fixed_n: int | None = None,
-               out_dir: str = "", value_aware: bool = True, year_real_floor: int = EN_YEAR_REAL_FLOOR) -> dict:
+               out_dir: str = "", value_aware: bool = True, year_real_floor: int = EN_YEAR_REAL_FLOOR,
+               bcap_dir: str = "mix4") -> dict:
     """English balance for the v4 mix (2026-10-17), on the real span parts (EN_REAL_PARTS) as `mix` lists them:
     1. the data gate's caps across those parts jointly: <= TEMPLATE_CAP crops per number-masked label, <= GROUP_CAP_LANG
        rows per YouTube video (30) and GROUP_CAP per parliament session (13); rare-class crops kept first;
@@ -1262,8 +1350,7 @@ def en_balance(vol: str, mix: list, seed: int = 43, band: tuple = (0.35, 0.40), 
     rng = random.Random(seed)
     dry = lambda p: re.sub(r"^mix4\w+/", "mix4/", p)  # noqa: E731  (a dry build's dir is non-English like mix4)
     en_mix = [m for m in mix if not dry(m[0]).startswith(non_en)] if non_en else list(mix)
-    orig = {en_bcap_path(p): p for p in EN_REAL_PARTS}  # a mix listing the _bcap copies is judged on their sources
-    en_mix = [(orig.get(m[0], m[0]),) + tuple(m[1:]) for m in en_mix]
+    en_mix = [((_bcap_source(m[0]) or m[0]),) + tuple(m[1:]) for m in en_mix]  # _bcap copies: judged on their sources
     real = [p for p in EN_REAL_PARTS if any(m[0] == p for m in en_mix)]
     rows = {p: _rows(f"{vol}/{p}") for p in real}
     cache = {}
@@ -1307,7 +1394,7 @@ def en_balance(vol: str, mix: list, seed: int = 43, band: tuple = (0.35, 0.40), 
 
     before = share(set())
     capped = share(out)
-    trim, n_per_video = set(), None
+    trim, n_per_video, vst = set(), None, None
     tparts = [p for p in trim_parts if p in rows]
     if (fixed_n is not None or capped["share"] > band[1]) and tparts and value_aware and fixed_n is None:
         trim, vst = _en_value_trim(rows, out, flat, tparts, lambda c: share(out | c)["share"] <= target,
@@ -1335,11 +1422,23 @@ def en_balance(vol: str, mix: list, seed: int = 43, band: tuple = (0.35, 0.40), 
                 hi = mid - 1
         n_per_video = lo
         trim = cut_at(lo)
+    # the same second top-year trim build4 gives the other languages (TOP_YEAR_SHARE - TOP_YEAR_MARGIN), counted over
+    # the kept real crops and every other English part of the listing that holds numbers
+    from collections import Counter as _C
+    other_years = _C()
+    for path, _hrs, _t in en_mix:
+        if path not in rows and number_share_of(path) > 0:
+            for x in cache.setdefault(path, _rows(f"{vol}/{path}")):
+                other_years.update(_en_years(_en_values(x.get("text", ""))))
+    ytrim, yst = en_top_year_trim(rows, out | trim, flat, other_years, TOP_YEAR_SHARE - TOP_YEAR_MARGIN,
+                                  tuple(p for p in trim_parts if p in rows))
+    trim |= ytrim
     after = share(out | trim)
     gone = out | trim
     st = {"share_before": before, "share_after_caps": capped, "share_after": after, "band": list(band),
           "in_band": band[0] <= after["share"] <= band[1], "caps_out": why,
-          "common_per_video": n_per_video, "value_trim": vst if value_aware and fixed_n is None and trim else None,
+          "common_per_video": n_per_video, "value_trim": vst,
+          "top_year_trim": {str(y): v for y, v in yst.items()}, "top_year_trim_rows": len(ytrim),
           "trim_rows": len(trim), "trim_h": round(_h([rows[p][i] for p, i in trim]), 2),
           "parts": {p: {"rows": [len(rows[p]), len(rows[p]) - sum(1 for q, _ in gone if q == p)],
                         "h": [round(_h(rows[p]), 2), round(_h([x for i, x in enumerate(rows[p]) if (p, i) not in gone]), 2)]}
@@ -1347,7 +1446,7 @@ def en_balance(vol: str, mix: list, seed: int = 43, band: tuple = (0.35, 0.40), 
     assert not any(_en_rare(rows[p][i]) for p, i in trim), "the share trim must never take a rare-class crop"
     if write:
         for p in real:
-            _write(f"{out_dir or vol}/{en_bcap_path(p)}", [x for i, x in enumerate(rows[p]) if (p, i) not in gone])
+            _write(f"{out_dir or vol}/{en_bcap_path(p, bcap_dir)}", [x for i, x in enumerate(rows[p]) if (p, i) not in gone])
     return st
 
 
@@ -1385,33 +1484,33 @@ def _one_per_id(paths: list) -> tuple:
         out.append(cands[0])
     return out, {"dup_copies": n_dup, "dup_audio_mismatch": bad}
 
-def ext_class(sp: dict) -> str:
-    """data_gate's span class (span_class): an int is a year (4-digit 1800-2099 caption token), int_small (< 1000) or
-    int_big; every other kind is its own class."""
-    k, t = sp.get("kind", "?"), str(sp.get("text", "")).strip()
-    if k != "int":
-        return k
-    if re.fullmatch(r"\d{4}", t) and 1800 <= int(t) <= 2099:
-        return "year"
-    d = re.sub(r"[\s.,'\u00a0\u202f\u2019]", "", t)
-    if d.isdigit():
-        return "int_small" if int(d) < 1000 else "int_big"
-    return "int_other"
+def ext_class(sp: dict, r: dict | None = None, lang: str = "") -> str:
+    """The data gate's class of a span: with the row and its language exactly the gate's (census_common.gate_class:
+    spoken dates / clock times / prices, suffix and scale rules), else the caption-token class (census_common.span_class:
+    year 1800-2099, year_early 1100-1799, int_small < 1000, int_big, int_other; every other kind is its own class)."""
+    if r is not None and lang:
+        return gate_class(r, sp, lang)
+    return span_class(sp)[0]
 
 
-def cap_ext_per_class(rows: list, share: float, rng, min_spans: int = 20) -> tuple:
-    """Second-recognizer spans (by in EXT_BY) <= `share` of each class's spans, as data_gate checks it (per class, not
-    per language): rows holding an ext span of a class over the cap leave the mix (random order) until every class
-    with >= min_spans spans is at or under it. Returns (rows, {class: [ext share before, after], ...})."""
+def cap_ext_per_class(rows: list, share: float, rng, min_spans: int = 20, lang: str = "", extra=None) -> tuple:
+    """Second-recognizer spans (census_common.EXT_BY) <= `share` of each class's spans, as data_gate checks it (per
+    class, not per language, in the gate's classes when `lang` is given): rows holding an ext span of a class over the cap
+    leave the mix (random order) until every class with >= min_spans spans is at or under it. extra = {class: spans}
+    of rows the gate counts beside these (the chosen synthetic rows: never ext, but they make a class reach min_spans
+    and they add to its denominator). Returns (rows, {"rows_out", "classes": {class: [share before, after]},
+    "still_over": {class: share}}); still_over lists a class this cap could not bring under `share`."""
     from collections import Counter
 
+    extra = Counter(extra or {})
+
     def tally(rs):
-        n, e = Counter(), Counter()
+        n, e = Counter(extra), Counter()
         for x in rs:
             for sp in x.get("spans") or []:
-                c = ext_class(sp)
+                c = ext_class(sp, x, lang)
                 n[c] += 1
-                e[c] += sp.get("by") in EXT_BY
+                e[c] += ext_span(sp)
         return n, e
 
     n0, e0 = tally(rows)
@@ -1423,20 +1522,57 @@ def cap_ext_per_class(rows: list, share: float, rng, min_spans: int = 20) -> tup
             break
         for c in over:
             idx = [i for i, x in enumerate(rows) if i not in out
-                   and any(ext_class(sp) == c and sp.get("by") in EXT_BY for sp in x.get("spans") or [])]
+                   and any(ext_class(sp, x, lang) == c and ext_span(sp) for sp in x.get("spans") or [])]
             rng.shuffle(idx)
             ec, nc = e[c], n[c]
             for i in idx:
                 if ec <= share * nc:
                     break
-                k = [sp for sp in rows[i].get("spans") or [] if ext_class(sp) == c]
-                ec -= sum(sp.get("by") in EXT_BY for sp in k)
+                k = [sp for sp in rows[i].get("spans") or [] if ext_class(sp, rows[i], lang) == c]
+                ec -= sum(ext_span(sp) for sp in k)
                 nc -= len(k)
                 out.add(i)
     kept = [x for i, x in enumerate(rows) if i not in out]
     n1, e1 = tally(kept)
     st = {c: [round(e0[c] / n0[c], 3), round(e1[c] / max(n1[c], 1), 3)] for c in n0 if e0[c] and n0[c] >= min_spans}
-    return kept, {"rows_out": len(out), "classes": st}
+    still = {c: round(e1[c] / n1[c], 3) for c in n1 if n1[c] >= min_spans and e1[c] > share * n1[c]}
+    return kept, {"rows_out": len(out), "classes": st, "still_over": still}
+
+
+GATE_EXT_SHARE = 0.25  # data_gate: ext share per class (classes with >= 20 spans)
+GATE_TOP_YEAR = 0.03  # data_gate: top year value <= 3% of the year spans
+
+
+def post_build_check(rows: list, syn: list, lang: str) -> dict:
+    """The data gate's checks that the build's caps decide, recomputed on a built language (real rows `rows` + chosen
+    synthetic rows `syn`, the gate's p3_ + tts_ parts) with the gate's own classes and keys (census_common): ext share
+    per class, rows over the template cap, videos / sessions over the group cap, top year value. A report:
+    eval/quality/data_gate.py stays the gate. Returns {..., "fail": [check names]}."""
+    cls_n, cls_e, years = Counter(), Counter(), Counter()
+    nt, ng = Counter(), Counter()
+    for x in list(rows) + [dict(y, synthetic=True) for y in syn]:
+        sps = x.get("spans") or []
+        if sps and not _synthetic(x):
+            t = template_key(x)
+            if t:
+                nt[t] += 1
+            ng[group_id(x)] += 1
+        for sp in sps:
+            c = ext_class(sp, x, lang)
+            cls_n[c] += 1
+            cls_e[c] += ext_span(sp)
+            if c == "year":
+                years[span_class(sp)[1]] += 1
+    ext = {c: round(cls_e[c] / cls_n[c], 3) for c in cls_n if cls_n[c] >= 20 and cls_e[c]}
+    tmpl = sum(c - TEMPLATE_CAP for c in nt.values() if c > TEMPLATE_CAP)
+    grp = sum(1 for g, c in ng.items() if not g.startswith("id:") and c > group_cap(lang, g))
+    top = max(years.values(), default=0) / max(1, sum(years.values()))
+    fail = [f"{c} ext share {v}" for c, v in ext.items() if v > GATE_EXT_SHARE]
+    fail += [f"rows over the template cap {tmpl}"] if tmpl else []
+    fail += [f"groups over the cap {grp}"] if grp else []
+    fail += [f"top year {top:.3f}"] if top > GATE_TOP_YEAR else []
+    return {"ext_share": ext, "rows_over_template_cap": tmpl, "groups_over_cap": grp, "top_year": round(top, 4),
+            "fail": fail}
 
 
 SEAM_FILES = ("seam", "seam_b")  # seam_crops outputs build4 reads: tag "" and the top-up run (tag "_b", seed 2)
@@ -1513,14 +1649,15 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
     - seam_long_h > 0: mix4/seam_long_<lang>.jsonl, long-number seam pairs (<lang>/seam_long.jsonl: same row format and
       the same parent filters as seam pairs, whole pairs, <= seam_long_h hours; its weight is the listing's
       seam_long_repeat in modal_app.retrain3_mix_v4).
-    Always (2026-10-17): a window / seam pair with a parent row decided by a second recognizer (EXT_BY) or a parent that
-    is held out NOW (the held-out carve can move after windows were built) leaves the mix; a language in `langs` with
+    Always (2026-10-17): a window / seam pair with a parent row decided by a second recognizer (EXT_BY), a parent a cap
+    took out of training (cap_out: rows_h, the ext allowance and per-class ext cap, the top-year trims, the balance caps,
+    dedupe; stats cap_out_dropped) or a parent that is held out NOW (the held-out carve can move after windows were
+    built) leaves the mix; a language in `langs` with
     no labelled rows keeps its mix4/d2 digit rows (it gets no spoken-form rows to replace them).
     - plain_share > 0: mix4/plain_<lang>.jsonl, number-free real rows (plain_glob, stock labels) up to number-free /
       (number-free + number) = plain_share per language, look-alike controls first (ml_balance.pick_plain)."""
     import ml_balance as B
 
-    rng = random.Random(seed)
     stats = {"langs": {}}
     os.makedirs(f"{vol}/{mix_dir}", exist_ok=True)
     # a language's D2 digit rows leave only when it has labelled spoken-form rows (rows*.jsonl) to replace them
@@ -1555,6 +1692,8 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         _write(f"{vol}/{mix_dir}/{os.path.basename(src)}", kept)
         stats[os.path.basename(src)] = {"rows": [len(rows_), len(kept)], "h": [round(_h(rows_), 2), round(_h(kept), 2)]}
     for lang in langs:
+        # one generator per language: a language's draws never depend on which languages were built before it
+        rng = random.Random(f"{seed}-{lang}")
         base = f"{vol}/ml/p3v2/{lang}"
         hp, rp = f"{vol}/ml/p3v2/heldout_{lang}.txt", f"{base}/reject_ids.txt"
         assert os.path.exists(hp), f"{lang}: held-out list missing"  # review H3: never silently skip these
@@ -1564,12 +1703,12 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         # validation-only passes (val_*.jsonl, e.g. VoxPopuli dev/test): judged like every pass, never trained; their
         # ids (and below their days / videos) join the held-out set
         val = _rows(f"{base}/val_*.jsonl")
-        for pth in glob.glob(f"{base}/val_*.jsonl"):
+        for pth in sorted(glob.glob(f"{base}/val_*.jsonl")):
             name = os.path.basename(pth)[:-6]
             assert allow_no_judge or os.path.exists(f"{base}/judged_{name}.json"), f"{lang}: {name} was never judged"
         held |= {x["id"] for x in val}
         # every pass must have been judged (marker written by the judge step)
-        for pth in glob.glob(f"{base}/rows*.jsonl"):
+        for pth in sorted(glob.glob(f"{base}/rows*.jsonl")):
             name = os.path.basename(pth)[:-6]
             assert allow_no_judge or os.path.exists(f"{base}/judged_{name}.json"), f"{lang}: {name} was never judged"
         rows, dup = _one_per_id(sorted(glob.glob(f"{base}/rows*.jsonl")))
@@ -1577,14 +1716,10 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         sfx = lambda i: (re.search(r"_(\d{8}-\d{2}:\d{2}:\d{2}_\d+)$", str(i)) or [None, None])[1]  # noqa: E731
         held_sfx = {sfx(i) for i in held} - {None}
         held |= {x["id"] for x in rows if sfx(x["id"]) in held_sfx}
-        # S5: the held-out unit is the YODAS video, not the utterance: rows from a held-out video stay out too
-        vid = lambda i: (re.match(r"[a-z]{2}\d+_\d+_(.{11})_", str(i)) or [None, None])[1]  # noqa: E731
-        held_vid = {vid(i) for i in held} - {None}
-        held |= {x["id"] for x in rows if vid(x["id"]) in held_vid}
-        # review H2: and the VoxPopuli plenary day (leakage check 2026-10-15: the safe unit)
-        day = lambda i: (re.match(r"(\d{8})-\d{4}-PLENARY", str(i)) or [None, None])[1]  # noqa: E731
-        held_day = {day(i) for i in held} - {None}
-        held |= {x["id"] for x in rows if day(x["id"]) in held_day}
+        # the held-out unit is the YODAS video or the parliament day (census_common.held_unit, as the carve and the
+        # dedupe count it), not the utterance: every row of a held-out video / day stays out too
+        held_u = {held_unit(i) for i in held} - {None}
+        held |= {x["id"] for x in rows if held_unit(x["id"]) in held_u}
         for x in rows:
             assert "num_chars" in x, f"{lang}: P3 row without num_chars: {x['id']}"
             assert not WF_LABEL.search(x["text"]), f"{lang}: symbol in label: {x['text'][:80]}"
@@ -1594,23 +1729,24 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         tr = [x for x in rows if x["id"] not in held and x["id"] not in rej]
         held_dup = set()  # training ids removed for duplicating a protected row (their windows / pairs go too)
         if dedupe:
-            part = {x["id"]: os.path.basename(p)[:-6] for p in glob.glob(f"{base}/rows*.jsonl") for x in _rows(p)}
+            part = {x["id"]: os.path.basename(p)[:-6] for p in sorted(glob.glob(f"{base}/rows*.jsonl")) for x in _rows(p)}
             # this build's synthetic dev rows (held-out voices), read from the sets, not last build's mix4 copy
             tts_dev = [x for tag, _ in TTS_SETS for x in _rows(f"{vol}/ml/{tag}/{lang}/rows.jsonl") if x.get("split") == "dev"]
             prot = [x for x in rows + val if x["id"] in held] + tts_dev
             for pat in protected_globs:
                 prot += _rows(f"{vol}/{pat.format(lang=lang)}")
             protect[lang] = prot
-            held_units |= {B.held_unit(i) for i in held} - {None}
+            held_units |= held_u
             tr, drep = B.dedupe(tr, prot, part_of=lambda x: part.get(x["id"], "?"))
             held_dup = {i for i, w in drep["removed"].items() if w.startswith("heldout")}
             stats.setdefault("dedupe", {})[lang] = {"rows": drep["counts"]}
+        cand_ids = {x["id"] for x in tr}  # every id that could train; the ones the caps below remove go into cap_out
         rng.shuffle(tr)
         # rare classes first (census 2026-10-15: rare cells were thin while plain integers filled the cap)
         tr = sorted(tr, key=lambda x: not any(sp["kind"] not in COMMON_KINDS for sp in x.get("spans", [])))
-        # rows whose reading a second recognizer decided (span by == "ext") have one acoustic check
+        # rows a span of which a second recognizer decided (census_common.EXT_BY) have one acoustic check
         # for the value: at most EXT_SHARE of the language's real row hours, never in windows or held-out
-        ext = [x for x in tr if any(sp.get("by") in EXT_BY for sp in x.get("spans", []))]
+        ext = [x for x in tr if ext_row(x)]
         ext_ids = {x["id"] for x in ext}
         tr = [x for x in tr if x["id"] not in ext_ids]
         tr = _take(tr, rows_h)
@@ -1618,13 +1754,13 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         ext = sorted(ext, key=lambda x: not any(sp["kind"] not in COMMON_KINDS for sp in x.get("spans", [])))
         tr += _take(ext, EXT_SHARE * _h(tr) / (1 - EXT_SHARE))
         # 2026-10-17: the gate checks the ext share PER CLASS (de dec 0.36, int_big 0.28-0.30 under the language cap)
-        tr, xst = cap_ext_per_class(tr, EXT_SHARE_CLASS, random.Random(f"{seed}-extcls-{lang}"))
+        tr, xst = cap_ext_per_class(tr, EXT_SHARE_CLASS, random.Random(f"{seed}-extcls-{lang}"), lang=lang)
         stats.setdefault("ext_per_class", {})[lang] = xst
         # 2026-10-17: no single year value above TOP_YEAR_SHARE of the language's year spans (2020 was 4-6%);
         # only rows whose every number is that year leave this mix (they stay on disk)
         n_tr = {x["id"] for x in tr}
         tr, ycap = _cap_top_years(tr, TOP_YEAR_SHARE, random.Random(f"{seed}-years-{lang}"))
-        year_out = n_tr - {x["id"] for x in tr}  # their windows / seam pairs leave too (review 04:50: windows bypassed the cap)
+        year_out = n_tr - {x["id"] for x in tr}  # (their windows / seam pairs leave with every other capped parent: cap_out)
         stats.setdefault("year_cap", {})[lang] = ycap
         if balance:
             before_caps = tr
@@ -1636,19 +1772,29 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
             # class stays at <= EXT_SHARE ext spans) -- never held-out / rejected / year-capped rows
             ext_left = [x for x in ext if x["id"] not in kept_ids and x["id"] not in year_out]
             pool = [x for x in before_caps if x["id"] not in kept_ids] + ext_left
-            tr, fst = fill_thin(tr, pool, random.Random(f"{seed}-fill-{lang}"), ok=_ext_ok(tr))
+            tr, fst = fill_thin(tr, pool, random.Random(f"{seed}-fill-{lang}"), ok=_ext_ok(tr, lang), lang=lang)
             bst["fill"] = fst
             stats.setdefault("balance_caps", {})[lang] = bst
-        ho = [x for x in ho if not any(sp.get("by") in EXT_BY for sp in x.get("spans", []))]
-        # windows / seam pairs: no parent decided by a second recognizer (windows2 excluded only "ext" before 10-17),
-        # no parent held out now
-        ext_all = {x["id"] for x in rows if any(sp.get("by") in EXT_BY for sp in x.get("spans") or [])}
+            # the caps shrink the year spans, so the top values creep over 3% (es 2014 at 3.3%, final dry build):
+            # the same top-year trim once more, a little under the gate's 3%
+            n_tr = {x["id"] for x in tr}
+            # the caps only drop rows whose EVERY number is the year; here a row holding it next to other numbers may
+            # go too when it has no rare class and no thin value (final build: 2020 stayed at 3.1-3.4% via mixed rows)
+            from collections import Counter as _C
+            _vc = _C(v for x in tr for v in _span_values(x, lang))
+            plain = lambda x: not _rare(x) and not any(_vc[v] <= _thin_floor(v) for v in _span_values(x, lang))  # noqa: E731
+            tr, ycap2 = _cap_top_years(tr, TOP_YEAR_SHARE - TOP_YEAR_MARGIN, random.Random(f"{seed}-years2-{lang}"),
+                                       mixed_ok=plain)
+            year_out |= n_tr - {x["id"] for x in tr}
+            stats.setdefault("year_cap_after_caps", {})[lang] = ycap2
+        ho = [x for x in ho if not ext_row(x)]
+        # windows / seam pairs: no parent decided by a second recognizer (census_common.EXT_BY), no parent held out now
+        ext_all = {x["id"] for x in rows if ext_row(x)}
         unsafe = ext_all | held
         win = _rows(f"{base}/windows.jsonl") if os.path.exists(f"{base}/windows.jsonl") else []
         n_w0 = len(win)
         win = [w for w in win if not set(w.get("parents", [])) & unsafe]
         stats.setdefault("win_unsafe_parent_dropped", {})[lang] = n_w0 - len(win)
-        win = [w for w in win if not set(w.get("parents", [])) & year_out]  # with or without dedupe
         if dedupe:
             n0 = len(win)
             win = [w for w in win if not set(w.get("parents", [])) & held_dup]
@@ -1696,6 +1842,25 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
                 took.append(x)
                 for k in ks:
                     tts_h[k] = tts_h.get(k, 0) + h
+        # the per-class ext cap once more, now that the synthetic rows are chosen: the gate counts them in each class
+        # (they make a thin class reach its 20-span floor and add to its denominator; fr amp passed the build's cap on
+        # real spans alone and failed the gate)
+        syn_cls = Counter(ext_class(sp, x, lang) for x in took for sp in x.get("spans") or [])
+        tr, xst2 = cap_ext_per_class(tr, EXT_SHARE_CLASS, random.Random(f"{seed}-extcls2-{lang}"), lang=lang,
+                                     extra=syn_cls)
+        stats.setdefault("ext_per_class_with_synthetic", {})[lang] = xst2
+        if xst2["still_over"]:
+            print(f"WARNING {lang}: ext share still over {EXT_SHARE_CLASS} after the cap: {xst2['still_over']}")
+        # every parent the caps took out of training (rows_h / ext allowance / per-class ext / top-year / balance caps /
+        # dedupe), not only the year-capped ones: its windows / seam pairs leave the mix with it
+        cap_out = cand_ids - {x["id"] for x in tr}
+        n_w1, n_wy = len(win), sum(1 for w in win if set(w.get("parents", [])) & year_out)
+        win_h_before = _h(win)
+        win = [w for w in win if not set(w.get("parents", [])) & cap_out]  # with or without dedupe
+        # windows: dropped by the cap_out rule, of them dropped by the year cap alone (the rule before 10-17)
+        cap_drop = {"parents_out": len(cap_out), "parents_out_not_ext": len(cap_out - ext_all),
+                    "windows_dropped": n_w1 - len(win), "windows_year_rule": n_wy,
+                    "windows_h": [round(win_h_before, 2), round(_h(win), 2)]}
         # a synthetic window may only stitch synthetic rows the class caps above admitted (v12 lesson)
         took_ids = {x["id"] for x in took}
         tts_ids = {x["id"] for x in tts}
@@ -1725,8 +1890,11 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
                 os.remove(f"{vol}/{mix_dir}/{k}_{lang}.jsonl")                  # lists whichever of them exist)
         if seam_h > 0:
             seam = _seam_rows(base, seam_files)  # ml_p3.seam_crops tags "" and "_b" (dry runs write other tags)
-            bad = held | rej | held_dup | year_out | ext_all
+            bad = held | rej | held_dup | ext_all
             seam = [x for x in seam if not set(x.get("parents", [])) & bad and not x.get("synthetic")]
+            n_s0, n_sy = len(seam), sum(1 for x in seam if set(x.get("parents", [])) & year_out)
+            seam = [x for x in seam if not set(x.get("parents", [])) & cap_out]
+            cap_drop.update(seam_dropped=n_s0 - len(seam), seam_year_rule=n_sy)
             for x in seam:
                 assert "num_tokens" in x and not WF_LABEL.search(x["text"]), f"{lang}: bad seam crop {x['id']}"
             if dedupe:
@@ -1743,8 +1911,11 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         if os.path.exists(f"{vol}/{mix_dir}/seam_long_{lang}.jsonl") and not seam_long_h:
             os.remove(f"{vol}/{mix_dir}/seam_long_{lang}.jsonl")  # a part this build does not make must not survive
         if seam_long_h > 0 and os.path.exists(f"{base}/seam_long.jsonl"):
-            bad = held | rej | held_dup | year_out | ext_all
+            bad = held | rej | held_dup | ext_all
             seam_long = [x for x in _rows(f"{base}/seam_long.jsonl") if not set(x.get("parents", [])) & bad]
+            n_l0, n_ly = len(seam_long), sum(1 for x in seam_long if set(x.get("parents", [])) & year_out)
+            seam_long = [x for x in seam_long if not set(x.get("parents", [])) & cap_out]
+            cap_drop.update(seam_long_dropped=n_l0 - len(seam_long), seam_long_year_rule=n_ly)
             # the long-number pairs come from the same streams as seam.jsonl: a pair whose (parents, cut position)
             # the main seam part already has leaves this part (whole pairs)
             have = {(tuple(x.get("parents", [])), x.get("pos")) for x in seam}
@@ -1779,6 +1950,12 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         _write(f"{vol}/{mix_dir}/p3_{lang}.jsonl", tr)
         _write(f"{vol}/{mix_dir}/win_{lang}.jsonl", win)
         _write(f"{vol}/{mix_dir}/heldout_{lang}.jsonl", ho)
+        stats.setdefault("cap_out_dropped", {})[lang] = cap_drop
+        # the data gate's checks that the build's caps decide, on what this build wrote (report; data_gate is the gate)
+        chk = post_build_check(tr, took, lang)
+        stats.setdefault("post_build_check", {})[lang] = chk
+        if chk["fail"]:
+            print(f"WARNING {lang}: post-build check fails {chk['fail']}")
         stats["langs"][lang] = {"rows": len(tr), "rows_h": round(_h(tr), 2), "windows": len(win), "win_h": round(_h(win), 2),
                                 "tts_rows": len(took), "tts_h": round(_h(took), 2), "ext_rows": len(set(ext_ids) & {x["id"] for x in tr}),
                                 "ext_h": round(_h([x for x in tr if x["id"] in ext_ids]), 2),
@@ -1823,7 +2000,8 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
             if len(kept) != len(rows_):
                 _write(pth, kept)
             stats.setdefault("target_text_collisions_dropped", {})[part] = len(rows_) - len(kept)
-    json.dump(stats, open(f"{vol}/{mix_dir}/stats.json", "w"), indent=1)
+    with open(f"{vol}/{mix_dir}/stats.json", "w") as f:
+        json.dump(stats, f, indent=1)
     return stats
 
 

@@ -1,5 +1,5 @@
-# 2026-10-13 retrain-3 tts/biz (R3.16 #3, D-7). Business shapes; about a third start with the number or code.
-# No E21/E22/eval phrasing.
+# 2026-10-13 retrain-3 tts/biz. Business shapes; about a third start with the number or code.
+# No evaluation-set phrasing.
 {biz_code} changed how we think about inventory.
 {biz_code} is where most of the detail lives.
 {biz_code} demand has been steadier than we expected.

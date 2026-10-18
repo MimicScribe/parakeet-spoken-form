@@ -17,6 +17,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from census_common import ext_row  # noqa: E402
+
 WF = re.compile(r"[0-9$€£¥¢₹₩₽%#/+°²³½¼¾⅓⅔ºª‰&]")
 
 
@@ -69,7 +72,7 @@ def main(argv):
         for w in win:
             for k, _ in kinds_of(w):
                 win_cls[(k, "synthetic" if w.get("synthetic") else "real")] += 1
-        ext_rows = [r for r in train if any(s.get("by") == "ext" for s in r.get("spans") or [])]
+        ext_rows = [r for r in train if ext_row(r)]  # census_common.EXT_BY: decided mainly by the second transcript
         for r in train:
             for k, rd in kinds_of(r):
                 c = cell[k]

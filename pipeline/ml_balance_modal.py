@@ -19,7 +19,7 @@ vol = modal.Volume.from_name("parakeet-spoken-form")
 image = (modal.Image.debian_slim(python_version="3.11")
          .apt_install("ffmpeg", "libsndfile1")
          .pip_install("pyarrow", "huggingface_hub", "hf_transfer", "soundfile", "librosa")
-         .add_local_python_source("harvest", "ml_balance", "ml_p3_core", "ml_cands", "ml_slav")
+         .add_local_python_source("harvest", "ml_balance", "census_common", "ml_p3_core", "ml_cands", "ml_slav")
          .add_local_file("ml_grammar_table.json", "/root/ml_grammar_table.json"))
 app = modal.App("parakeet-balance")
 

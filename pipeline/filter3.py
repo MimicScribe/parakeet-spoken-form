@@ -1,5 +1,5 @@
-"""Retrain-3 crop filters over the recropped shards (R3.12.2 D-1b / D-4 / label assert / unit abbreviations, R3.17 F1
-filler restoration + F2 label-agreement report). CPU only; runs on a local copy of the small text files:
+"""Retrain-3 crop filters over the recropped shards (crop filters, label assert, unit abbreviations, filler
+restoration and a label-agreement report). CPU only; runs on a local copy of the small text files:
 
     <root>/crops3/<tag>.jsonl   recrop v2 output
     <root>/dec3/<tag>.json      {wav: {"stock": text, "v10": text}} (modal s3_decode_crops)

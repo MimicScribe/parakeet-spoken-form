@@ -39,7 +39,7 @@ nemo_image = (
     .env({"HF_HOME": f"{VOL}/hf", "HF_HUB_ENABLE_HF_TRANSFER": "1"})
     .add_local_python_source("common", "data_e22", "data_replay", "data_fleurs", "ft_train", "ft_eval", "rescore", "preflight",
                               "labeller", "readings", "label_gpu", "harvest", "beds", "veto",
-                              "mix_build", "recrop", "score_retrain", "yearflip")
+                              "mix_build", "census_common", "recrop", "score_retrain", "yearflip")
 )
 
 tts_image = (
@@ -1037,7 +1037,7 @@ mix_image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("ffmpeg")
     .uv_pip_install("numpy", "scipy", "soundfile", "librosa")
-    .add_local_python_source("common", "mix_build", "ml_cands", "ml_balance", "ml_p3_core",
+    .add_local_python_source("common", "mix_build", "census_common", "ml_cands", "ml_balance", "ml_p3_core",
                              "score_retrain", "labeller", "readings")  # score_retrain: en_balance's number reader
     .add_local_file("ml_grammar_table.json", "/root/ml_grammar_table.json")  # build4's number-word lexicon
 )
@@ -1189,7 +1189,7 @@ def retrain3_mix_v4(langs=WAVE1, repeat: int = 1, anchor18: int = 0, win_repeat:
            "mix3b/d1.jsonl": "mix3b/d1_ycap.jsonl", "mix3b/d10n.jsonl": "mix3b/d10n_ycap.jsonl"}
     import mix_build
 
-    en_sub = {p: mix_build.en_bcap_path(p) for p in mix_build.EN_REAL_PARTS} if en_bal else {}
+    en_sub = {p: mix_build.en_bcap_path(p, mix_dir) for p in mix_build.EN_REAL_PARTS} if en_bal else {}
     hours = {"replay/lspc_train.jsonl": en_plain_h} if en_plain_h > 0 else {}
     base = [(en_sub.get(q, q), hours.get(q, h), t) for q, h, t in
             [(sub.get(p, p), h, t) for p, h, t in retrain3_mix_v3()] + EN4_PARTS] + EN_WIN_PARTS * en_win_repeat
@@ -1241,13 +1241,13 @@ def check_build_langs(langs, mix_dir: str = "mix4") -> dict:
 def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(WAVE1), allow_no_judge: bool = False,
                dedupe: bool = False, seam_h: float = 0.0, plain_share: float = 0.0, balance: bool = False,
                en_bal: bool = False, repeat: int = 1, win_repeat: int = 0, anchor18: int = 0, en_plain_h: float = 0.0,
-               en_win_repeat: int = 1, mix_dir: str = "mix4", seam_long_h: float = 0.0, seam_long_repeat: int = 0, en_free_repeat: int = 1):
+               en_win_repeat: int = 1, mix_dir: str = "mix4", seam_long_h: float = 0.0, seam_long_repeat: int = 0, en_free_repeat: int = 1, final: bool = False):
     """Greek ς restore (idempotent) + mix_build.build4 + the number share of the v4 mix (total and English-only).
     Run 2 (2026-10-17): balance = build4 template / session caps; en_bal = mix_build.en_balance on the English real
     parts (writes their _bcap copies: caps, then the YouTube top-up trim into the 35-40% band); repeat / win_repeat /
     anchor18 = the arm's listing, so the share report is the share retrain3 will assert. Run-2 build:
       modal run modal_app.py::build_mix4 --langs <RUN2_LANGS> --dedupe --seam-h 5 --plain-share 0.6 --balance --en-bal \
-        --win-repeat 3 --anchor18 2"""
+        --win-repeat 2 --anchor18 2"""
     import json
 
     import mix_build
@@ -1258,13 +1258,18 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
            "build4": mix_build.build4(VOL, ls, rows_h=rows_h, win_h=win_h, allow_no_judge=allow_no_judge,
                                       dedupe=dedupe, seam_h=seam_h, plain_share=plain_share, balance=balance,
                                       mix_dir=mix_dir, seam_long_h=seam_long_h)}
-    dry = mix_dir != "mix4"
-    mix = retrain3_mix_v4(ls, repeat=repeat, anchor18=anchor18, win_repeat=win_repeat, en_bal=en_bal and not dry,
-                          en_plain_h=en_plain_h, en_win_repeat=en_win_repeat, seam_long_repeat=seam_long_repeat,
-                          mix_dir=mix_dir, en_free_repeat=en_free_repeat)
+    dry = mix_dir != "mix4" and not final  # final: a candidate mix in its own dir, English copies under it
+    kw = dict(repeat=repeat, anchor18=anchor18, win_repeat=win_repeat, en_plain_h=en_plain_h, en_win_repeat=en_win_repeat,
+              seam_long_repeat=seam_long_repeat, mix_dir=mix_dir, en_free_repeat=en_free_repeat)
+    mix = retrain3_mix_v4(ls, en_bal=False, **kw)
     if en_bal:  # a dry build only reports what en_balance would write (the listing keeps the source parts)
-        out["en_balance"] = mix_build.en_balance(VOL, mix, non_en=_NON_EN_PARTS, write=not dry)
+        out["en_balance"] = mix_build.en_balance(VOL, mix, non_en=_NON_EN_PARTS, write=not dry, bcap_dir=mix_dir)
+        if not dry:
+            vol.commit()
+            mix = retrain3_mix_v4(ls, en_bal=True, **kw)  # the listing training reads (the capped copies)
     out.update(share_report_of(mix))
+    with open(f"{VOL}/{mix_dir}/build_report.json", "w") as f:  # logs get cut
+        json.dump(out, f, indent=1, ensure_ascii=False)
     if en_bal:  # English after the caps + trim (a dry build's share_v4 still lists the untrimmed English parts)
         e = out["en_balance"]["share_after"]
         non_en = out["share_v4"]["total_h"] - out["share_v4"]["lang_h"].get("en", 0.0)
@@ -1301,7 +1306,7 @@ def share_report(langs: str = ",".join(WAVE1), repeat: int = 1, win_repeat: int 
                           en_plain_h=en_plain_h, en_win_repeat=en_win_repeat, mix_dir=mix_dir,
                           seam_long_repeat=seam_long_repeat, en_free_repeat=en_free_repeat)
     print("LSPC full h", round(mix_build._h(mix_build._rows(f"{VOL}/replay/lspc_train.jsonl")), 1))
-    orig = {mix_build.en_bcap_path(p): p for p in mix_build.EN_REAL_PARTS}
+    orig = {mix_build.en_bcap_path(p, mix_dir): p for p in mix_build.EN_REAL_PARTS}
     if en_bal and not all(os.path.exists(f"{VOL}/{p}") for p in orig):  # not built yet: report on the source parts
         mix = [(orig.get(p, p), h, t) for p, h, t in mix]
     out = share_report_of(mix)
@@ -1545,7 +1550,7 @@ R3_ARMS.update({
 def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, save_every: int = 250,
              en_weight: float = 1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
              dur_weight: float = 1.0, init_from: str = "v10pt@1500", lr: float = 0.0, mix: str = "mix3",
-             anchor_init: bool = False, cons_weight: float = -1.0, langs: str = ""):
+             anchor_init: bool = False, cons_weight: float = -1.0, langs: str = "", mix_dir: str = "mix4"):
     """One retrain-3 run (R3.13): r3 losses, decoupled L2-SP to v10pt@1500, 200 s x 2 accumulated batches.
     Rehearsal (E2) = a small max_steps. Resumes from exp/<run>/last.ckpt after a preemption.
     cons_weight >= 0 overrides the arm's cross-window consistency weight (R4-c tuning knob).
@@ -1578,10 +1583,11 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
         r4["cons_weight"] = cons_weight
     mix = {"mp": retrain3_mix_mp, "v2": lambda: retrain3_mix_v2(), "v2v": lambda: retrain3_mix_v2(verbatim=True),
            "v3": retrain3_mix_v3,
-           "v4": lambda: retrain3_mix_v4(_langs(langs), repeat=wave1_repeat, anchor18=anchor18_repeat, **v4kw)
+           "v4": lambda: retrain3_mix_v4(_langs(langs), repeat=wave1_repeat, anchor18=anchor18_repeat, mix_dir=mix_dir,
+                                         **v4kw)
            }.get(mix, retrain3_mix)()
-    if any(m[0].startswith("mix4/") for m in mix):
-        print("BUILD", json.dumps(check_build_langs(langs).get("langs_without_rows", [])))
+    if any(m[0].startswith(("mix4/", mix_dir + "/")) for m in mix):
+        print("BUILD", mix_dir, json.dumps(check_build_langs(langs, mix_dir).get("langs_without_rows", [])))
     # a warm start anchors L2-SP to its own init, not v10pt (the prior being trained away)
     i_run, _, i_step = init_from.partition("@")
     anchor = f"{VOL}/exp/{i_run}/step{i_step}.pt" if anchor_init else f"{VOL}/exp/v10pt/step1500.pt"
@@ -1595,10 +1601,10 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
         # wave-1 run: the 35-40% band protects B's ENGLISH balance; wave-1 rows (all number-bearing)
         # sit on top. Same exclusion list as build_mix4's share_v4_english_only.
         en = share
-        if any(m[0].startswith("mix4/") for m in mix):
-            en = mix_build.mix_share(VOL, [m for m in mix if not m[0].startswith(_NON_EN_PARTS)])
+        if any(re.match(r"mix4\w*/", m[0]) for m in mix):  # mix4 or a candidate dir (mix4final): same exclusion
+            en = mix_build.mix_share(VOL, [m for m in mix if not re.sub(r"^mix4\w+/", "mix4/", m[0]).startswith(_NON_EN_PARTS)])
         print("SHARE total", share["share"], "english part", en["share"])
-        assert 0.35 <= en["share"] <= 0.40, f"English number share {en['share']} outside 35-40% (R3.17 F4)"
+        assert 0.35 <= en["share"] <= 0.40, f"English number share {en['share']} outside 35-40%"
     ft_train.train(VOL, ultra_path(), run, mix=mix, max_steps=max_steps, lr=cfg["lr"], warmup=warmup, seed=seed,
                    init_from=init_from, batch_duration=200, accumulate=2, spec_augment=False, kl_weight=10.0,
                    kl_punct=30.0, kl_tok=1.0, save_every=save_every, on_save=vol.commit, stage_dir="/tmp/stage",
@@ -1814,7 +1820,7 @@ def probe_seam(runs: str, langs: str = ",".join(RUN2_LANGS), english: bool = Tru
 
 
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="L4", timeout=2 * 3600)
-def probe_heldout(runs: str, langs: str = ",".join(WAVE1)):
+def probe_heldout(runs: str, langs: str = ",".join(WAVE1), mix_dir: str = "mix4"):
     """Held-out probe (pre-registration §3 "TOOL OWED"): decode mix4/heldout_<lang>.jsonl of every TRAINED language in
     `langs` with each checkpoint in `runs` ("w3soup_a0.5@0,r4reh_a@100,..."; "ultra" = stock) ->
     hyps/<run>/heldout_<lang>.jsonl, scored locally by the four-outcome number scorer (words right / digits right /
@@ -1829,12 +1835,16 @@ def probe_heldout(runs: str, langs: str = ",".join(WAVE1)):
     for run in runs.split(","):
         _load_runs(m, stock, run)
         for lang in ls:
-            ft_eval.transcribe_loaded(VOL, m, run, f"mix4/heldout_{lang}.jsonl", f"heldout_{lang}")
+            ft_eval.transcribe_loaded(VOL, m, run, f"{mix_dir}/heldout_{lang}.jsonl", f"heldout_{lang}")
             # held-out synthetic voices: exact spoken labels for every class (a reading check, not a real-speech gate)
-            ft_eval.transcribe_loaded(VOL, m, run, f"mix4/tts_dev_{lang}.jsonl", f"ttsdev_{lang}")
+            ft_eval.transcribe_loaded(VOL, m, run, f"{mix_dir}/tts_dev_{lang}.jsonl", f"ttsdev_{lang}")
         for lang in untrained(ls):  # the untrained languages' FLEURS-dev digit rows (decision set: digits kept?)
-            ft_eval.transcribe_loaded(VOL, m, run, f"mix4/dec18_{lang}.jsonl", f"dec18_{lang}")
+            # DEC18_DIR: the dec18 sets are built into mix4 only (ml_p3), whatever build mix_dir names
+            ft_eval.transcribe_loaded(VOL, m, run, f"{DEC18_DIR}/dec18_{lang}.jsonl", f"dec18_{lang}")
         vol.commit()
+
+
+DEC18_DIR = "mix4"  # where ml_p3 writes the dec18 sets (score_heldout.DEC18_DIR reads them from the same place)
 
 
 def untrained(langs) -> tuple:

@@ -25,7 +25,8 @@ print("ok")
 # every English part the v4 mix lists has a number share (else mix_share counts it as 0% numbers)
 try:
     import modal_app as MA
-    en = [p for p, _, _ in MA.retrain3_mix_v4() if p.startswith(("d1/en4_ok/", "mix3b/d1", "mix3b/d10n"))]
+    en = [p for p, _, _ in MA.retrain3_mix_v4() if p.startswith(("d1/en4_ok/", "mix3b/d1", "mix3b/d10n"))
+          and p not in MA.EN_FREE_PARTS]  # the number-free parts (d1p_v / d10p_v) count 0% by design
     assert en and all(p in MB.NUMBER_PART for p in en), [p for p in en if p not in MB.NUMBER_PART]
     print("ok en number parts", len(en))
 except ImportError:  # modal_app needs the modal package; the table entries are checked by name instead

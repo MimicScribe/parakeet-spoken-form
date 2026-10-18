@@ -1,4 +1,4 @@
-# v12 spoken-year supplement (2026-10-11). Voiced at fast rates. No E21/eval phrasing ("conference call",
+# v12 spoken-year supplement (2026-10-11). Voiced at fast rates. No evaluation-set phrasing ("conference call",
 # "comparable store sales", "kind of", "run rate", "margins grew"). {year_any} / {two_k_qty} in readings.py.
 Sales in Q two of {year_any} were up slightly.
 Our full year {year_any} outlook has not changed.

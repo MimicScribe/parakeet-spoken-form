@@ -56,3 +56,13 @@ assert {k: v for k, v in b.items() if k not in a} == {"suffix_anchor": True, "an
                                                       "gate_human": 0.5}
 assert MA._langs("") == MA.WAVE1 and MA._langs("de,pl") == ("de", "pl")
 print("test_run2_mix: ok")
+
+# a candidate mix dir (mix4final): built parts and the English capped copies live under it, anchors stay in mix4
+mf = [p for p, _, _ in MA.retrain3_mix_v4(R2, win_repeat=2, en_bal=True, mix_dir="mix4final", anchor18=1)]
+assert "mix4final/p3_de.jsonl" in mf and "mix4/p3_de.jsonl" not in mf, mf
+assert "mix4/d2anchor_da.jsonl" in mf and "mix4final/d2anchor_da.jsonl" not in mf, [p for p in mf if "anchor" in p]
+assert all(MB.en_bcap_path(p, "mix4final") in mf for p in MB.EN_REAL_PARTS)
+assert MB.en_bcap_path("d1/en4_ok/yodas_en4_cap30_ycap.jsonl", "mix4final") == "mix4final/en_bcap/yodas_en4_cap30_ycap_bcap.jsonl"
+assert MB.number_share_of("mix4final/en_bcap/yodas_en4_cap30_ycap_bcap.jsonl") == 1.0
+assert MB.number_share_of("mix4final/p3_de.jsonl") == 1.0
+print("test_run2_mix: candidate dir ok")

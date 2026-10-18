@@ -71,12 +71,15 @@ for p in ps_new:
         assert not any(C.num_edge_ambiguous((x[0], 0, 0, True), x[1], 0.9) for x in h["edge_fracs"]
                        if x[0] in ("dreihundertfünfundzwanzig", "vierundzwanzig", "fünfunddreißig")), (p["pos"], h)
 
-# ---- 1a. windows2 drops every second-recognizer span kind build4 drops (ext and ext_pick)
+# ---- 1a. windows2 drops every second-recognizer span kind build4 drops (census_common.EXT_BY via ext_row)
 _p3 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_p3.py")).read()  # ml_p3 needs modal: read it
 win_src = _p3[_p3.index("def windows2_lang("):_p3.index("def windows2(")]
 seam_src = _p3[_p3.index("def _seam_pass("):_p3.index("def seam_crops(")]
-assert 'sp.get("by") == "ext"' not in win_src and "in EXT_BY" in win_src, "windows2 must exclude mix_build.EXT_BY spans"
-assert B.EXT_BY == MB.EXT_BY == ("ext", "ext_pick")
+assert 'sp.get("by") == "ext"' not in win_src and "ext_row(r)" in win_src and "from census_common import" in win_src, \
+    "windows2 must exclude census_common.EXT_BY spans"
+import census_common as CC  # noqa: E402
+assert B.EXT_BY is MB.EXT_BY is CC.EXT_BY  # one shared definition
+assert set(CC.EXT_BY) == {"ext", "ext_pick", "ext_ctx", "ext_value", "ext_regional"}
 keep_call = re.compile(r"num_keep=(?:C\.num_keep_frac|_num_keep)\(lang\)")  # _num_keep: + the WAVE2 languages
 assert keep_call.search(win_src) and ("_num_keep(lang)" in seam_src and "num_keep=nk" in seam_src
                                       or keep_call.search(seam_src)), "windows2 / seam pass must use the compound rule"
@@ -231,7 +234,8 @@ assert st2["share_before"]["total_h"] == 1.0, st2["share_before"]
 print("test_run_ready: dry en_balance ok")
 
 # ---- free fill: rows a cap removed come back for a value still under its floor, never past the 3% top-year share
-mk = lambda i, y: {"id": f"f{i}", "caption": f"Im Jahr {y} war es {i}.", "spans": [{"kind": "int", "text": str(y)}], "duration": 1.0}  # noqa: E731
+_w = lambda i: "".join(chr(97 + int(d)) for d in str(i))  # noqa: E731  (a distinct word per row: distinct templates)
+mk = lambda i, y: {"id": f"f{i}", "caption": f"Im Jahr {y} war es {_w(i)} gut.", "spans": [{"kind": "int", "text": str(y)}], "duration": 1.0}  # noqa: E731
 base_rows = [mk(i, 2000 + i % 40) for i in range(40 * 45)]  # 45 each of 2000-2039
 pool = [mk(10000 + i, 1995) for i in range(50)] + [mk(20000 + i, 2005) for i in range(50)]
 out, fst = MB.fill_thin(base_rows, pool, random.Random(0))
@@ -239,4 +243,27 @@ assert sum(x["spans"][0]["text"] == "1995" for x in out) == MB.FILL_FLOOR["year_
 assert sum(x["spans"][0]["text"] == "2005" for x in out) == 45  # not short: nothing added
 out2, _ = MB.fill_thin([mk(i, 2010) for i in range(10)], [mk(100 + i, 1999) for i in range(5)], random.Random(0), top_share=0.03)
 assert len(out2) == 10  # 1999 would hold > 3% of the year spans: not added
+# the fill respects the balance caps it refills after (red-on-base: it re-added every capped row, 3-per-template and
+# 13-per-session ignored)
+same_t = [{"id": f"t{i}", "caption": "Im Jahr 1995 war es gut.", "spans": [{"kind": "int", "text": "1995"}], "duration": 1.0}
+          for i in range(20)]
+out3, fst3 = MB.fill_thin(base_rows, same_t, random.Random(0))
+assert len(out3) - len(base_rows) == MB.TEMPLATE_CAP and fst3["skipped_over_cap"] == 20 - MB.TEMPLATE_CAP, fst3
+sess = [{"id": f"20190101-0900-PLENARY-3-de_20190101-10:00:{i:02d}_{i}", "caption": f"Im Jahr 1995 war es {_w(i)} gut.",
+         "spans": [{"kind": "int", "text": "1995"}], "duration": 1.0} for i in range(30)]
+out4, _ = MB.fill_thin(base_rows, sess, random.Random(0))
+assert len(out4) - len(base_rows) == MB.GROUP_CAP, len(out4) - len(base_rows)
+out5, _ = MB.fill_thin(base_rows, same_t, random.Random(0), caps=False)  # the old behaviour on request
+assert len(out5) - len(base_rows) == 20
 print("test_run_ready: fill ok")
+
+# ---- top-year trim of mixed rows (a year next to other numbers) only where mixed_ok allows
+yr = [{"id": f"m{i}", "spans": [{"kind": "int", "text": "2020"}, {"kind": "int", "text": "5"}]} for i in range(20)]
+yr += [{"id": f"o{i}", "spans": [{"kind": "int", "text": str(1950 + i % 40)}]} for i in range(400)]
+k0, _ = MB._cap_top_years(yr, 0.03, random.Random(0))
+assert len(k0) == len(yr)  # only mixed rows hold 2020: the plain rule cannot trim it
+k1, st1 = MB._cap_top_years(yr, 0.03, random.Random(0), mixed_ok=lambda x: True)
+assert st1[2020]["after"] <= 0.03 * 420 + 1 and len(k1) < len(yr)
+k2, _ = MB._cap_top_years(yr, 0.03, random.Random(0), mixed_ok=lambda x: False)
+assert len(k2) == len(yr)
+print("test_run_ready: mixed top-year ok")

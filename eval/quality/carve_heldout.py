@@ -2,16 +2,21 @@
 """Carve a rare-class held-out set from labelled real-speech rows (the first held-out lists
 had 0 spans in every rare class).
 
-usage: carve_heldout.py <lang>[,<lang>...] [--target 10] [--max-share 0.25] [--work DIR] [--dry]
+usage: carve_heldout.py <lang>[,<lang>...] [--target 20] [--max-share 0.25] [--work DIR] [--dry]
                         [--kinds unit,dec --max-share 0.10 --avoid phone]
 --kinds (2026-10-17, thin decision sets for common classes): carve only these kinds (int / pct / dec / ord allowed),
 richest groups first, counted in data_gate's classes (a dec read as a price is cur); the cap is then --max-share of
 the class's spans still in TRAINING, checked for every listed kind on each group; --avoid skips any group holding a
 span of those labeller kinds.
 Per language: reads every labelling pass (ml/p3v2/<lang>/rows*.jsonl) and the current heldout_<lang>.txt, then for each
-rare kind (not int/pct/dec/ord) adds whole groups (a YODAS video, a VoxPopuli plenary day; leakage check 2026-10-15)
+rare kind (not int/pct/dec/ord) adds whole groups (a YODAS video, a parliament day: census_common.held_unit, the unit
+mix_build.build4 holds out)
 until that kind has >= --target held-out spans or would exceed --max-share of its real spans. Groups already held
 out count first. Appends "# group <src>:<key>" + ids to heldout_<lang>.txt and uploads it (unless --dry).
+Rows any span of which the second transcript decided (census_common.EXT_BY) never enter the carve: build4 keeps them
+out of the held-out set too. The held-out and reject lists are read fail-closed (volume_io.read_shared): a list that
+exists on the volume but cannot be fetched stops the carve, and the held-out list is only uploaded after it was read
+(or the volume was seen to have none).
 Run BEFORE windows2 / build_mix4: both drop held-out ids and assert that no window or pair uses one."""
 import argparse
 import collections
@@ -20,28 +25,28 @@ import glob
 import hashlib
 import json
 import re
-import subprocess
+import sys
 from pathlib import Path
 
-PIPE = Path(__file__).resolve().parents[2] / "pipeline"
-VOLUME = "parakeet-spoken-form"
+import volume_io as V
+
+PIPE = V.PIPE
+VOLUME = V.VOLUME
+sys.path.insert(0, str(PIPE))
+from census_common import ext_row, held_unit  # noqa: E402  (the build's definitions)
+
 COMMON = {"int", "pct", "dec", "ord"}
-
-
-def vget(remote, local):
-    return subprocess.run(["modal", "volume", "get", "--force", VOLUME, remote, str(local)], cwd=PIPE,
-                          capture_output=True).returncode == 0
+vget = V.vget
 
 
 def group(r):
-    i = str(r["id"])
-    if r.get("src") == "vox":
-        m = re.match(r"(\d{8})-", i)
-        return f"vox:{m.group(1)}" if m else None
-    if r.get("src") == "yodas":
-        m = re.match(r"[a-z]{2}\d+_\d+_(.{11})_", i)
-        return f"yodas:{m.group(1)}" if m else None
-    return None  # FLEURS / D2 rows: sentence-disjoint splits already exist, not carved here
+    """The held-out unit of a row (census_common.held_unit, as build4 holds it out), named vox:<day> / yodas:<video>;
+    None for FLEURS / D2 rows (sentence-disjoint splits already exist, not carved here)."""
+    u = held_unit(r["id"])
+    if u is None:
+        return None
+    k, v = u.split(":", 1)
+    return ("vox:" if k == "day" else "yodas:") + v
 
 
 def kind_counts(rs, cls=None):
@@ -115,23 +120,27 @@ def main():
     for lang in a.langs.split(","):
         w = Path(a.work) / lang
         w.mkdir(parents=True, exist_ok=True)
-        # review H3: every labelling pass on the volume, and a failed fetch stops the carve
-        ls = subprocess.run(["modal", "volume", "ls", VOLUME, f"ml/p3v2/{lang}"], cwd=PIPE, capture_output=True, text=True)
-        names = sorted({m.group(1) for m in re.finditer(r"(?:^|/|\s)(rows[a-z0-9_]*)\.jsonl", ls.stdout)})  # not pre_rows_*
+        # every labelling pass on the volume, and a failed fetch stops the carve
+        listing = V.vlist(f"ml/p3v2/{lang}")  # a failed listing stops the carve
+        names = sorted(n[:-6] for n in listing if re.fullmatch(r"rows[a-z0-9_]*\.jsonl", n))  # not pre_rows_*
         # validation-only passes (val_*.jsonl): build4 holds their ids and days / videos out, so they count as held out
-        vals = sorted({m.group(1) for m in re.finditer(r"(?:^|/|\s)(val_[a-z0-9_]*)\.jsonl", ls.stdout)})
+        vals = sorted(n[:-6] for n in listing if re.fullmatch(r"val_[a-z0-9_]*\.jsonl", n))
         assert names, f"{lang}: no rows*.jsonl on the volume"
         for n in names + vals:
             assert vget(f"ml/p3v2/{lang}/{n}.jsonl", w / f"{n}.jsonl"), f"{lang}: fetch of {n}.jsonl failed"
-        if not vget(f"ml/p3v2/heldout_{lang}.txt", w / "heldout.txt"):  # a language's first held-out list starts empty
+        # fail closed: a held-out list the volume has but this run cannot read is an error, never "a first list"
+        first = not V.read_shared(f"ml/p3v2/heldout_{lang}.txt", w / "heldout.txt")
+        if first:  # the volume has no list for this language yet: it starts empty
             (w / "heldout.txt").write_text(f"# carve_heldout.py first list for {lang}\n")
         held = {l.strip() for l in open(w / "heldout.txt") if l.strip() and not l.startswith("#")}
         rej = set()
         for stale in [*w.glob("rows*.jsonl"), *w.glob("val_*.jsonl")]:
             if stale.stem not in names + vals:
                 stale.unlink()
-        if vget(f"ml/p3v2/{lang}/reject_ids.txt", w / "reject.txt"):
+        if V.read_shared(f"ml/p3v2/{lang}/reject_ids.txt", w / "reject.txt"):
             rej = {l.strip() for l in open(w / "reject.txt") if l.strip()}
+        else:
+            print(f"{lang}: no reject_ids.txt on the volume (no judge run yet): no rows rejected")
         val = [json.loads(l) for n in vals for l in open(w / f"{n}.jsonl") if l.strip()]
         held |= {r["id"] for r in val}
         # one row per id across passes, as mix_build._one_per_id: a regional pass first, else the first in name order
@@ -139,7 +148,7 @@ def main():
         rows = list({r["id"]: r for p in reversed(paths) for l in open(p) if l.strip() for r in [json.loads(l)]}.values())
         seen = {x["id"] for x in rows}
         rows += [r for r in val if r["id"] not in seen]
-        rows = [r for r in rows if r["id"] not in rej and not any(sp.get("by") == "ext" for sp in r.get("spans", []))]
+        rows = [r for r in rows if r["id"] not in rej and not ext_row(r)]
         add, have, total = plan(lang, rows, held, a.target, a.max_share, only=a.kinds.split(",") if a.kinds else None,
                                 avoid=set(filter(None, a.avoid.split(","))), cls=gate_class(lang) if a.kinds else None)
         print(f"{lang}: +{len(add)} groups, +{sum(map(len, add.values()))} rows held out")
@@ -152,8 +161,9 @@ def main():
                 f.write(f"\n# carve_heldout.py {datetime.date.today()} ({what}, target {a.target})\n")
                 for g, ids in sorted(add.items()):
                     f.write(f"# group {g}\n" + "\n".join(ids) + "\n")
-            subprocess.run(["modal", "volume", "put", "--force", VOLUME, str(w / "heldout.txt"),
-                            f"ml/p3v2/heldout_{lang}.txt"], cwd=PIPE, check=True, capture_output=True)
+            if first and f"heldout_{lang}.txt" in V.vlist("ml/p3v2"):  # another run wrote one since: never overwrite it
+                raise V.VolumeReadError(f"heldout_{lang}.txt appeared on the volume during the carve: rerun")
+            V.put(w / "heldout.txt", f"ml/p3v2/heldout_{lang}.txt")
 
 
 if __name__ == "__main__":

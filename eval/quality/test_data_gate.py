@@ -227,5 +227,36 @@ class SuffixAndClock1017(unittest.TestCase):
             self.assertEqual(g["heldout_classes"], {"int_big": 1})
 
 
+class SharedCensusRules(unittest.TestCase):
+    """The gate counts with the build's own rules (census_common)."""
+
+    def test_short_masked_captions_are_no_template(self):
+        # red-on-base: the build exempts a masked caption of < 3 letter words from the template cap, the gate capped it
+        with tempfile.TemporaryDirectory() as d:
+            rows = [dict(real(i, "cinco euros", [{"text": "5", "kind": "cur", "reading": "cinco euros"}]),
+                         caption="5 euros.") for i in range(6)]
+            write(d, "p3_es", rows)
+            g = G.gate_lang(d, "es")
+            self.assertEqual(check(g, "rows over the 3-per-template cap")[0]["got"], 0)
+            write(d, "p3_es", [dict(r, caption="son 5 euros al mes") for r in rows])  # a real template: capped
+            self.assertEqual(check(G.gate_lang(d, "es"), "rows over the 3-per-template cap")[0]["got"], 3)
+
+    def test_ext_ctx_counts_as_ext(self):
+        # red-on-base: ext_ctx / ext_value spans did not count toward the ext share
+        with tempfile.TemporaryDirectory() as d:
+            rows = [real(i, "son cinco kilómetros", [{"text": "5 km", "kind": "unit", "reading": "cinco kilómetros",
+                                                      "by": ("ext_ctx", "ext_value", "ctc", "ctc")[i % 4]}])
+                    for i in range(40)]
+            write(d, "p3_es", rows)
+            c = check(G.gate_lang(d, "es"), "unit ext share")[0]
+            self.assertEqual(c["got"], 0.5)
+            self.assertFalse(c["pass"])
+
+    def test_template_key_is_the_builds(self):
+        import mix_build as MB  # noqa: F401  (pipeline/ is on sys.path via data_gate)
+        self.assertIs(G.template_key, MB.template_key)
+        self.assertIs(G.group_id, MB.group_id)
+
+
 if __name__ == "__main__":
     unittest.main()

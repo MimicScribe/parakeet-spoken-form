@@ -215,7 +215,8 @@ gpu_image2 = (modal.Image.debian_slim(python_version="3.11")  # gpu_image + torc
               .apt_install("ffmpeg", "libsndfile1")           # must stay the last steps, so this is a separate image
               .pip_install("torch==2.4.1", "torchaudio==2.4.1", "transformers==4.44.2", "soundfile", "librosa",
                            "numpy<2")
-              .add_local_python_source("ml_cands", "ml_decide", "ml_p3_core", "ml_slav", "ml_balance")  # ml_slav: ru / uk
+              .add_local_python_source("ml_cands", "ml_decide", "ml_p3_core", "ml_slav", "ml_balance",
+                                       "census_common")  # ml_slav: ru / uk
               .add_local_file("ml_grammar_table.json", "/root/ml_grammar_table.json"))
 
 
@@ -493,7 +494,7 @@ def label2_lang(lang: str, limit: int = 0, int_new_hours: float = 1.5, crops: bo
                 srcs: str = "vox,yodas", with_d2: bool = True, name: str = "rows", ext: str = "",
                 cer_ext: bool = True, split_long: bool = True, max_row: float = 20.0, only_ids: str = "",
                 trim_ext: bool = True, piece_ext: bool = True, salvage: bool = True, decide_off: str = "",
-                cands_off: str = "", partial: bool = True, ctc_model: str = "") -> dict:
+                cands_off: str = "", partial: bool = True, ctc_model: str = "", force: bool = False) -> dict:
     """ext: a file in <lang>/ of {"id", "text"} verbatim transcripts by a second recognizer. When given,
     ONLY those ids are labelled, and a span the CTC greedy text misspells is decided when ext agrees (ml_decide).
     cer_ext (2026-10-16): the row CER / caption-gap guards take the better of the CTC greedy and the ext transcript
@@ -508,7 +509,9 @@ def label2_lang(lang: str, limit: int = 0, int_new_hours: float = 1.5, crops: bo
     verified pieces (origin "partial"; --no-partial = the old salvage). decide_off / cands_off:
     comma lists of ml_decide.FIXES / ml_cands.CAND_FIXES names to switch off (the old decisions / candidates).
     ctc_model: another CTC reader than ml_decide.MODELS[lang] ("strong" = ml_decide.STRONG[lang]); give the pass its own
-    --name so the outputs of the default reader stay."""
+    --name so the outputs of the default reader stay.
+    A finished pass (its stats<sfx>.json exists) is never relabelled into the same files: the call refuses to start
+    (its rows, crops and diag files open for writing) unless force=True (--force)."""
     import random
     import shutil
 
@@ -528,12 +531,17 @@ def label2_lang(lang: str, limit: int = 0, int_new_hours: float = 1.5, crops: bo
     ctc = D.LangCTC(lang, model=(D.STRONG[lang] if ctc_model == "strong" else ctc_model) or None)
     dry = bool(dry_per_kind or only_ids)
     out = f"{OUT2}/{lang}" + ("/dry" if dry else "")  # a dry run never touches the real outputs
+    sfx = pass_suffix(name)
+    if not dry:  # dry outputs (<lang>/dry/) are scratch by design
+        refuse_rerun(out, sfx, force)
     os.makedirs(f"{out}/wav", exist_ok=True)
     # audio this pass cuts (trims, pieces) lives under its own name: passes of one source run side by side and reuse
     # row ids, and a shared path let one pass overwrite the audio another pass's labels point at
     wdir = f"{out}/wav/{name}"
     os.makedirs(wdir, exist_ok=True)
-    os.makedirs(f"{out}/crops", exist_ok=True)
+    # crops too: two passes over one source share row ids, so crop audio lives under the pass name
+    crop_dir = f"{out}/crops/{name}"
+    os.makedirs(crop_dir, exist_ok=True)
     d2 = [dict(json.loads(l), origin="d2") for l in open(f"{VOL}/d2/{lang}/digit.jsonl")] if with_d2 else []
     fix = f"{VOL}/d2fix/{lang}/digit.jsonl"
     if with_d2 and os.path.exists(fix):
@@ -592,7 +600,6 @@ def label2_lang(lang: str, limit: int = 0, int_new_hours: float = 1.5, crops: bo
     kept, crop_rows, kept_int_h = [], [], 0.0
     cst = {"planned": 0, "kept": 0, "cer": 0, "edge_word": 0, "no_times": 0}
     pst = {"trimmed": 0, "trim_kept": 0, "salvage_tried": 0, "salvage_rows": 0, "salvage_pieces": 0, "piece_by_ext": 0}
-    sfx = "" if name == "rows" else name[len("rows"):] if name.startswith("rows") else "_" + name
     diag = open(f"{out}/diag{sfx}.jsonl", "w")
     rows_f, crops_f = open(f"{out}/{name}.jsonl", "w"), open(f"{out}/crops{sfx}.jsonl", "w")
     n_done = 0
@@ -666,7 +673,9 @@ def label2_lang(lang: str, limit: int = 0, int_new_hours: float = 1.5, crops: bo
                     kept_int_h += pr["duration"]
             continue
         nr = res["row"]
-        dst = f"{out}/wav/{row['origin']}_{row['id']}.wav" if row["origin"] == "d2" else row["audio_filepath"]
+        # the D2 audio copy lives under the pass name too (wdir): a second pass over the same D2 ids must not overwrite
+        # the wav the first pass's rows point at
+        dst = f"{wdir}/{row['origin']}_{row['id']}.wav" if row["origin"] == "d2" else row["audio_filepath"]
         if row["audio_filepath"] != dst and not dry:
             shutil.copyfile(row["audio_filepath"], dst)
         if dry:
@@ -699,7 +708,7 @@ def label2_lang(lang: str, limit: int = 0, int_new_hours: float = 1.5, crops: bo
             if not C.edges_match(label, g):
                 cst["edge_word"] += 1  # an edge word clipped, or a neighbour's tail left in the audio (review H3)
                 continue
-            wav = f"{out}/crops/{nr['id']}_c{k}.wav"
+            wav = f"{crop_dir}/{nr['id']}_c{k}.wav"
             sf.write(wav, xc, 16000, subtype="PCM_16")
             sub = flags[cp["i0"]:cp["i1"]]
             crop_rows.append({"audio_filepath": wav, "duration": round(len(xc) / 16000, 3), "text": label,
@@ -853,6 +862,20 @@ def _lang_ctc(D, lang: str, model: str):
     return CaseCTC(lang, model=model or None)
 
 
+def pass_suffix(name: str) -> str:
+    """The file suffix of a label2 pass: "rows" -> "", "rows_x" -> "_x", "x" -> "_x" (stats<sfx>.json, crops<sfx>...)."""
+    return "" if name == "rows" else name[len("rows"):] if name.startswith("rows") else "_" + name
+
+
+def refuse_rerun(out: str, sfx: str, force: bool = False):
+    """label2 opens a pass's rows / crops / diag files for writing: a pass that finished (stats<sfx>.json written at its
+    end) would lose its labels to a rerun under the same name. Raise unless force."""
+    st = f"{out}/stats{sfx}.json"
+    if os.path.exists(st) and not force:
+        raise FileExistsError(f"{st} exists: this pass already ran; give the new pass its own --name, or --force to "
+                              f"overwrite it")
+
+
 def _vox_suffix(rid: str):
     """VoxPopuli time suffix: one utterance can sit under two agenda ids (leakage check 2026-10-15)."""
     m = re.search(r"_(\d{8}-\d{2}:\d{2}:\d{2}_\d+)$", str(rid))
@@ -913,7 +936,7 @@ def windows2_lang(lang: str, per_stream: int = 3, max_rows: int = 8, seed: int =
     held = _id_set(f"{OUT2}/heldout_{lang}.txt")
     import glob as _gv
 
-    held |= {json.loads(l)["id"] for p in _gv.glob(f"{out}/val_*.jsonl") for l in open(p)}  # validation-only rows
+    held |= {json.loads(l)["id"] for p in sorted(_gv.glob(f"{out}/val_*.jsonl")) for l in open(p)}  # validation-only rows
     held_sfx = {_vox_suffix(i) for i in held} - {None}
     import glob as _g
 
@@ -924,11 +947,11 @@ def windows2_lang(lang: str, per_stream: int = 3, max_rows: int = 8, seed: int =
     held_day = {day(i) for i in held} - {None}  # review H2: and the VoxPopuli plenary day
     skip = held | _id_set(f"{out}/reject_ids.txt") | {r["id"] for r in rows_all if _vox_suffix(r["id"]) in held_sfx
                                                        or vid(r["id"]) in held_vid or day(r["id"]) in held_day}
-    # rows decided by a second recognizer (span by in EXT_BY: "ext" and "ext_pick", as in mix_build.build4) never enter
-    # windows or pairs
-    from ml_balance import EXT_BY
+    # rows decided by a second recognizer (census_common.EXT_BY, the definition mix_build.build4 and the data gate use)
+    # never enter windows or pairs
+    from census_common import EXT_BY, ext_row  # noqa: F401
 
-    ext_ids = {r["id"] for r in rows_all if any(sp.get("by") in EXT_BY for sp in r.get("spans") or [])}
+    ext_ids = {r["id"] for r in rows_all if ext_row(r)}
     skip |= ext_ids
     wave2 = lang in WAVE2
     if wave2:
@@ -936,7 +959,7 @@ def windows2_lang(lang: str, per_stream: int = 3, max_rows: int = 8, seed: int =
         skip |= {r["id"] for r in rows_all if C.vox_day(r["id"]) in hdays}
     if heldout:  # eval windows: the held-out side of the same split (val_* rows included), never training rows
         val_rows = [json.loads(l) for p in sorted(_g.glob(f"{out}/val_*.jsonl")) for l in open(p)]
-        ext_ids |= {r["id"] for r in val_rows if any(sp.get("by") in EXT_BY for sp in r.get("spans") or [])}
+        ext_ids |= {r["id"] for r in val_rows if ext_row(r)}
         rows_all = rows_all + val_rows
         ho_ids = (skip | {r["id"] for r in val_rows}) - _id_set(f"{out}/reject_ids.txt") - ext_ids
         include_tts = False
@@ -1069,7 +1092,7 @@ def _seen_pair_keys(out: str, tag: str) -> set:
     import glob
 
     keys = set()
-    for p in glob.glob(f"{out}/seam*.jsonl"):
+    for p in sorted(glob.glob(f"{out}/seam*.jsonl")):
         if os.path.basename(p) == f"seam{tag}.jsonl":
             continue  # this run's own output
         halves = {}
@@ -1129,7 +1152,7 @@ def _seam_pass(lang, out, rows, rng, ctc, read, cache, max_rows, positions, limi
     import glob
 
     judged = set()  # "from judged rows": only passes the judge step marked (a pass still being labelled is skipped)
-    for p in glob.glob(f"{out}/rows*.jsonl") + (glob.glob(f"{out}/val_*.jsonl") if heldout else []):
+    for p in sorted(glob.glob(f"{out}/rows*.jsonl")) + (sorted(glob.glob(f"{out}/val_*.jsonl")) if heldout else []):
         if os.path.exists(f"{out}/judged_{os.path.basename(p)[:-6]}.json"):
             judged |= {json.loads(l)["id"] for l in open(p) if l.strip()}
     if heldout:  # held-out synthetic voices (heldout_tts): their sets are judged as a whole, rejects already out
@@ -1592,7 +1615,7 @@ def granvox_fill_select_lang(lang: str, quotas: dict, years_per_lang: int = 4, s
     if os.path.exists(vv):
         held |= {json.loads(l)["id"][:8] for l in open(vv) if l.strip()}
     exclude = set()
-    for p in glob.glob(f"{OUT2}/{lang}/cands_*.jsonl"):
+    for p in sorted(glob.glob(f"{OUT2}/{lang}/cands_*.jsonl")):
         exclude |= {json.loads(l)["id"] for l in open(p) if l.strip()}
     rows = [json.loads(l) for l in open(f"{VOL}/ml/granvox/{lang}/index.jsonl")]
     sel, st = vox_fill.select(rows, lang, quotas, held, exclude, seed=seed, years_per_lang=years_per_lang)
@@ -1682,7 +1705,7 @@ def label2(langs: str = ",".join(LANGS), limit: int = 0, int_new_hours: float = 
            dry_per_kind: int = 0, srcs: str = "vox,yodas", with_d2: bool = True, name: str = "rows", ext: str = "",
            cer_ext: bool = True, split_long: bool = True, max_row: float = 20.0, only_ids: str = "",
            trim_ext: bool = True, piece_ext: bool = True, salvage: bool = True, decide_off: str = "",
-           cands_off: str = "", partial: bool = True, ctc_model: str = ""):
+           cands_off: str = "", partial: bool = True, ctc_model: str = "", force: bool = False):
     import ml_cands as M
 
     M.CAND_FIXES -= set(filter(None, cands_off.split(",")))  # the coverage check below sees the same candidates
@@ -1692,7 +1715,15 @@ def label2(langs: str = ",".join(LANGS), limit: int = 0, int_new_hours: float = 
         assert not bad, f"--ctc-model strong has no reader for {bad}"
         assert name not in ("rows", "rows_" + srcs), "a strong-reader pass needs its own --name"
 
-    for l in langs.split(","):  # review M9: a missing grammar key silently drops its span; refuse to start instead
+    if not (dry_per_kind or only_ids or force):  # a finished pass is not relabelled into its own files (refuse_rerun)
+        for l in langs.split(","):
+            try:
+                b"".join(vol.read_file(f"ml/p3v2/{l}/stats{pass_suffix(name)}.json"))
+            except FileNotFoundError:
+                continue
+            raise FileExistsError(f"ml/p3v2/{l}/stats{pass_suffix(name)}.json exists: pass {name!r} already ran for {l}; "
+                                  "give the new pass its own --name, or --force to overwrite it")
+    for l in langs.split(","):  # a missing grammar key silently drops its span; refuse to start instead
         texts = []
         for src in srcs.split(","):
             try:
@@ -1710,7 +1741,7 @@ def label2(langs: str = ",".join(LANGS), limit: int = 0, int_new_hours: float = 
         print(f"{l}: grammar table covers {len(texts)} captions")
     for r in label2_lang.starmap([(l, limit, int_new_hours, crops, dry_per_kind, srcs, with_d2, name, ext, cer_ext,
                                    split_long, max_row, only_ids, trim_ext, piece_ext, salvage, decide_off, cands_off,
-                                   partial, ctc_model)
+                                   partial, ctc_model, force)
                                   for l in langs.split(",")]):
         print(json.dumps({k: v for k, v in r.items() if k not in ("examples", "row_samples", "noncanonical_different_words")},
                          ensure_ascii=False))

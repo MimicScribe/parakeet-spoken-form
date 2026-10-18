@@ -445,7 +445,7 @@ def span_mask(spm, pairs, batch, width, device):
 
 
 # ---------------------------------------------------------------------------------------------------------------
-# RETRAIN-3 auxiliary losses (plan R3.12.3 / R3.12.1 N1-N4 / review #4). One joint pass per sub-batch over EVERY row:
+# RETRAIN-3 auxiliary losses. One joint pass per sub-batch over EVERY row:
 #   tag      English  blank+gnorm KL      punct KL         token KL  wf_pen  en_pen
 #   anchor   yes      full                full             -         yes     -
 #   anchor_num yes    -  (v10pt numwords exemption)  -     -         yes     -
@@ -505,7 +505,7 @@ def nspan_prefix(row: dict) -> str:
         toks = row["text"].split()
         k = row["num_tokens"].index(True) if True in row["num_tokens"] else len(toks)
         return " ".join(toks[:k])
-    # review H5: a row without offsets would be fully anchored to the digit-writing teacher
+    # a row without offsets would be fully anchored to the digit-writing teacher
     raise ValueError(f"nonen_span row without num_chars / num_tokens: {row.get('id') or row['text'][:60]}")
 
 
@@ -857,7 +857,7 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             # nonen_span rows: token KL on the prefix only (klu), never on or after the spoken number
             tok_rows = nonen_sl[:, None, None] | (nspan_sl[:, None, None] & klu_sl[:, None, :U])
             tmask = mask & tok_rows & (t_lnb.exp() > emit_p)
-            # review H4: on nonen_span rows the prefix columns still span every frame, including the number's audio,
+            # on nonen_span rows the prefix columns still span every frame, including the number's audio,
             # where stock writes digits; drop cells where the teacher's written-form mass (given non-blank) is > 0.1
             if bool(nspan_sl.any()):
                 t_wf = (t_logits[..., wf].logsumexp(-1) - t_nbz).exp()
@@ -919,7 +919,7 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                        "kl_t": kl_t.detach(), "wf": wf_pen.detach(), "en": en_pen.detach(),
                        "th": th_pen.detach(), "kl_d": kl_d.detach(), "cons": cons.detach()}
         if os.environ.get("R3_GRADSHARE") and batch_idx % 50 == 0:
-            # E2 acceptance (R3.12.3): each term's gradient on the joint's last layer, overall and on the written-form
+            # acceptance check: each term's gradient on the joint's last layer, overall and on the written-form
             # output rows (wf_pen must reach >= 10% of the RNNT gradient there)
             W = m.joint.joint_net[-1].weight
             wf_rows = wf.clamp(max=W.shape[0] - 1)
@@ -1041,7 +1041,7 @@ def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_text
                     except ValueError as e:  # num_tokens / label length mismatch: this row keeps the prefix rule
                         print(f"R4 word flags skipped: {e}")
                     if (x.get("synthetic") or str(x.get("origin", "")).startswith("tts")
-                            or path.startswith("mix4/tts_")):
+                            or re.match(r"mix4\w*/tts_", path)):  # a candidate mix dir (mix4final/...) too
                         syn.add(x["text"])
             if tag in ("anchor", "anchor_num"):
                 # rows that say a number (numberish words, Roman numerals) are KL-exempt (v10pt's numwords rule): the
@@ -1180,7 +1180,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         ids = lambda t: tuple(m.tokenizer.text_to_ids(t))  # noqa: E731
         row_tags = {}
         ns = tagged.get("nonen_span", set())
-        for other in ("free", "span", "anchor_num", "nonen", "anchor"):  # review M1: a stricter tag would win silently
+        for other in ("free", "span", "anchor_num", "nonen", "anchor"):  # a stricter tag would win silently
             both = ns & tagged.get(other, set())
             assert not both, f"{len(both)} nonen_span labels also tagged {other}, e.g. {next(iter(both))[:80]!r}"
         for tag in ("free", "span", "nonen_span", "anchor_num", "nonen", "anchor"):  # later = stricter wins
