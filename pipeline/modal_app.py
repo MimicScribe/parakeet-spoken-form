@@ -1720,6 +1720,9 @@ R3_ARMS.update({
     # R8-s-wfd = R8-s + wf_pen on digit pieces only, NO kl_mask_space: the clean symbol-class test
     "R8-s-wfd": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, wf_pen_digits_only=True),
     "R9-S1": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0"),
+    # R8-s-entm = R8-s-ent + the '▁' digit-cell mask on the English teacher's rows only (non-English rows unmasked as in
+    # R8-s): English written-form fix without the non-English damage of kl_mask_space (bisect 2026-10-18)
+    "R8-s-entm": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, en_teacher="w3soup_a0.5@0", kl_mask_space_en=True),
     "R9-S2": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0",
                   wf_weight=0.0),
     "R9-S3": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R7_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0"),
@@ -1781,6 +1784,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     cfg.setdefault("l2sp_exempt_num", False)
     cfg.setdefault("kl_scale", 1.0)
     cfg.setdefault("wf_pen_digits_only", False)
+    cfg.setdefault("kl_mask_space_en", False)
     cfg.setdefault("en_teacher", "")
     cfg.setdefault("en_teacher_num", "anchor")
     cfg.setdefault("en_kl_scale", 1.0)
@@ -1843,7 +1847,8 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
                    en_weight=en_weight, l2sp_c=cfg["l2sp_c"], l2sp_anchor=anchor, dur_weight=dur_weight,
                    en_set=cfg["en_set"], r3_sub_batch=r3_sub_batch, comma_weight=cfg["comma_weight"],
                    wf_en_weight=cfg["wf_en_weight"], unfreeze_top=unfreeze_top, kl_mask_space=cfg["kl_mask_space"],
-                   l2sp_exempt_num=cfg["l2sp_exempt_num"], wf_pen_digits_only=cfg["wf_pen_digits_only"], en_teacher=cfg["en_teacher"],
+                   l2sp_exempt_num=cfg["l2sp_exempt_num"], wf_pen_digits_only=cfg["wf_pen_digits_only"],
+                   kl_mask_space_en=cfg["kl_mask_space_en"], en_teacher=cfg["en_teacher"],
                    en_teacher_num=cfg["en_teacher_num"], en_kl_scale=cfg["en_kl_scale"],
                    enc_lr_scale=cfg["enc_lr_scale"], enc_l2sp_c=cfg["enc_l2sp_c"], lora_rank=cfg["lora_rank"],
                    lora_alpha=cfg["lora_alpha"], **r4)
