@@ -1696,6 +1696,12 @@ R3_ARMS.update({
     # R8-s-enk0c0 = R8-s-enk0 with L2-SP off too: is the pull or the English KL the English throttle? (2026-10-18 review)
     "R8-s-enk0c0": dict(_R8, lr=1e-4, l2sp_c=0.0, recipe=_R8S_RECIPE, en_kl_scale=0.0),
     "R8-s-ent": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, en_teacher="w3soup_a0.5@0"),
+    # R9 bounded set (2026-10-18, pre-registered bars): S1 = stock init + kl_mask_space + B as the English KL teacher;
+    # S2 = S1 without the written-form penalty (does wf_pen push digit mass onto wrong words?); S3 = S1 from B (init only)
+    "R9-S1": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0"),
+    "R9-S2": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0",
+                  wf_weight=0.0),
+    "R9-S3": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R7_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0"),
 })
 R3_ARMS.update({
     "R8-s3e": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, wf_en_weight=3.0),
