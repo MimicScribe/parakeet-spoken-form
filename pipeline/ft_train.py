@@ -677,13 +677,16 @@ def anchor_positions(words: list[tuple[str, int, int]], flags: list[bool], n_ids
 
 
 def klu_row(spm, tag: str, ids, suffix_anchor: bool = False, anchor_after: int = 1, nspan_pos: dict | None = None,
-            span_prefix: dict | None = None, cache: dict | None = None) -> list[bool]:
+            span_prefix: dict | None = None, cache: dict | None = None, en_full: bool = False) -> list[bool]:
     """(len(ids) + 1) flags: the label positions where the anchor KL applies for one row (add_r3_losses' table; padding
     beyond len(ids) is masked there anyway). R4 arm b (suffix_anchor): span and anchor_num rows anchor every non-number
     position (anchor_positions over en_number_words); nonen_span rows use nspan_pos (built in train() from the row's
-    number tokens) and fall back to the prefix rule when it has no entry."""
+    number tokens) and fall back to the prefix rule when it has no entry. en_full (en_teacher with en_teacher_num
+    "anchor"): span and anchor_num rows anchor EVERY position, number words included (EN_TEACHER block comment)."""
     n, key = len(ids), tuple(ids)
     if tag in ("anchor", "nonen"):
+        return [True] * (n + 1)
+    if en_full and tag in ("span", "anchor_num"):
         return [True] * (n + 1)
     if suffix_anchor and tag in ("span", "anchor_num"):
         if cache is None or key not in cache:
@@ -705,6 +708,64 @@ def klu_row(spm, tag: str, ids, suffix_anchor: bool = False, anchor_after: int =
     return [False] * (n + 1)  # free, and anchor_num without suffix anchoring (v10pt's numwords exemption)
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# English KL options (2026-10-18). Stock-init arms never relearned B's English spoken form while
+# the English rows were KL-anchored to stock (a digit writer); the anchors-off arm did. Two arms, both off by default:
+# en_kl_scale s (!= 1): the KL terms (blank, punct, duration, English token) of the English KL rows (EN_TEACHER_TAGS)
+#   are multiplied by s per row. Only their numerators: the cell counts the KL averages divide by are unchanged, so
+#   the non-English rows' contribution stays exactly what it is at s = 1 (s = 0: no KL on English, the rest as stock).
+# en_teacher (a decoder + joint checkpoint, e.g. B = w3soup_a0.5@0): a second frozen teacher. English KL rows read ITS
+#   logits for every KL term; every other row keeps stock. The teacher reads the same encoder output as the stock
+#   teacher (B was trained with the encoder frozen: its encoder IS stock; a checkpoint holding encoder tensors is
+#   refused). Masks under this teacher:
+#   - token KL: English rows had none (stock writes digits, the RNNT term owned the tokens); with a spoken-form teacher
+#     they get one, same rule as the non-English rows (non-blank distribution at the teacher's emitting cells), as its
+#     own term (kl_te, weight tok_weight) so the non-English token-KL average is not diluted.
+#   - number cells, en_teacher_num "anchor" (default): span / anchor_num rows anchor every label position (klu_row
+#     en_full). Both reasons for the stock masks are gone: the teacher writes the number words the label holds, and
+#     teacher forcing on spoken number tokens is its own distribution, so no guard word is needed after them.
+#     en_teacher_num "mask": the stock-era positions (klu_row as without the teacher); the teacher only swaps logits.
+#   - digit cells: wherever the English teacher still puts > 0.1 of its non-blank mass on written-form pieces (B writes
+#     digits on ~11 English sentinel items, alnum codes "Q4"), the cell is dropped from every KL term (the nonen_span
+#     wf_cell rule; with kl_mask_space the bare "▁" counts too).
+EN_TEACHER_TAGS = ("anchor", "anchor_num", "span")
+
+
+def routed_teacher_logits(stock_joint, en_joint, f, g_stock, g_en, en_rows):
+    """Teacher joint logits (float) for one sub-batch: rows where en_rows is True from en_joint on g_en, the others from
+    stock_joint on g_stock, both on the same encoder features f (B, T, D). en_joint None = the stock call, unchanged.
+    Each joint runs only on its own rows."""
+    if en_joint is None or not bool(en_rows.any()):
+        return stock_joint.joint(f, g_stock).float()
+    if bool(en_rows.all()):
+        return en_joint.joint(f, g_en).float()
+    a = stock_joint.joint(f[~en_rows], g_stock[~en_rows]).float()
+    b = en_joint.joint(f[en_rows], g_en[en_rows]).float()
+    out = a.new_empty((f.shape[0],) + tuple(a.shape[1:]))
+    out[~en_rows] = a
+    out[en_rows] = b
+    return out
+
+
+def build_en_teacher(m, state: dict):
+    """(decoder, joint): frozen eval copies of m's decoder / joint with `state`'s tensors ("decoder." / "joint." names,
+    a train() step checkpoint). Refuses a checkpoint with any other tensor (an encoder fine-tune cannot share the stock
+    teacher's encoder output) or one that leaves a decoder / joint tensor unset."""
+    import copy
+
+    other = [k for k in state if not k.startswith(("decoder.", "joint."))]
+    assert not other, f"en_teacher checkpoint holds {len(other)} non decoder / joint tensors, e.g. {other[:3]}"
+    dec, joint = copy.deepcopy(m.decoder), copy.deepcopy(m.joint)
+    for mod, pre in ((dec, "decoder."), (joint, "joint.")):
+        missing, unexpected = mod.load_state_dict({k[len(pre):]: v for k, v in state.items() if k.startswith(pre)},
+                                                  strict=False)
+        assert not unexpected and not missing, (pre, missing[:3], unexpected[:3])
+        mod.eval()
+        for p in mod.parameters():
+            p.requires_grad_(False)
+    return dec, joint
+
+
 def blank_gate(kmask, t_lnb, thr):
     """Cells where the blank KL applies: kmask and teacher P(non-blank) > the row's threshold. kmask / t_lnb (B, T, U),
     thr (B,)."""
@@ -722,12 +783,13 @@ def row_gate(tags: list[str], keys: list, gate: float, gate_human: float, synthe
 
 def per_tag_summary(tags: list[str], acc: list) -> dict:
     """{tag: {term: value, term_n: count}} from the per-row (numerator, denominator) vectors of add_r3_losses' chunk:
-    acc[0/1] blank KL, [2/3] punct KL, [4/5] token KL, [6/7] wf_pen, [8/9] en_pen (numerator / count per row)."""
+    acc[0/1] blank KL, [2/3] punct KL, [4/5] token KL, [6/7] wf_pen, [8/9] en_pen (numerator / count per row), and
+    [16/17] the English token KL (en_teacher) when acc holds it."""
     out = {}
     for tg in sorted(set(tags)):
         ix = torch.tensor([i for i, t in enumerate(tags) if t == tg], device=acc[0].device)
         d = {"rows": len(ix)}
-        for name, k in (("kl_b", 0), ("kl_p", 2), ("kl_t", 4), ("wf", 6), ("en", 8)):
+        for name, k in (("kl_b", 0), ("kl_p", 2), ("kl_t", 4), ("wf", 6), ("en", 8)) + ((("kl_te", 16),) if len(acc) > 17 else ()):
             num, den = acc[k][ix].sum(), acc[k + 1][ix].sum()
             d[name], d[name + "_n"] = float(num / den.clamp(min=1)), int(den)
         out[tg] = d
@@ -870,7 +932,8 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                   anchor_after: int = 1, nspan_pos: dict | None = None, gate: float = 0.9, gate_human: float = 0.0,
                   synthetic: set | None = None, cons_weight: float = 0.0, pair_bank: "PairBank | None" = None,
                   en_set: str = "whole", comma_weight: float = 0.0, wf_en_weight: float = 1.0,
-                  kl_mask_space: bool = False):
+                  kl_mask_space: bool = False, en_teacher_state: dict | None = None, en_teacher_num: str = "anchor",
+                  en_kl_scale: float = 1.0):
     """R3 losses (table above). R4 options, all off by default: suffix_anchor (arm b: anchor every non-number position of
     span / anchor_num rows, and of nonen_span rows via nspan_pos {label ids: anchor_positions}), gate_human (arm b: the
     blank-KL teacher gate on human-verified rows, `gate` elsewhere), cons_weight + pair_bank (arm c: cross-window
@@ -880,15 +943,25 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
     unchanged bit for bit. wf_en_weight != 1: wf_pen per row x wf_row_weights (English rows x wf_en_weight, nonen_span
     rows x 1); 1 = unchanged bit for bit. kl_mask_space: the nonen_span "teacher is writing digits" cell mask also counts
     the bare word-boundary piece "▁" (the only entry into digit mode: the vocabulary has no "▁2"-style pieces), so the
-    KL terms stop teaching digit entry over the number's audio at units-first onsets; False = unchanged bit for bit."""
+    KL terms stop teaching digit entry over the number's audio at units-first onsets; False = unchanged bit for bit.
+    en_teacher_state (a decoder + joint state dict) / en_teacher_num / en_kl_scale: the English KL options (block comment
+    at EN_TEACHER_TAGS); None / 1 = unchanged bit for bit."""
     import copy
 
     assert en_set in ("whole", "first"), en_set
+    assert en_teacher_num in ("anchor", "mask"), en_teacher_num
+    assert en_kl_scale >= 0, en_kl_scale
 
     teacher_dec, teacher_joint = copy.deepcopy(m.decoder).eval(), copy.deepcopy(m.joint).eval()
     for p in list(teacher_dec.parameters()) + list(teacher_joint.parameters()):
         p.requires_grad_(False)
     m._kl_teacher = (teacher_dec, teacher_joint)
+    m._kl_en_teacher = build_en_teacher(m, en_teacher_state) if en_teacher_state is not None else None
+    en_full = m._kl_en_teacher is not None and en_teacher_num == "anchor"
+    if m._kl_en_teacher is not None or en_kl_scale != 1.0:
+        print(f"English KL rows {EN_TEACHER_TAGS}: teacher {'second checkpoint' if m._kl_en_teacher else 'stock'}"
+              + (f" (number cells: {en_teacher_num}; English token KL on)" if m._kl_en_teacher else "")
+              + f", KL x {en_kl_scale}; every other row: stock teacher, KL x 1", flush=True)
     spm = m.tokenizer.tokenizer
     term_t = torch.tensor([i for i in range(spm.get_piece_size())
                            if spm.id_to_piece(i).lstrip("▁") in {".", "?", "!", "...", "…"}])
@@ -929,6 +1002,9 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
         signal, signal_len, tokens, tokens_len = batch[:4]
         tdec, tjoint = m._kl_teacher
         tdec.to(signal.device), tjoint.to(signal.device)
+        edec, ejoint = m._kl_en_teacher or (None, None)
+        if edec is not None:
+            edec.to(signal.device), ejoint.to(signal.device)
         dev = signal.device
         if getattr(m, "_enc_unfrozen", ()):
             # unfreeze_top: the student side takes the training pass's own encoder output (with its graph, so these
@@ -950,6 +1026,10 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                 enc, enc_len = m.encoder(audio_signal=feats, length=feats_len)
                 t_g, _, _ = tdec(targets=tokens, target_length=tokens_len)
             f_s = None
+        te_g = None
+        if edec is not None:  # the English teacher's prediction net on the same labels (it shares `enc`, stock)
+            with torch.no_grad():
+                te_g, _, _ = edec(targets=tokens, target_length=tokens_len)
         with NoDropout(m.decoder):
             s_g, _, _ = m.decoder(targets=tokens, target_length=tokens_len)
         f = enc.transpose(1, 2)
@@ -962,8 +1042,10 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
         klu = torch.zeros(B, W, dtype=torch.bool)  # label positions where KL applies
         for i, tg in enumerate(tags):
             klu[i, :len(row_toks[i]) + 1] = torch.tensor(klu_row(spm, tg, row_toks[i], suffix_anchor, anchor_after,
-                                                                 nspan_pos, span_prefix, en_cache))
+                                                                 nspan_pos, span_prefix, en_cache, en_full))
         klu = klu.to(dev)
+        is_en = torch.tensor([tg in EN_TEACHER_TAGS for tg in tags], device=dev)
+        is_ent = is_en & (edec is not None)  # rows read from the English teacher
         thr = torch.tensor(row_gate(tags, [tuple(t) for t in row_toks], gate, gate_human, synthetic or set()), device=dev)
         is_nonen = torch.tensor([tg == "nonen" for tg in tags], device=dev)
         is_nspan = torch.tensor([tg == "nonen_span" for tg in tags], device=dev)
@@ -988,11 +1070,11 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
         cm_ok = (~comma_target_cols(row_toks, cm_t.tolist(), W)).to(dev) if comma_weight else torch.ones_like(klu)
 
         def chunk(fs_sl, f_sl, s_sl, t_sl, enc_len_sl, tok_len_sl, klu_sl, nonen_sl, nspan_sl, yr_sl, yrcol_sl, thr_sl,
-                  cmok_sl):
+                  cmok_sl, te_sl, ent_sl):
             with NoDropout(m.joint):
                 s_logits = m.joint.joint(fs_sl, s_sl).float()
             with torch.no_grad():
-                t_logits = tjoint.joint(f_sl, t_sl).float()
+                t_logits = routed_teacher_logits(tjoint, ejoint, f_sl, t_sl, te_sl, ent_sl)
             T, U = s_logits.shape[1], s_logits.shape[2]
             mask = ((torch.arange(T, device=dev)[None, :, None] < enc_len_sl[:, None, None])
                     & (torch.arange(U, device=dev)[None, None, :] <= tok_len_sl[:, None, None]))
@@ -1018,14 +1100,18 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             tmask = mask & tok_rows & (t_lnb.exp() > emit_p)
             # on nonen_span rows the prefix columns still span every frame, including the number's audio,
             # where stock writes digits; drop cells where the teacher's written-form mass (given non-blank) is > 0.1
-            if bool(nspan_sl.any()):
+            # English token KL (en_teacher only): the English teacher's rows at their klu positions, own term (kl_te)
+            temask = mask & ent_sl[:, None, None] & klu_sl[:, None, :U] & (t_lnb.exp() > emit_p)
+            if bool(nspan_sl.any()) or bool(ent_sl.any()):
+                # the English teacher's digit cells drop out the same way (where it still writes digits)
                 t_wf = (t_logits[..., wfm].logsumexp(-1) - t_nbz).exp()
-                wf_cell = nspan_sl[:, None, None] & (t_wf > 0.1)
+                wf_cell = (nspan_sl | ent_sl)[:, None, None] & (t_wf > 0.1)
                 tmask = tmask & ~wf_cell
                 bmask = bmask & ~wf_cell
                 kmask = kmask & ~wf_cell
                 dmask = dmask & ~wf_cell
-            if bool((nonen_sl | nspan_sl).any()):
+                temask = temask & ~wf_cell
+            if bool((nonen_sl | nspan_sl | ent_sl).any()):
                 s_lp = s_logits[..., :nb - 1] - s_nbz[..., None]
                 t_lp = t_logits[..., :nb - 1] - t_nbz[..., None]
                 kl_t = (t_lp.exp() * (t_lp - s_lp)).sum(-1)
@@ -1054,7 +1140,8 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             # per-row sums (summed over the batch below; per tag for the r3tag log line)
             return ((kl_blank * bmask).sum((1, 2)), bmask.sum((1, 2)).float(), (kl_p * kmask).sum((1, 2)),
                     kmask.sum((1, 2)).float(), (kl_t * tmask).sum((1, 2)), tmask.sum((1, 2)).float(), wf_s, wf_n, en_s,
-                    en_n, th_s, th_n, (kl_d * dmask).sum((1, 2)), dmask.sum((1, 2)).float(), cm_s, cm_n)
+                    en_n, th_s, th_n, (kl_d * dmask).sum((1, 2)), dmask.sum((1, 2)).float(), cm_s, cm_n,
+                    (kl_t * temask).sum((1, 2)), temask.sum((1, 2)).float())
 
         parts = []
         for j in range(0, B, sub_batch):
@@ -1064,8 +1151,12 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             parts.append(torch.utils.checkpoint.checkpoint(
                 chunk, f_s[sl, :t], f[sl, :t], s_g[sl, :, :u].transpose(1, 2), t_g[sl, :, :u].transpose(1, 2),
                 enc_len[sl], tokens_len[sl], klu[sl], is_nonen[sl], is_nspan[sl], is_yr[sl], yrcol[sl], thr[sl],
-                cm_ok[sl], use_reentrant=False))
-        acc = [torch.cat(v) for v in zip(*parts)]  # 16 per-row vectors (B,)
+                cm_ok[sl], None if te_g is None else te_g[sl, :, :u].transpose(1, 2), is_ent[sl], use_reentrant=False))
+        acc = [torch.cat(v) for v in zip(*parts)]  # 18 per-row vectors (B,)
+        if en_kl_scale != 1.0:  # numerators only: the KL averages keep their cell counts (block comment)
+            w_en = torch.where(is_en, torch.full((), float(en_kl_scale), device=dev), torch.ones((), device=dev))
+            for k in (0, 2, 12, 16):  # blank, punct, duration, English token KL
+                acc[k] = acc[k] * w_en
         tot = [a.sum() for a in acc]
         kl_b = tot[0] / tot[1].clamp(min=1)
         kl_p = tot[2] / tot[3].clamp(min=1)
@@ -1079,6 +1170,9 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                + wf_weight * th_pen + dur_weight * kl_d)
         if comma_weight:  # off: the sum above, unchanged bit for bit
             aux = aux + comma_weight * cm_pen
+        kl_te = tot[16] / tot[17].clamp(min=1)
+        if edec is not None:  # off: no English token KL, unchanged bit for bit
+            aux = aux + tok_weight * kl_te
         cons, n_pairs = torch.zeros((), device=dev), 0
         if cons_weight and pair_bank is not None:
             cons, n_pairs = consistency_term(m, pair_bank, dev, nb)
@@ -1087,6 +1181,8 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                        "kl_t": kl_t.detach(), "wf": wf_pen.detach(), "en": en_pen.detach(),
                        "th": th_pen.detach(), "kl_d": kl_d.detach(), "cons": cons.detach(),
                        "comma": cm_pen.detach()}
+        if edec is not None:
+            m._r3_parts["kl_te"] = kl_te.detach()
         if os.environ.get("R3_GRADSHARE") and batch_idx % 50 == 0:
             # acceptance check: each term's gradient on the joint's last layer, overall and on the written-form
             # output rows (wf_pen must reach >= 10% of the RNNT gradient there)
@@ -1113,7 +1209,8 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             # per tag (rehearsal log): value (cells or rows it averages over)
             for tg, d in per_tag_summary(tags, acc).items():
                 print(f"r3tag {tg} rows {d['rows']} " + " ".join(f"{k} {d[k]:.5f} ({d[k + '_n']})"
-                                                               for k in ("kl_b", "kl_p", "kl_t", "wf", "en")), flush=True)
+                                                               for k in ("kl_b", "kl_p", "kl_t", "wf", "en")
+                                                               + (("kl_te",) if edec is not None else ())), flush=True)
         return out
 
     m.training_step = training_step
@@ -1350,7 +1447,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           anchor_after: int = 1, gate: float = 0.9, gate_human: float = 0.0, cons_weight: float = 0.0,
           cons_pairs: str = "", cons_per_batch: int = 1, en_set: str = "whole", r3_sub_batch: int = 2,
           comma_weight: float = 0.0, wf_en_weight: float = 1.0, unfreeze_top: int = 0, kl_mask_space: bool = False,
-          l2sp_exempt_num: bool = False):
+          l2sp_exempt_num: bool = False, en_teacher: str = "", en_teacher_num: str = "anchor", en_kl_scale: float = 1.0):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
     entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists.
@@ -1363,7 +1460,11 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     encoder train too (unfreeze_top_layers: eval mode, L2-SP to their stock values, saved in every step checkpoint; the r3
     KL teacher keeps the stock blocks); 0 = the frozen encoder, unchanged. l2sp_exempt_num (r3 + l2sp_c): the joint's
     output rows of the pieces that mostly spell non-English spoken numbers (num_piece_ids over the nonen_span labels) and
-    of the bare "▁" piece are exempt from the L2-SP pull too, like the written-form rows; False = unchanged."""
+    of the bare "▁" piece are exempt from the L2-SP pull too, like the written-form rows; False = unchanged.
+    en_teacher (r3) = "<run>@<step>": the English KL rows (anchor / anchor_num / span) take that decoder + joint checkpoint
+    as their KL teacher, every other row keeps stock; en_teacher_num "anchor" | "mask": their number cells anchored to it
+    or masked as with stock; "" = stock everywhere, unchanged. en_kl_scale (r3): the English KL rows' KL terms x this
+    (0 = no KL on English, non-English unchanged); 1 = unchanged. add_r3_losses' EN_TEACHER block comment has the masks."""
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
@@ -1429,6 +1530,14 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         enc_stock = unfreeze_top_layers(m, unfreeze_top)
     if "blankspan" in kl_terms:
         assert kl_replay_only, "blankspan only works with kl_replay_only (span rows are matched by label)"
+    assert r3 or (not en_teacher and en_kl_scale == 1.0), "en_teacher / en_kl_scale need r3"
+    en_state = None
+    if en_teacher:  # loaded on every start (resume too): the teacher is an attribute, never in a checkpoint
+        assert "@" in en_teacher and not en_teacher.startswith("ultra"), f"en_teacher {en_teacher!r}: '<run>@<step>'"
+        src, _, step = en_teacher.partition("@")
+        en_path = f"{vol}/exp/{src}/step{step}.pt"
+        en_state = torch.load(en_path, map_location="cpu")
+        print(f"en_teacher {en_teacher} ({en_path}): {len(en_state)} tensors, number cells {en_teacher_num}", flush=True)
     extra_cb = []
     if r3:
         ids = lambda t: tuple(m.tokenizer.text_to_ids(t))  # noqa: E731
@@ -1473,7 +1582,8 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
                       suffix_anchor=suffix_anchor, anchor_after=anchor_after, nspan_pos=nspan_pos, gate=gate,
                       gate_human=gate_human, synthetic=synthetic, cons_weight=cons_weight, pair_bank=bank,
                       en_set=en_set, sub_batch=r3_sub_batch, comma_weight=comma_weight,
-                      wf_en_weight=wf_en_weight, kl_mask_space=kl_mask_space)
+                      wf_en_weight=wf_en_weight, kl_mask_space=kl_mask_space, en_teacher_state=en_state,
+                      en_teacher_num=en_teacher_num, en_kl_scale=en_kl_scale)
         if l2sp_c:
             last_layer = m.joint.joint_net[-1].weight.shape[0]
             exempt = [i for i in wf_piece_ids(m.tokenizer.tokenizer) if i < last_layer]

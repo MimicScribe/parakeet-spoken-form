@@ -1627,6 +1627,19 @@ R3_ARMS.update({
     "R8-s-m5x": dict(_R8, lr=5e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True, l2sp_exempt_num=True),
     "R8-s-m5k": dict(_R8, lr=5e-4, l2sp_c=0.0, recipe=_R8S_RECIPE, kl_mask_space=True),
 })
+# English KL arms (2026-10-18), one change each against R8-s (stock start, lr 1e-4, c 10). Stock-init arms never
+# relearned the English spoken form B writes (en_wf 70-99 vs B 11) while the English rows were KL-anchored to stock, a
+# digit writer; the anchors-off diagnostic did. ft_train.add_r3_losses, EN_TEACHER block comment:
+#   R8-s-enk0 = R8-s with no KL on the English rows (en_kl_scale 0); non-English rows keep the stock KL, L2-SP unchanged.
+#   R8-s-ent  = R8-s with model B (w3soup_a0.5@0, frozen) as the KL teacher of the English rows, number cells anchored to
+#               it and an English token KL; non-English rows keep the stock teacher.
+#   modal run --detach modal_app.py::retrain3 --run <run> --arm <R8-s-enk0 | R8-s-ent> --mix v4 --mix-dir <dir> \
+#     --langs <RUN2_LANGS> --init-from ultra --anchor-init --dur-weight 0 --warmup 20 --max-steps 500 \
+#     --save-every 250 --r3-sub-batch 1
+R3_ARMS.update({
+    "R8-s-enk0": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, en_kl_scale=0.0),
+    "R8-s-ent": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, en_teacher="w3soup_a0.5@0"),
+})
 R3_ARMS.update({
     "R8-s3e": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, wf_en_weight=3.0),
     "R8-sc": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, comma_weight=3 * _R8["wf_weight"]),
@@ -1679,6 +1692,9 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     cfg.setdefault("kl_mask_space", False)
     cfg.setdefault("l2sp_exempt_num", False)
     cfg.setdefault("kl_scale", 1.0)
+    cfg.setdefault("en_teacher", "")
+    cfg.setdefault("en_teacher_num", "anchor")
+    cfg.setdefault("en_kl_scale", 1.0)
     given = dict(mix=mix, init_from=init_from, anchor_init=anchor_init, dur_weight=dur_weight, warmup=warmup,
                  langs=",".join(_langs(langs)))
     bad = {k: (given[k], v) for k, v in cfg.pop("recipe", {}).items() if given[k] != v}
@@ -1734,7 +1750,8 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
                    en_weight=en_weight, l2sp_c=cfg["l2sp_c"], l2sp_anchor=anchor, dur_weight=dur_weight,
                    en_set=cfg["en_set"], r3_sub_batch=r3_sub_batch, comma_weight=cfg["comma_weight"],
                    wf_en_weight=cfg["wf_en_weight"], unfreeze_top=unfreeze_top, kl_mask_space=cfg["kl_mask_space"],
-                   l2sp_exempt_num=cfg["l2sp_exempt_num"],
+                   l2sp_exempt_num=cfg["l2sp_exempt_num"], en_teacher=cfg["en_teacher"],
+                   en_teacher_num=cfg["en_teacher_num"], en_kl_scale=cfg["en_kl_scale"],
                    **r4)
     vol.commit()
 
