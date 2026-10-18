@@ -1,0 +1,157 @@
+{
+ "nl": {
+  "leads": [
+   [
+    "day",
+    "Een vriend vertelde me:"
+   ],
+   [
+    "day",
+    "Even ter herinnering:"
+   ],
+   [
+    "day",
+    "Ik las laatst in de krant:"
+   ],
+   [
+    "biz",
+    "Dat staat in het jaarverslag:"
+   ],
+   [
+    "biz",
+    "Kort samengevat:"
+   ],
+   [
+    "news",
+    "In het journaal hoorde ik:"
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "biz",
+    ""
+   ],
+   [
+    "news",
+    ""
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "biz",
+    ""
+   ]
+  ],
+  "tails": [
+   "",
+   "",
+   "",
+   "",
+   "",
+   ", als ik het goed heb",
+   ", zeiden ze",
+   ", meen ik",
+   ", als ik me goed herinner"
+  ],
+  "clauses": {
+   "year2": [
+    "het museum werd in {a} geopend en in {b} volledig gerenoveerd",
+    "tussen {a} en {b} is de bevolking van de stad flink gegroeid",
+    "mijn oma is geboren in {a} en mijn opa in {b}",
+    "volgens het rapport stond de werkloosheid in {a} hoger dan in {b}",
+    "we verhuisden in {a} naar Utrecht en kwamen in {b} weer terug",
+    "de fabriek sloot in {a} haar deuren, maar ging in {b} weer open",
+    "na de verkiezingen van {a} volgden er nieuwe in {b}",
+    "in {a} was het weer erg zacht, vergeleken met de winter van {b}",
+    "de brug moet in {a} klaar zijn en de tunnel pas in {b}",
+    "het bedrijf wil in {a} winst maken en in {b} naar de beurs",
+    "onze school bestond in {a} precies vijftig jaar, en in {b} komt er een nieuw gebouw",
+    "de eerste editie was in {a}, de tweede pas in {b}"
+   ],
+   "year3": [
+    "de cijfers voor {a}, {b} en {c} laten een duidelijk dalende lijn zien",
+    "het festival vond plaats in {a}, in {b} en opnieuw in {c}",
+    "onze buren kochten het huis in {a}, verbouwden het in {b} en verkochten het in {c}",
+    "de subsidie wordt uitbetaald in {a}, {b} en {c}, telkens in het najaar",
+    "de overheid wil in {a} een eerste stap zetten, in {b} een tweede en in {c} klaar zijn",
+    "de bibliotheek trok in {a}, {b} en {c} steeds minder bezoekers",
+    "er werd gebouwd in {a} en in {b}, en pas in {c} was alles af"
+   ],
+   "dec2": [
+    "de temperatuur steeg van {a} graden naar {b} graden in één week",
+    "de gemiddelde score was {a} punten, vorig jaar nog {b} punten",
+    "het brood weegt {a} kilo en het pakket erbij {b} kilo",
+    "de regio kreeg gemiddeld {a} millimeter regen, tegen {b} millimeter vorig jaar",
+    "het verbruik is {a} liter per honderd kilometer, en soms zelfs {b} liter",
+    "de werkdag duurde {a} uur en de reis erheen {b} uur",
+    "de plank is {a} meter lang en de kast {b} meter breed",
+    "de patiënt woog eerst {a} kilo en later nog maar {b} kilo"
+   ],
+   "price2": [
+    "het kaartje kostte {a}, maar de parkeerbon was al {b}",
+    "voor de lunch betaalden we {a} en voor het diner {b}",
+    "de reparatie komt uit op {a}, en de onderdelen kosten {b}",
+    "zijn abonnement kost {a} per maand en de verzekering {b}",
+    "een koffie is {a} en een broodje is {b}",
+    "de boete bedroeg {a}, maar na bezwaar werd het {b}",
+    "ik gaf {a} uit aan boeken en {b} aan een nieuwe jas"
+   ],
+   "pricebig2": [
+    "de gemeente trekt {a} uit voor het park en {b} voor de nieuwe fietspaden",
+    "het huis is getaxeerd op {a}, maar de koper bood slechts {b}",
+    "het project kostte eerst {a}, en uiteindelijk zelfs {b}",
+    "de school kreeg {a} aan subsidie en het ziekenhuis {b}",
+    "de auto is nieuw {a} waard en na drie jaar nog maar {b}"
+   ],
+   "time2": [
+    "de eerste trein vertrekt om {a} en de laatste om {b}",
+    "het loket is open vanaf {a}, maar sluit al om {b}",
+    "we hebben om {a} afgesproken, dus ik ben er uiterlijk om {b}",
+    "de vergadering begon om {a} en liep uit tot na {b}",
+    "op vrijdag gaat de winkel open om {a} en dicht om {b}",
+    "de bus naar het station rijdt om {a} en daarna pas weer om {b}"
+   ],
+   "phone1": [
+    "voor vragen kunt u bellen naar {a}, we zijn er de hele ochtend",
+    "mijn nummer is {a}, laat gerust een bericht achter",
+    "het nummer van het ziekenhuis is {a}, dag en nacht bereikbaar",
+    "bel ons op {a} of mail naar het gewone adres",
+    "als je iets nodig hebt, bel dan {a} en vraag naar Els",
+    "de dierenarts is bereikbaar op {a}, ook in het weekend"
+   ],
+   "phone2": [
+    "bel {a} of {b} voor een afspraak met de huisarts",
+    "het kantoor is bereikbaar op {a}, en de storingsdienst op {b}",
+    "mijn werknummer is {a} en mijn privénummer {b}"
+   ],
+   "decade2": [
+    "in {a} luisterden we naar heel andere muziek dan in {b}",
+    "mijn vader groeide op in {a}, mijn moeder in {b}",
+    "veel films uit {a} en {b} worden nog steeds uitgezonden",
+    "de stad veranderde sterk in {a} en nog meer in {b}",
+    "in {a} was alles anders dan in {b}, vertelde mijn buurman"
+   ],
+   "count2": [
+    "er waren {a} stoelen in de zaal en {b} gasten op de lijst",
+    "de school had {a} leerlingen en {b} ouders kwamen naar de avond",
+    "we telden {a} fietsen bij het station en {b} bij de markt"
+   ],
+   "big2": [
+    "het stadion verwelkomde {a} bezoekers, vorig jaar waren dat er nog {b}",
+    "de gemeente telt {a} inwoners en ongeveer {b} huishoudens",
+    "er zijn dit jaar {a} pakketten verstuurd en {b} retouren verwerkt",
+    "de krant haalde {a} abonnees, terwijl de website {b} bezoekers trok",
+    "het project kostte {a} werkuren, waarvan {b} in de laatste maand",
+    "op de beurs kwamen {a} mensen af en werden er {b} folders uitgedeeld"
+   ]
+  }
+ }
+}
