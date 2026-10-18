@@ -1,6 +1,6 @@
 # Next training run: proposal (2026-10-14, proposal only)
 
-**Maintainer decision 2026-10-14: the goal is spoken-form numbers in ALL 25 languages, eventually** ("I want everything in spoken form"). Digits from the model become the exception. A downstream application's number reader stays as the backstop for any digits the model still writes.
+**Project goal (2026-10-14): spoken-form numbers in all 25 languages, eventually.** Digits from the model become the exception. A downstream application's number reader stays as the backstop for any digits the model still writes.
 
 Builds on [`OBSERVATIONS.md`](../OBSERVATIONS.md) and [`RESTART.md`](../RESTART.md). Init from model B (`w3soup_a0.5@0`). Same method as B: decoder + joint only, KL to stock, `dur_weight 0`, soup + α blend.
 
@@ -77,7 +77,7 @@ That test is the per-language "seam disputes" gate below; its B baseline is the 
 |---|---|
 | GPU: mix build, one rehearsal, one main run, soups, NeMo evals | ≈ $10–20 |
 | Data | ≈ $0: the six languages are already labelled. Greek and the mixed-label cleanup are mix-build steps |
-| Maintainer time | one listening round on the six languages' held-out readings, ≈ 30 min |
+| Listening time | one listening round on the six languages' held-out readings, ≈ 30 min |
 | Wall clock | about a day: mix + run + NeMo evals ≈ 6 h; streaming-harness gates overnight |
 
 ## Road to all 25 languages
@@ -98,7 +98,7 @@ Notes:
 - The volume of number-bearing speech per language is the main risk for waves 2–3. If a language yields under about 1 h, it waits, or uses licence-checked TTS (Piper voices, checked per voice).
 - Each wave gets the same gates as wave 1: readings ≥ 90% exact, 0 wrong values, FLEURS no worse, seam disputes down.
 
-## Open decisions for the maintainer
+## Open decisions
 
 1. ~~Spoken form in these six languages?~~ Decided: spoken form everywhere, eventually (above).
 2. French: include only if it passes its gate, or leave it on digits now?

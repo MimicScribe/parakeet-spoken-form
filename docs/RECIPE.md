@@ -4,6 +4,19 @@ How a spoken-form training row is made, and what to check before any run. The co
 
 Goal: every number and symbol is written as the words the speaker said, in all 25 languages, with no lost words, no invented words and no changed values. Long numbers (phones, millions, prices with cents, dates, years) matter most.
 
+## Languages and tiers
+
+Run 2 trains 17 non-English languages plus English; the other languages are anchors that stay at stock behaviour (digits). Tiers set the census bar (`data_gate.py` `TIER_LANGS`; `--tier` overrides):
+
+| Tier | Languages | Bar |
+|---|---|---|
+| full | en de es fr it nl pt | the first, strictest bar |
+| next | ru pl ro | same checks, about 55% of the counts |
+| moderate | uk sv cs hu fi sk bg hr | lower counts; bg is held to no regression against stock behaviour only |
+| light / anchors | da et el lv lt mt sl | not trained; FLEURS digit rows keep them at stock (`--anchor18`) |
+
+The 17 codes in `build_mix4 --langs`: de es fr it nl pt ru uk pl ro sv cs hu fi sk bg hr (`RUN2_LANGS` in `modal_app.py`, which lists uk with ru, pl, ro; the census tier for uk is moderate). English is built by the English parts.
+
 ## 1. Source real speech (public data only)
 
 - Parliament speech with machine transcripts (Granary VoxPopuli) plus the matching unlabelled audio.
@@ -17,11 +30,13 @@ Select by class quota (millions, billions, dates, clock times), skip every held-
 
 A second recognizer, number formatting off, gives independent evidence per clip. For some languages it writes words; for others (nl, pl, ro, ru, uk) it writes digits, which is value-only evidence. The transcript is cached per clip and per pass, so nothing is paid for twice.
 
-The fetcher for this transcript is **not included** in this repo (it calls a third-party recognizer). The judges read it from `ext.jsonl`, one JSON object per clip: `id` (the row id), `status` (`"completed"`; `judge_reject.py` treats anything else as no judge), `text` (the transcript), and optionally `words` (`[{"w": ...}, ...]`, preferred over `text` when present). `judge_plro.py` reads only `id` and a non-empty `text`.
+The fetcher for this transcript is **not included** in this repo. Any independent recognizer with number formatting off will do. The judges read its output from `ext.jsonl`, one JSON object per clip, and use only: `id` (the row id), `status` (`"completed"`; `judge_reject.py` treats anything else as no judge), `text` (the transcript), and optionally `words` (`[{"w": ...}, ...]`, preferred over `text` when present; only the `w` field is read). Timestamps are not needed (`judge_reject.py` `judge_tokens` and `judge_row_nl`, `wordfix_ext.py`). `judge_plro.py` reads only `id` and a non-empty `text`.
 
 ## 3. Build the grammar table
 
-`pipeline/ml_grammar_table.json` maps `lang|kind|value` to its accepted spoken readings, including gender, case and cents rules. Build it from a dumper, then check that every key the labeller will ask for exists. Labelling refuses to start when keys are missing.
+`pipeline/ml_grammar_table.json` is checked in and usable as is. It maps a key to the spoken words of one reading (a list of words, or `["null"]` for "nothing is said here"). A key has seven `|`-separated fields, `lang|kind|n|f|s|h|m`: language, kind (`card`, `dec`, `ord`, `year`, `cur`, `pct`, `clock`), the number, a form flag (for example `01` for cents), a currency symbol, and hour / minute parts for clock times (the request fields in `ml_cands.build_table`). Example: `es|year|1998|||0|0` -> `mil novecientos noventa y ocho`. It has about 45,900 keys for de, es, fr, it, nl, pt, ru and uk. English and the other 16 languages use their own readers (`readings.py`, `ml_multi.py`), not this table.
+
+To extend it, `ml_cands.build_table` asks a grammar dumper for every key the texts need and merges the answers. The dumper is not published, so supply your own that reads `requests.json` and writes `answers.json` in the same order (see `build_table`). Check that every key the labeller will ask for exists; labelling refuses to start when keys are missing.
 
 ## 4. Label
 
@@ -41,7 +56,7 @@ For the 16 languages with less data, `ml_multi.py` then `ml_multi_tight.py` cut 
 
 One transcript check per row against the second transcript (`eval/quality/judge_reject.py` for de/es/fr/it/nl/pt, `judge_plro.py` for pl/ro and the next-tier languages). The driver that fetches `ext.jsonl` and runs the judges over all passes is not included.
 
-The mix builder (`mix_build.build4`) refuses a pass without `ml/p3v2/<lang>/judged_<pass>.json` and a language without `ml/p3v2/<lang>/reject_ids.txt`. Only `judge_plro.py --upload` writes both. After `judge_reject.py` you do it by hand: copy its `judge_stats.json` to `judged_<pass>.json`, append its `reject_ids.txt` to the language's `reject_ids.txt` (one id per line), and put both on the volume. Synthetic sets need their own `judged_<set>.json`.
+The mix builder (`mix_build.build4`) refuses a pass without `ml/p3v2/<lang>/judged_<pass>.json` and a language without `ml/p3v2/<lang>/reject_ids.txt`. Only `judge_plro.py --upload` writes both; for `judge_reject.py` see the manual step under Troubleshooting.
 
 ## 7. Repair instead of dropping
 
@@ -123,3 +138,9 @@ A language that fails its gate stays on the baseline.
 15. **Pilot every paid step.** Stop if yield is under 30% or a spot check is under 95%.
 16. **Disk floors and rate limits.** Keep free disk, and use few readers with backoff against hub 429s.
 17. **Quote heredoc delimiters** in shell scripts.
+
+## Troubleshooting
+
+- **Run `modal run` from `pipeline/`.** The Modal images add local files by relative path. Booleans are `--flag` / `--no-flag`; underscores in parameter names become dashes.
+- **`never judged` or `reject_ids.txt missing` from `build4`.** After `judge_reject.py`, copy its `judge_stats.json` to `ml/p3v2/<lang>/judged_<pass>.json`, append its `reject_ids.txt` (one id per line) to `ml/p3v2/<lang>/reject_ids.txt`, and put both on the volume. Synthetic sets need their own `judged_<set>.json`.
+- **Scoring with `score_retrain.py`.** See RESTART.md section 6.A: `--base` is a flag, not a value, unless `--select` is used.

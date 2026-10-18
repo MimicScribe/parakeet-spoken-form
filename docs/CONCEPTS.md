@@ -15,16 +15,19 @@ Reference transcripts are a weak test for number seams, because most references 
 
 We do **not** train on the harness outputs. The harness only measures. Training data comes from real and separately synthesised speech, so the test stays independent of the training set.
 
-Measured breakdown: about 70% of long-number seam breaks in the baseline were merge-made splices (94 of 130); the rest were edge garbles inside one window.
+Measured breakdown: on the synthetic bank, about 70% of model B's long-number seam breaks were merge-made splices (94 of 130); the rest were edge garbles inside one window. On real held-out speech about 50% of breaks were merge-touched (RESULTS sections 1 and 2).
 
 ## 2. Half-conversion causes seam breaks
 
 A model that writes words for some numbers and digits for others, followed by a downstream digit-to-words step, is the worst of both. Two overlapping windows decode the same audio; one writes the number as words, the other as digits, and the later step reads the digits in its own grammar. The two forms differ, the merge has nothing to align on, and the stitch splices them.
 
-- Digits-only baseline: consistent, few breaks.
-- Fully converted English: consistent, about 0 breaks.
-- A blended (soup) checkpoint at alpha 0.5: converted 38-48% of numbers (Portuguese 19%) and left 50-59% as digits (Portuguese 80%). Seam breaks were worse than the digits-only baseline (209 to 256 in the app-path test).
+- Digits-only baseline: the windows agree on the form; seam breaks were not tabulated for it here.
+- English: 0 seam breaks in both B and R5-b on the synthetic bank, so English does not separate them.
+- Model B has 209 seam breaks on the 22-language synthetic bank, mostly outside English.
+- R5-b, a blended (soup) checkpoint at alpha 0.5, converted 38-48% of numbers on real held-out speech in 6 languages (Portuguese 19%) and left 50-59% as digits (Portuguese 80%). On the 22-language synthetic bank its seam breaks rose from 209 to 256 in a streaming-decoder test. On real speech the difference (92 to 101 lenient, 116 to 130 strict) is within noise. These are three different populations; do not add them up.
 - Numbers that mix digits and words inside one number were only 0.3-2.2% at alpha 0.5 (RESULTS section 4), so the split is between numbers, not within one.
+
+Hypothesis (one run per arm, not yet tested at alpha 1.0): the half-conversion is what raised the breaks.
 
 Lesson: pick candidates by **conversion completeness under a damage gate**. Among candidates that stay inside the no-damage limits, take the most converted. Raw accuracy alone will choose a half-converted model.
 
@@ -32,11 +35,11 @@ Lesson: pick candidates by **conversion completeness under a damage gate**. Amon
 
 The obvious fix is in the merge: choose the better of two window readings. It barely helps. The earlier window clips the number at its edge, the next window starts in the middle of the number and **regroups** the digits ("uno nueve ocho" becomes "un millon novecientos ochenta y"), so no window holds the whole number.
 
-Measured: a number-aware merge pick and an edge-trim policy moved errors about 1-2%, and edge trim lost real English words (5-6 words on 7 of 10 real files). Both were dropped.
+Measured: a number-aware merge pick and an edge-trim policy moved errors about 1-2%, and edge trim lost real English words (5-6 words on 7 of 10 real files). Both were dropped. The merge replay was slightly unfaithful on the real bed (7 of 71 files differed from the recorded run), and the live re-decode was a single synthetic-bank test. A further re-decode variant is being tested.
 
-The training answer: **seam pairs cut inside long numbers**, each labelled with only the continuation that side heard, so the next window continues the reading instead of regrouping.
+Our approach for run 2 (data built, training pending): **seam pairs cut inside long numbers**, each labelled with only the continuation that side heard, so the next window continues the reading instead of regrouping.
 
-The **0.9 number-word edge rule** makes those labels honest: a number word cut by an edge is labelled only if at least 90% of it is inside. Without it, in compound-number languages about 75% of in-number cuts labelled partly heard words as whole (es pilot: 1,231 of 1,673 pairs). With it, in-word halves fell from 775 / 2,678 / 694 / 755 to 34 / 10 / 23 / 48 (es / fr / it / pt).
+The **0.9 number-word edge rule** makes those labels honest: a number word cut by an edge is labelled only if at least 90% of it is inside. Without it, in compound-number languages about 75% of in-number cuts labelled partly heard words as whole (es pilot: 1,231 of 1,673 pairs). With it, in-word halves fell from 775 / 2,678 / 694 / 755 to 34 / 10 / 23 / 48 (es / fr / it / pt). These are label-quality counts on the training data, not a model result.
 
 ## 4. Labels by agreement
 

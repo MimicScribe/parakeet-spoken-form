@@ -13,7 +13,7 @@ Benchmarks behind [CONCEPTS.md](CONCEPTS.md). Each table names its bed, its size
 ## 1. Seam breaks, synthetic adversarial bank
 - **Bed:** 22 languages × 30 number-dense sentences (2 voices / rates), rendered with system TTS voices and joined into continuous files.
 - **Runs:** each file is decoded at 5 start offsets (0–7.6 s), so window edges fall at different places in each number.
-- **Scoring:** values are parsed back with a number grammar (`score_values.py`).
+- **Scoring:** decoded text is parsed into numbers by an external number grammar (it produces `parse_out_*.jsonl`; not in this repo). `score_values.py` then matches slots non-positionally (a phone is a digit substring, a price accepts dollars and cents anywhere). It is a screen, not a proof: a number elsewhere in the sentence can match by coincidence.
 - **Seam-broken (`offset_score.py`):** a slot that is wrong at one offset and right at another. This needs no reference transcript.
 - **Always-wrong:** a slot wrong at every offset.
 - **Size:** 5,500 slot readings per arm.
@@ -39,7 +39,7 @@ Seam-broken by language (11 of the 22 languages are shown here; the totals above
 | hu | 17 | 17 |
 | fi | 32 | 25 |
 
-- **By slot (B):** big numbers 34, phone 64, price 32 of the 209. About 70% of the long-number breaks are merge-touched, meaning the two windows read the number differently and the merge spliced them.
+- **By slot (B):** big numbers 34, phone 64, price 32 of the 209. 94 of the 130 long-number breaks (big numbers, phone, price) are merge-touched, meaning the two windows read the number differently and the merge spliced them.
 - **Known limits:**
   - The TTS voices group phone numbers their own way.
   - The bank has one or two voices per language.

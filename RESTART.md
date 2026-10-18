@@ -1,6 +1,6 @@
 # Restart here
 
-**Asked for "another run"?** The default scope (maintainer, 2026-10-14) is in [`docs/NEXT_RUN.md`](docs/NEXT_RUN.md): spoken-form numbers in every language, in waves (multilingual first), plus the remaining English issues in [`OBSERVATIONS.md`](OBSERVATIONS.md) (2.1 short-phrase drops, 2.8 year readings across window edges, 2.6 glued blends). Start from model B. Streaming evaluation runs in a harness outside this repo; its scorers are in eval/quality/.
+**Planning another run?** The default scope (2026-10-14) is in [`docs/NEXT_RUN.md`](docs/NEXT_RUN.md): spoken-form numbers in every language, in waves (multilingual first), plus the remaining English issues in [`OBSERVATIONS.md`](OBSERVATIONS.md) (2.1 short-phrase drops, 2.8 year readings across window edges, 2.6 glued blends). Start from model B. Streaming evaluation runs in a harness outside this repo; its scorers are in eval/quality/.
 
 Cliff notes for picking up spoken-form Parakeet training. They cover where things stand, what worked, what failed, and the exact path to the next run. Details:
 
@@ -12,14 +12,14 @@ Cliff notes for picking up spoken-form Parakeet training. They cover where thing
 
 ## 0. Current data phase (run 2, 2026-10-17)
 
-The state above (section 1) is the model-B state. Since then the work is data only: spoken-form rows for 17 languages plus English, with long numbers cut across window seams. No training run starts before the census passes its bar and the maintainer approves that run. Order, all `modal run` commands from `pipeline/` (details in [`docs/RECIPE.md`](docs/RECIPE.md)):
+The state above (section 1) is the model-B state. Since then the work is data only: spoken-form rows for 17 languages plus English, with long numbers cut across window seams. No training run starts before the census passes its bar and that run has been explicitly approved. Order, all `modal run` commands from `pipeline/` (details in [`docs/RECIPE.md`](docs/RECIPE.md)):
 
 1. `ml_p3.py::label2` per language: label real speech with the heard reading.
 2. Judge each pass against the second transcript (`eval/quality/judge_reject.py`, `judge_plro.py`), then write the `judged_<pass>.json` marker and merge the rejects (manual unless `judge_plro.py --upload`).
 3. `ml_p3.py::windows2` and `ml_p3.py::seam_crops` (`--min-words 3` for the long-number set `seam_long`).
 4. `modal_app.py::build_mix4` with the run-2 flags (RECIPE section 11).
 5. `eval/quality/data_gate.py <mix dir>` (census; English needs a `p3_en.jsonl` that this repo does not build).
-6. If it passes and the maintainer approves: `modal_app.py::retrain3 --mix v4 --mix-dir <dir> ...`.
+6. If it passes and the run is approved: `modal_app.py::retrain3 --mix v4 --mix-dir <dir> ...`.
 7. `modal_app.py::probe_heldout`, then `eval/quality/score_heldout.py` on the pulled hyps.
 
 ## 1. Where things stand (model B, 2026-10-14)
@@ -84,7 +84,7 @@ Measurement traps that produced false results:
 
 ## 5. When to run again, and what to fold in
 
-**A run is justified by:** a measured, model-side problem (English or multi-language) that a few-hundred-step corrective run can plausibly move. Greek alone does not qualify (maintainer decision).
+**A run is justified by:** a measured, model-side problem (English or multi-language) that a few-hundred-step corrective run can plausibly move. Greek alone does not qualify (a scoping decision).
 
 **Fold in if a run happens** (details in [`OBSERVATIONS.md`](OBSERVATIONS.md) §2):
 1. **Greek final ς rows restored:** `mix_build.restore_unk_nonen`, run by `patch_mix3`. Committed, not yet trained.
@@ -113,7 +113,7 @@ Measurement traps that produced false results:
 - The volume must still hold `exp/v10pt/step1500.pt`, `exp/sbd0soup_a1.0/step0.pt` and `exp/w3soup_a0.5/step0.pt`. Nothing else holds the training checkpoints: the Hugging Face repo has only the exported CoreML weights.
 - Run every command from `pipeline/`.
 
-**A. A new corrective run from B** (the likely next step):
+**A. Run 2 (mix v4) is the current path**: follow section 0 and RECIPE section 11 (`build_mix4`, then `retrain3 --mix v4 --mix-dir <dir>`). The commands below are the alternative: an English-only corrective run from B on mix v3 (`build_mix3c`).
 ```bash
 cd pipeline
 modal run modal_app.py::patch_mix3                            # runs mix_build.restore_unk_nonen (Greek ς rows back into mix3/d2, d2p)
@@ -127,7 +127,6 @@ modal run modal_app.py::eval_multi --runs "ultra,w3soup_a0.5@0,r4soup_a1.0@0,r4s
 python score_retrain.py <pulled hyps> "ultra_rt_c,w3soup_a0.5@0_c,r4soup_a1.0@0_c,r4soup_a0.5@0_c" --base --json scores.json
 # to pick a checkpoint against B, add: --select --base w3soup_a0.5@0_c
 ```
-In `score_retrain.py`, `--base` alone turns on the FLEURS comparison against stock (`ultra_rt_c`). Only with `--select` is the value after `--base` read, as the baseline for the selection. `ultra` must be in the `eval_multi` run list: the stock default for `_c` runs is `ultra_rt_c`.
 `retrain3` defaults do NOT match B's recipe: always pass `--dur-weight 0`, `--mix`, `--init-from`, and `--base` on `soup3`. The exact B commands are in [`runs/model_b/ws3.sh`](runs/model_b/ws3.sh).
 
 **B. Rebuild the warm-start root from stock** (only if the volume is lost):
@@ -151,9 +150,15 @@ These flags come from [`runs/v12/train.sh`](runs/v12/train.sh) (v12 = the v10pt 
 2. `swap_weights.py <stock bundle> decoder_joint.safetensors <out bundle>`. Use `--check` on stock tensors first: it must round-trip byte-identical.
 3. Upload the three weight files to `MimicScribe/parakeet-ultra-spoken-coreml`.
 4. Pin the new revision and file hashes in the downstream application that consumes the bundle.
-5. The maintainer approves every upload and push.
+5. Review each upload and push before it happens.
 
 **D. Evaluation in a downstream application** is not part of this repo. Rule that matters here: compare candidates on one frozen build, and confirm which weights each run loaded.
+
+## Troubleshooting
+
+- **`score_retrain.py --base`:** alone it turns on the FLEURS comparison against stock (`ultra_rt_c`). Only with `--select` is the value after `--base` read, as the baseline for the selection.
+- **Stock default:** `ultra` must be in the `eval_multi` run list; the stock default for `_c` runs is `ultra_rt_c`.
+- **Modal commands** run from `pipeline/` (see RECIPE Troubleshooting).
 
 ## 7. Not in git (needed for a restart)
 

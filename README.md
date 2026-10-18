@@ -6,7 +6,7 @@ and symbols as the words the speaker said. "I'll be there at four fifteen" stays
 
 Status (2026-10-17): model B ("retrain-3") is trained and published as CoreML weights at
 [MimicScribe/parakeet-ultra-spoken-coreml](https://huggingface.co/MimicScribe/parakeet-ultra-spoken-coreml)
-(revision `5edfc817`), queued for the next MimicScribe release. The next round (all 25 languages, long
+(revision `5edfc817`), queued for the next MimicScribe release. The next round (17 languages plus English trained, the other 7 held at stock; tiers in [docs/RECIPE.md](docs/RECIPE.md); focus on long
 numbers across window seams) is in the data phase: labelling, census and held-out tooling are done, and no
 training run starts before the census passes its bar. **Start at [RESTART.md](RESTART.md)** for the state ([docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for dependencies),
 then [docs/RECIPE.md](docs/RECIPE.md) (sources to a gated run) and [docs/CONCEPTS.md](docs/CONCEPTS.md)
