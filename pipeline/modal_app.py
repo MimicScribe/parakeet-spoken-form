@@ -1541,6 +1541,14 @@ R3_ARMS.update({
     "R7-a": dict(_R7),
     "R7-b": dict(_R7, suffix_anchor=True, anchor_after=1, gate=0.9, gate_human=0.5),
 })
+# R8 (run 2, 2026-10-18): the R7-b run-2 mix with de / nl / it compound numbers spelled as separate number words
+# (closed number vocabulary; mix4final5), the digit fallback allowed (wf_weight 1), an L2-SP pull that binds, and
+# suffix anchoring. R8-a = small steps (lr 3e-5, c 10); R8-b = larger steps held by a strong pull (lr 1e-4, c 30).
+_R8 = dict(_R7, wf_weight=1.0, suffix_anchor=True, anchor_after=1, gate=0.9, gate_human=0.5)
+R3_ARMS.update({
+    "R8-a": dict(_R8, lr=3e-5, l2sp_c=10.0),
+    "R8-b": dict(_R8, lr=1e-4, l2sp_c=30.0),
+})
 R3_ARMS.update({
     "R4-a": dict(wf_weight=3.0, l2sp_c=1.0, lr=3e-5, recipe=_R4_RECIPE),
     "R4-b": dict(wf_weight=3.0, l2sp_c=1.0, lr=3e-5, recipe=_R4_RECIPE, suffix_anchor=True, anchor_after=1,
