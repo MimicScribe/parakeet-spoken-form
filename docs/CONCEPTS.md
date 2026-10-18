@@ -15,9 +15,11 @@ Reference transcripts are a weak test for number seams, because most references 
 
 We do **not** train on the harness outputs. The harness only measures. Training data comes from real and separately synthesised speech, so the test stays independent of the training set.
 
-Measured breakdown: on the synthetic bank, about 70% of model B's long-number seam breaks were merge-made splices (94 of 130); the rest were edge garbles inside one window. On real held-out speech about 50% of breaks were merge-touched (RESULTS sections 1 and 2).
+Measured breakdown (numbers being rescored): on the synthetic bank, about 70% of model B's long-number seam breaks were merge-made splices (94 of 130); the rest were edge garbles inside one window. On real held-out speech about 50% of breaks were merge-touched (RESULTS sections 1 and 2).
 
 ## 2. Half-conversion causes seam breaks
+
+*(The seam-break figures in this file are the earlier scoring and are being rescored: total wrong becomes the headline, strict replaces lenient, and a boundary guard is added. Treat the numbers as provisional; the reasoning stands.)*
 
 A model that writes words for some numbers and digits for others, followed by a downstream digit-to-words step, is the worst of both. Two overlapping windows decode the same audio; one writes the number as words, the other as digits, and the later step reads the digits in its own grammar. The two forms differ, the merge has nothing to align on, and the stitch splices them.
 

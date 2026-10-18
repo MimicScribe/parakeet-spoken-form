@@ -11,6 +11,8 @@ Benchmarks behind [CONCEPTS.md](CONCEPTS.md). Each table names its bed, its size
 - **R5-b:** the previous spoken-form run on the wave-1 data, a soup at α 0.5 back toward B.
 
 ## 1. Seam breaks, synthetic adversarial bank
+**(Numbers being rescored: total wrong becomes the headline, strict scoring replaces lenient, and a boundary guard is added. The figures in sections 1 to 3 are the earlier scoring and will change.)**
+
 - **Bed:** 22 languages × 30 number-dense sentences (2 voices / rates), rendered with system TTS voices and joined into continuous files.
 - **Runs:** each file is decoded at 5 start offsets (0–7.6 s), so window edges fall at different places in each number.
 - **Scoring:** decoded text is parsed into numbers by an external number grammar (it produces `parse_out_*.jsonl`; not in this repo). `score_values.py` then matches slots non-positionally (a phone is a digit substring, a price accepts dollars and cents anywhere). It is a screen, not a proof: a number elsewhere in the sentence can match by coincidence.
@@ -45,6 +47,8 @@ Seam-broken by language (11 of the 22 languages are shown here; the totals above
   - The bank has one or two voices per language.
 
 ## 2. Seam breaks, real held-out speech
+**(Numbers being rescored; see section 1.)**
+
 - **Bed:** held-out rows only, stitched by session or video into files of up to 85 s.
 - **Size:** 11 languages, 71 files, 75 min, 670 number slots.
 - **Runs:** 5 offsets per file.
@@ -62,6 +66,7 @@ Seam-broken by language (11 of the 22 languages are shown here; the totals above
   - Real phone and price slots are thin in several languages.
 
 ## 3. Merge-side fixes (negative results)
+**(Numbers being rescored; see section 1.)**
 Both fixes were tested by replaying the recorded window decodes through alternative merge policies. Replays of the production policy reproduce the recorded runs exactly on the synthetic bed.
 
 **The "real" columns are not the section 2 totals.** The merge prototype replayed its own run of the real bed, with slightly different totals (production 410 and 418 here, against 92 + 240 lenient or 116 + 340 strict for B in section 2). Its replay was also not fully faithful on the real bed: 7 files differed from the recorded run by 0 to 4 tokens. Compare the policies with each other within a column, not with section 2.
