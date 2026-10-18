@@ -1259,6 +1259,61 @@ def check_build_langs(langs, mix_dir: str = "mix4", build_langs=None) -> dict:
     return st
 
 
+@app.function(image=mix_image, volumes={VOL: vol}, cpu=8, memory=16384, timeout=3600)
+def mix_add_tts(base_dir: str, new_dir: str, add: str, langs: str, aug_frac: float = 0.75,
+                split_compounds: str = "de,nl,it", seed: int = 53):
+    """A diagnostic copy of a built mix (base_dir -> new_dir, which must not exist) with extra verified synthetic rows
+    appended to its tts_<lang> parts (2026-10-18: the early symbol-class batch). add = a path with {lang}. The added rows
+    get the build's treatment: letter+digit relabel (alnum_relabel), a degraded copy at aug_frac (Degrader, as
+    mix_build.build4), compound split for split_compounds (compound_split.split_rows, Italian elided default)."""
+    import json
+    import random
+    import shutil
+
+    import alnum_relabel as AR
+    import compound_split as CS
+    import mix_build
+
+    vol.reload()
+    src, dst = f"{VOL}/{base_dir}", f"{VOL}/{new_dir}"
+    assert os.path.isdir(src) and not os.path.exists(dst), (src, dst)
+    shutil.copytree(src, dst, ignore=shutil.ignore_patterns("tts_aug"))
+    deg, rng = mix_build.Degrader(f"{VOL}/slr28/RIRS_NOISES", seed), random.Random(seed)
+    split, rep = {l for l in split_compounds.split(",") if l}, {}
+    for l in _langs(langs):
+        p = f"{VOL}/{add.format(lang=l)}"
+        if not os.path.exists(p):
+            rep[l] = "missing"
+            continue
+        rows, n_rel, n_aug = [json.loads(x) for x in open(p) if x.strip()], 0, 0
+        out = []
+        for i, x in enumerate(rows):
+            y, tm = AR.relabel_row({k: v for k, v in x.items() if k != "synthetic"}, l)
+            if tm is not None:
+                n_rel += 1
+                x = dict(y, synthetic=x["synthetic"]) if "synthetic" in x else y
+            if rng.random() < aug_frac:
+                o = f"{dst}/tts_aug_add/{l}/{i}_{os.path.basename(x['audio_filepath'])}"
+                os.makedirs(os.path.dirname(o), exist_ok=True)
+                x["aug"] = deg(x["audio_filepath"], o)
+                x["audio_filepath"] = o
+                n_aug += 1
+            out.append(x)
+        st = None
+        if l in split:
+            out, st = CS.split_rows(out, l)
+        with open(f"{dst}/tts_{l}.jsonl", "a") as f:
+            for x in out:
+                f.write(json.dumps(x, ensure_ascii=False) + "\n")
+        rep[l] = {"rows": len(out), "h": round(sum(x["duration"] for x in out) / 3600, 3), "relabelled": n_rel,
+                  "degraded": n_aug, "split": st}
+    with open(f"{dst}/add_report.json", "w") as f:
+        json.dump({"base": base_dir, "add": add, "aug_frac": aug_frac, "langs": rep}, f, indent=1)
+    vol.commit()
+    print(json.dumps(rep, ensure_ascii=False), flush=True)
+    return rep
+
+
 @app.function(image=mix_image, volumes={VOL: vol}, cpu=8, memory=32768, timeout=4 * 3600)  # 17 languages: > 1 h
 def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(WAVE1), allow_no_judge: bool = False,
                dedupe: bool = False, seam_h: float = 0.0, plain_share: float = 0.0, balance: bool = False,
