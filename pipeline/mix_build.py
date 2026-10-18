@@ -1994,7 +1994,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
            dedupe: bool = False, seam_h: float = 0.0, plain_share: float = 0.0,
            plain_glob: str = "ml/plain/{lang}/plain*.jsonl", protected_globs: tuple = (), balance: bool = False,
            seam_files: tuple = SEAM_FILES, mix_dir: str = "mix4", seam_long_h: float = 0.0,
-           split_langs: tuple = (), win15_share: float = 0.0, win15_dir: str = "ml/win15b") -> dict:
+           split_langs: tuple = (), win15_share: float = 0.0, win15_dir: str = "ml/win15b", edge_fix_dir: str = "") -> dict:
     """mix4/ manifests for the wave-1 run (all CPU, idempotent):
     - mix4/d2.jsonl: mix3/d2 (Greek restore applied) WITHOUT wave-1 languages: their digit rows were relabelled by P3
       (origin d2) and would otherwise teach digits through the stock token KL;
@@ -2035,7 +2035,11 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
     - win15_share > 0 (2026-10-18): mix4/win15_<lang>.jsonl, 15 s multi-number windows (win15.py, <win15_dir>/<lang>/
       windows.jsonl) whose every parent is a row this build trains on with the same label, none held out / rejected /
       ext; <= win15_share x the language's number hours (rows + synthetic + windows + seam parts), synthetic windows
-      <= TTS_SHARE of that target, the year value spread kept (win15.select_for_build)."""
+      <= TTS_SHARE of that target, the year value spread kept (win15.select_for_build).
+    - edge_fix_dir (2026-10-18): the real rows' clipped / missing edge words (edge_fix.py records,
+      <edge_fix_dir>/<lang>/fixes_*.jsonl): the p3 part is written with those rows' labels trimmed or their edge word
+      masked (label + audio cut; edge_fix.apply_fixes, sha-gated, never a row dropped). Applied at WRITE time like the
+      split: every selection, cap, window parent and pair runs on the unfixed labels; consistency pairs skip fixed rows."""
     import compound_split as CS
     import ml_balance as B
 
@@ -2429,22 +2433,34 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
                         "plain_pool_h": round(_h(pool), 2), "number_h": round(number_h, 2),
                         "anchor_free_h": round(anchor_h.get(lang, 0.0), 2), "plain_need_h": round(need, 2),
                         "number_free_share": round(free_h / max(free_h + number_h, 1e-9), 3), "plain_pick": pst}
+        tr_w = tr
+        if edge_fix_dir:
+            import edge_fix as EF
+
+            fx = {}
+            for p_ in sorted(glob.glob(f"{vol}/{edge_fix_dir}/{lang}/fixes_*.jsonl")):
+                fx.update(EF.load_fixes(p_))
+            tr_w, stats.setdefault("edge_fix", {})[lang] = EF.apply_fixes(tr, fx)
+        fixed_ids = {x["id"] for x in tr_w if "edge_fix" in x}
         _write(f"{vol}/{mix_dir}/pairs_{lang}.jsonl",
-               S(consistency_pairs(tr + took, win, lang, rng), lang, "pairs", pairs=True))
-        _write(f"{vol}/{mix_dir}/p3_{lang}.jsonl", S(tr, lang, "p3"))
+               S(consistency_pairs([x for x in tr if x["id"] not in fixed_ids] + took, win, lang, rng), lang, "pairs",
+                 pairs=True))
+        _write(f"{vol}/{mix_dir}/p3_{lang}.jsonl", S(tr_w, lang, "p3"))
         _write(f"{vol}/{mix_dir}/win_{lang}.jsonl", S(win, lang, "win"))
         _write(f"{vol}/{mix_dir}/heldout_{lang}.jsonl", S(ho, lang, "heldout"))
         stats.setdefault("cap_out_dropped", {})[lang] = cap_drop
         # the data gate's checks that the build's caps decide, on what this build wrote (report; data_gate is the gate)
         chk = post_build_check(tr, took, lang, before)
         stats.setdefault("post_build_check", {})[lang] = chk
+        if edge_fix_dir:  # report only: the caps decided on the unfixed labels; data_gate judges what was written
+            stats.setdefault("post_build_check_edge_fixed", {})[lang] = post_build_check(tr_w, took, lang, before)
         # the build fails where the gate would, except the accepted waivers: rows over the template cap / videos over
         # the group cap (rare-class and thin-value rows balance_caps keeps; no caps at all without `balance`)
         fatal = [f for f in chk["fail"] if not f.startswith(POST_CHECK_WAIVED)]
         if chk["fail"]:
             print(f"WARNING {lang}: post-build check fails {chk['fail']}")
         assert not fatal, f"{lang}: the built language fails the gate's checks: {fatal}"
-        stats["langs"][lang] = {"rows": len(tr), "rows_h": round(_h(tr), 2), "windows": len(win), "win_h": round(_h(win), 2),
+        stats["langs"][lang] = {"rows": len(tr_w), "rows_h": round(_h(tr_w), 2), "windows": len(win), "win_h": round(_h(win), 2),
                                 "tts_rows": len(took), "tts_h": round(_h(took), 2), "ext_rows": len(set(ext_ids) & {x["id"] for x in tr}),
                                 "ext_h": round(_h([x for x in tr if x["id"] in ext_ids]), 2),
                                 "syn_windows_outside_caps_dropped": n_syn_dropped,
@@ -2499,6 +2515,7 @@ for _l in WAVE1:  # wave-1 spoken-form rows and windows are number-bearing rows 
     NUMBER_PART[f"mix4/p3_{_l}.jsonl"] = 1.0
     NUMBER_PART[f"mix4/win_{_l}.jsonl"] = 1.0
     NUMBER_PART[f"mix4/win15_{_l}.jsonl"] = 1.0
+NUMBER_PART["mix4/en_win15.jsonl"] = 1.0  # English 15 s windows (modal_app.build_mix4 en_win15)
 NUMBER_PART["mix4/d2.jsonl"] = 1.0  # (mix4/d2p and mix4/fleurs_train_multi stay 0: plain anchor rows)
 # English parts added 2026-10-17 (modal_app EN4_PARTS / EN_WIN_PARTS and the year-capped mix3b manifests): every row
 # carries a number except the cloud set's control sentences and a few seam crops (shares measured on the manifests)

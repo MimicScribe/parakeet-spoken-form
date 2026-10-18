@@ -1042,7 +1042,8 @@ mix_image = (
     .uv_pip_install("numpy", "scipy", "soundfile", "librosa")
     .add_local_python_source("common", "mix_build", "census_common", "ml_cands", "ml_balance", "ml_p3_core",
                              "score_retrain", "labeller", "readings",  # score_retrain: en_balance's number reader
-                             "compound_split")  # build4 split_langs
+                             "compound_split",  # build4 split_langs
+                             "win15", "edge_fix")  # build4 win15_share (15 s windows) / edge_fix_dir (edge-word fixes)
     .add_local_file("ml_grammar_table.json", "/root/ml_grammar_table.json")  # build4's number-word lexicon
 )
 
@@ -1131,7 +1132,7 @@ WAVE1 = ("de", "es", "fr", "it", "nl", "pt")
 # parts with non-English audio (wave-1 rows/windows/synthetic, multilingual D2 and FLEURS): left out of the English
 # number share (fleurs_train_multi is non-English too, so it leaves the denominator as well)
 _NON_EN_PARTS = ("mix4/p3_", "mix4/win_", "mix4/tts_", "mix4/d2", "mix3/fleurs", "mix4/fleurs", "mix3/d2p", "mix4/seam_",
-                 "mix4/plain_")
+                 "mix4/plain_", "mix4/win15_")  # (mix4/en_win15 is English)
 
 
 OTHER18 = ("bg", "hr", "cs", "da", "et", "fi", "el", "hu", "lv", "lt", "mt", "pl", "ro", "sk", "sl", "sv", "ru", "uk")
@@ -1178,14 +1179,17 @@ def _langs(langs) -> tuple:
 def retrain3_mix_v4(langs=WAVE1, repeat: int = 1, anchor18: int = 0, win_repeat: int = 0, en_bal: bool = False,
                     en_plain_h: float = 0.0, en_win_repeat: int = 1, seam_long_repeat: int = 0,
                     mix_dir: str = "mix4", phonefmt: bool = False, phone_anchor: int = 0,
-                    en_free_repeat: int = 1) -> list:
+                    en_free_repeat: int = 1, win15_repeat: int = 1) -> list:
     """Wave-1 run (2026-10-15): the v3 mix with mix3/d2 swapped for mix4/d2 (trained languages' digit rows out) and, per
     trained language (`langs`, the same tuple build_mix4 built), its P3 v2 spoken-form rows + synthetic rows (listed
     `repeat` times) + streaming-geometry windows and mirrored seam pairs (listed `win_repeat` times; 0 = `repeat`, the
     R5 behaviour for windows, seam pairs once) tagged `nonen_span` (mix_build.build4).
     en_bal (run 2): the English real span parts are swapped for their balance-capped copies (mix_build.en_balance, written
     by build_mix4 --en-bal). en_plain_h > 0: LibriSpeech number-free hours (B: 40). en_win_repeat: the English windows /
-    seam pairs (d1/en4_ok, English parts of the share) listed that many times."""
+    seam pairs (d1/en4_ok, English parts of the share) listed that many times.
+    15 s windows (2026-10-18, win15.py): mix4/win15_<lang>.jsonl (nonen_span) and mix4/en_win15.jsonl (English, span),
+    listed win15_repeat times when the build wrote them (build_mix4 --win15-share; a build without them lists nothing
+    new). Once = the build's share (win15_share is of the language's number hours listed once)."""
     langs = _langs(langs)
     sub = {"mix3/d2.jsonl": "mix4/d2.jsonl", "mix3/d2p.jsonl": "mix4/d2p.jsonl",
            "mix3/fleurs_train_multi.jsonl": "mix4/fleurs_train_multi.jsonl",
@@ -1219,13 +1223,15 @@ def retrain3_mix_v4(langs=WAVE1, repeat: int = 1, anchor18: int = 0, win_repeat:
     # long-number seam pairs (build4 seam_long_h; their own weight: seam_long_repeat, 0 = win_repeat)
     slong = [(f"mix4/seam_long_{l}.jsonl", 0, "nonen_span") for l in langs
              if os.path.exists(f"{VOL}/{mix_dir}/seam_long_{l}.jsonl")] * (seam_long_repeat or win_repeat or 1)
+    w15 = ([(f"mix4/win15_{l}.jsonl", 0, "nonen_span") for l in langs if os.path.exists(f"{VOL}/{mix_dir}/win15_{l}.jsonl")]
+           + [("mix4/en_win15.jsonl", 0, "span")] * os.path.exists(f"{VOL}/{mix_dir}/en_win15.jsonl")) * win15_repeat
     if win_repeat:  # run 2: windows + seam pairs together, win_repeat times
-        out = base + extra * repeat + (wins + seam) * win_repeat + slong + anchors + phone + plain
+        out = base + extra * repeat + (wins + seam) * win_repeat + slong + anchors + phone + plain + w15
     else:
-        out = base + (extra + wins) * repeat + anchors + phone + seam + plain + slong  # the R4-R6 lists, unchanged
+        out = base + (extra + wins) * repeat + anchors + phone + seam + plain + slong + w15  # the R4-R6 lists (+ w15)
     if mix_dir != "mix4":  # a dry build's parts (build4 mix_dir); the d2anchor / dec18 sets live in mix4 only
         built = ("mix4/d2.", "mix4/d2_phonefmt_", "mix4/d2p.", "mix4/fleurs_train_multi.", "mix4/p3_", "mix4/tts_", "mix4/win_", "mix4/seam_",
-                 "mix4/plain_")
+                 "mix4/plain_", "mix4/win15_", "mix4/en_win15.")
         out = [((mix_dir + p[4:]) if p.startswith(built) else p, h, t) for p, h, t in out]
     return out
 
@@ -1257,7 +1263,8 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
                dedupe: bool = False, seam_h: float = 0.0, plain_share: float = 0.0, balance: bool = False,
                en_bal: bool = False, repeat: int = 1, win_repeat: int = 0, anchor18: int = 0, en_plain_h: float = 0.0,
                en_win_repeat: int = 1, mix_dir: str = "mix4", seam_long_h: float = 0.0, seam_long_repeat: int = 0, en_free_repeat: int = 1, final: bool = False,
-               split_compounds: str = ""):
+               split_compounds: str = "", win15_share: float = 0.0, win15_dir: str = "ml/win15b", win15_repeat: int = 1,
+               en_win15: bool = True, edge_fix_dir: str = ""):
     """Greek ς restore (idempotent) + mix_build.build4 + the number share of the v4 mix (total and English-only).
     Run 2 (2026-10-17): balance = build4 template / session caps; en_bal = mix_build.en_balance on the English real
     parts (writes their _bcap copies: caps, then the YouTube top-up trim into the 35-40% band); repeat / win_repeat /
@@ -1265,7 +1272,10 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
       modal run modal_app.py::build_mix4 --langs <RUN2_LANGS> --dedupe --seam-h 5 --plain-share 0.6 --balance --en-bal \
         --win-repeat 2 --anchor18 2
     split_compounds (2026-10-18): "de,nl,it" = those languages' parts spell compound number words as separate
-    morphemes (mix_build.build4 split_langs; compound_split)."""
+    morphemes (mix_build.build4 split_langs; compound_split).
+    win15_share > 0 (2026-10-18): the 15 s windows (mix_build.build4 win15_share / win15_dir) and, with en_win15, the
+    English windows (<win15_dir>/en, held-out videos / days of the CURRENT lists out: en_win15_part), listed
+    win15_repeat times. edge_fix_dir: the real rows' edge-word fixes (edge_fix.py; mix_build.build4 edge_fix_dir)."""
     import json
 
     import mix_build
@@ -1276,10 +1286,12 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
            "build4": mix_build.build4(VOL, ls, rows_h=rows_h, win_h=win_h, allow_no_judge=allow_no_judge,
                                       dedupe=dedupe, seam_h=seam_h, plain_share=plain_share, balance=balance,
                                       mix_dir=mix_dir, seam_long_h=seam_long_h,
-                                      split_langs=tuple(l for l in split_compounds.split(",") if l))}
+                                      split_langs=tuple(l for l in split_compounds.split(",") if l),
+                                      win15_share=win15_share, win15_dir=win15_dir, edge_fix_dir=edge_fix_dir)}
+    out["en_win15"] = en_win15_part(mix_dir, win15_dir, write=win15_share > 0 and en_win15)
     dry = mix_dir != "mix4" and not final  # final: a candidate mix in its own dir, English copies under it
     kw = dict(repeat=repeat, anchor18=anchor18, win_repeat=win_repeat, en_plain_h=en_plain_h, en_win_repeat=en_win_repeat,
-              seam_long_repeat=seam_long_repeat, mix_dir=mix_dir, en_free_repeat=en_free_repeat)
+              seam_long_repeat=seam_long_repeat, mix_dir=mix_dir, en_free_repeat=en_free_repeat, win15_repeat=win15_repeat)
     mix = retrain3_mix_v4(ls, en_bal=False, **kw)
     if en_bal:  # a dry build only reports what en_balance would write (the listing keeps the source parts)
         out["en_balance"] = mix_build.en_balance(VOL, mix, non_en=_NON_EN_PARTS, write=not dry, bcap_dir=mix_dir)
@@ -1296,6 +1308,45 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
         out["english_batch_share_after_balance"] = round(e["total_h"] / max(e["total_h"] + non_en, 1e-9), 4)
     print(json.dumps(out, indent=1, ensure_ascii=False))
     vol.commit()
+
+
+def en_win15_part(mix_dir: str, win15_dir: str, write: bool) -> dict:
+    """<mix_dir>/en_win15.jsonl: the English 15 s windows (<win15_dir>/en/windows.jsonl) minus any window with a parent
+    from a held-out video or plenary day of the CURRENT held-out lists (en_win.held_out's rule; the lists can move
+    after the windows were cut). write False removes a stale copy (a part this build does not make must not survive)."""
+    import json
+
+    dst = f"{VOL}/{mix_dir}/en_win15.jsonl"
+    src = f"{VOL}/{win15_dir}/en/windows.jsonl"
+    if not write or not os.path.exists(src):
+        if os.path.exists(dst):
+            os.remove(dst)
+        return {"written": False, "source": os.path.exists(src)}
+    vids = {l.strip() for l in open(f"{VOL}/d1/en4_ok/heldout_videos_enh.txt") if l.strip() and not l.startswith("#")}
+    days = set()
+    for l in open(f"{VOL}/d1/en4_ok/heldout_days_vox_en.txt"):
+        m = re.match(r"(?:# group vox:)?(\d{8})", l.strip())
+        if m:
+            days.add(m.group(1))
+    rows = [json.loads(l) for l in open(src, encoding="utf-8") if l.strip()]
+    keep = [r for r in rows if not en_win15_held(r, vids, days)]
+    with open(dst, "w", encoding="utf-8") as f:
+        for r in keep:
+            f.write(json.dumps({k: v for k, v in r.items() if k != "greedy"}, ensure_ascii=False) + "\n")
+    return {"written": True, "windows": len(rows), "held_out_dropped": len(rows) - len(keep),
+            "kept_h": round(sum(r["duration"] for r in keep) / 3600, 3)}
+
+
+def en_win15_held(w: dict, vids: set, days: set) -> bool:
+    """An English window with a parent from a held-out YouTube video (its stream / parent ids) or plenary day."""
+    st = str(w.get("stream") or "")
+    if st.startswith("yt:") and st[3:] in vids:
+        return True
+    for p in w.get("parents") or []:
+        m = re.match(r"(?:\w+_)?(\d{8})-\d{4}-", p)
+        if (m and m.group(1) in days) or any(v and v in p for v in vids):
+            return True
+    return False
 
 
 def share_report_of(mix: list) -> dict:
