@@ -254,16 +254,16 @@ class Round2(unittest.TestCase):
 
     def test_synthetic_selected_by_gate_class_spans(self):
         # red-on-base: synthetic rows were capped by hours per raw kind, the gate counts spans per gate class
-        # (40 real spans: above the rare-class floor's RARE_REAL_MAX, so the share rule decides)
-        real = [{"id": f"r{i}", "text": "im Jahr", "spans": [{"kind": "int", "text": "2015"}]} for i in range(40)]
-        tts = [{"id": f"t{i}", "text": "im Jahr", "src": "tts", "_targeted": True,
-                "spans": [{"kind": "int", "text": "2016"}]} for i in range(30)]
-        took = MB.select_synthetic(tts, real, "de", {"int": 1.0})
-        self.assertEqual(len(took), 17)  # 17 / 57 = 0.298 <= 0.30; an 18th would be 0.310
-        chk = MB.post_build_check(real, took + tts[17:19], "de")
-        self.assertIn("year", chk["synthetic_over"])
-        took2, n = MB.trim_synthetic(took, real[:30], "de")  # real rows a later cap removed: shares re-checked
-        self.assertEqual((len(took2), n), (12, 5))  # 12 / 42 = 0.286
+        # (a class whose real spans meet its bar: the share rule decides; fill-to-bar covers thin classes)
+        real = [{"id": f"r{i}", "text": "x", "spans": [{"kind": "pct", "text": "45 %"}]} for i in range(400)]
+        tts = [{"id": f"t{i}", "text": "x", "src": "tts", "_targeted": True,
+                "spans": [{"kind": "pct", "text": "46 %"}]} for i in range(200)]
+        took = MB.select_synthetic(tts, real, "de", {"pct": 1.0})
+        self.assertEqual(len(took), 171)  # 171 / 571 = 0.2995 <= 0.30; a 172nd would be 0.3007
+        chk = MB.post_build_check(real, took + tts[171:175], "de")
+        self.assertIn("pct", chk["synthetic_over"])
+        took2, n = MB.trim_synthetic(took, real[:350], "de")  # real rows a later cap removed: shares re-checked
+        self.assertEqual((len(took2), n), (150, 21))  # 150 / 500 = 0.30
 
     def test_windows2_held_unit(self):
         # red-on-base: windows2 held out PLENARY days only (committee sessions of a held-out day trained)

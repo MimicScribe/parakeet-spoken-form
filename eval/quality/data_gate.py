@@ -40,9 +40,7 @@ from census_common import (CLASS_MIN, CLOCK_CTX, DOT_CLOCK, EXT_BY, GROUP_CAP, G
                            SYN_SHARE_LANG, TEMPLATE_CAP, TIER_FACTOR, TIER_LANGS, TIER_OF, by_value, ext_span,
                            gate_class, gate_class_value, group_cap, group_id, morph_class, span_class, spoken_shape,
                            syn_floor, syn_limit, synthetic, template_key, tier_of)
-
-BAR_YEARS = {"de": 2000, "it": 2000, "nl": 2000}
-FORWARD_KEY = (2030, 2035, 2040, 2050)
+from census_common import BAR_YEARS, FORWARD_KEY, MOD_BARS, WAVE_BARS, filled_to_bar, syn_ok  # noqa: E402
 
 
 def rows(d, name):
@@ -111,9 +109,12 @@ TIER_P = {
                  big=220, bigd=110, bigs=28, rh=5.5, wh=1.1, grp=275, ho_year=80, ho_cls=16, ext=True),
 }
 assert all(TIER_P[t]["f"] == TIER_FACTOR[t] for t in TIER_P), "census_common.TIER_FACTOR must mirror TIER_P"
+assert all(TIER_P[t][k] == v for t, P in WAVE_BARS.items() for k, v in P.items() if k in TIER_P[t]), \
+    "census_common.WAVE_BARS (fill-to-bar) must mirror TIER_P"
 # moderate: ~25% counts, the main classes present with value spread; light: no-damage coverage only
 MOD = dict(year=375, int_small=625, int_big=100, dec=75, pct=75, clock=75, cur=75, each=8, fwd_key=5, fwd_seen=10,
            top=0.05, rh=2.5, wh=0.5, grp=125, ho_year=40, ho_cls=10, ext=True)
+assert all(MOD[k] == v for k, v in MOD_BARS.items()), "census_common.MOD_BARS (fill-to-bar) must mirror MOD"
 LIGHT = dict(spans=20, distinct=10, top=0.10)
 
 
@@ -231,12 +232,19 @@ def common_checks(ctx, tier):
             sh = x["syn"] / x["spans"]
             lim = syn_limit(ctx["lang"], k)
             floor = syn_floor(ctx["lang"], k, tier)
+            real_vals = x["vals"] - x["syn_vals"]
+            if filled_to_bar(ctx["lang"], k, x["syn"], x["spans"], real_vals, x["syn_vals"], tier):
+                # fill-to-bar (census_common.syn_allowed): a thin class may be synthetic up to its bar
+                out.append(check(f"{k} synthetic share <= {lim:.0%} or filled to bar", True,
+                                 f"filled to bar (synthetic {x['syn']}, real {x['spans'] - x['syn']})", lim))
+                continue
             if floor is not None:
                 out.append(check(f"{k} synthetic share <= {lim:.0%} or synthetic spans <= floor {floor}",
                                  sh <= lim or x["syn"] <= floor, {"share": round(sh, 3), "synthetic": x["syn"]},
                                  {"share": lim, "floor": floor}))
                 continue
-            out.append(check(f"{k} synthetic share <= {lim:.0%}", sh <= lim, round(sh, 3), lim))
+            out.append(check(f"{k} synthetic share <= {lim:.0%}",
+                             syn_ok(ctx["lang"], k, x["syn"], x["spans"], tier, real_vals, x["syn_vals"]), round(sh, 3), lim))
     groups = ctx["groups"]
     fb = sum(c for g, c in groups.items() if g.startswith("id:")) / max(sum(groups.values()), 1)
     out.append(check("rows with a known video/session id", fb <= 0.05, f"{1 - fb:.1%}", ">= 95%"))  # else variety is inflated
@@ -254,7 +262,8 @@ def gate_lang(d, lang, tier=None):
     train = rows(d, f"p3_{lang}") + [dict(r, synthetic=True) for r in rows(d, f"tts_{lang}")]
     win = rows(d, f"win_{lang}")
     ho = [r for r in rows(d, f"heldout_{lang}") if not synthetic(r)]
-    cls = collections.defaultdict(lambda: {"spans": 0, "hours": 0.0, "vals": collections.Counter(), "syn": 0, "ext": 0})
+    cls = collections.defaultdict(lambda: {"spans": 0, "hours": 0.0, "vals": collections.Counter(), "syn": 0, "ext": 0,
+                                           "syn_vals": collections.Counter()})
     real_h = 0.0
     groups = collections.Counter()
     templates = collections.Counter()
@@ -274,6 +283,7 @@ def gate_lang(d, lang, tier=None):
             x = cls[c]
             if syn:  # synthetic counts toward the bar, capped per class (check below)
                 x["syn"] += 1
+                x["syn_vals"][v] += 1
             x["spans"] += 1
             x["hours"] += r.get("duration", 0) / 3600 / max(1, len(sps))
             x["vals"][v] += 1

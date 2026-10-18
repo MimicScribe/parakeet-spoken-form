@@ -128,6 +128,33 @@ def g_year(rng, i, ctx):
     return tpl.format(y=y), [ordw(y, "m", acc_case)], KINDS["year"]
 
 
+YEARS3_FRAMES = [  # (template, case of each year) -- tense-neutral, years mid / late
+    ("У документі згадуються {ys} роки, і це важливо.", "nom"),
+    ("Таблиця охоплює {ys} роки по всіх регіонах.", "nom"),
+    ("Експерти порівняли показники {ys} років між собою.", "gen"),
+    ("У звіті зібрані дані за {ys} роки.", "nom"),
+    ("Комісія окремо розглянула підсумки {ys} років.", "gen"),
+    ("Особливу увагу в доповіді приділено {ys} рокам.", "dat"),
+]
+YEARS_POOL: list = []  # year values g_years3 draws (pop order); empty = ctx["years"]
+
+
+def g_years3(rng, i, ctx):
+    """2-3 years in one sentence (cheaper per year span), each an ordinal in the frame's case, at normal rates."""
+    k = rng.choice([2, 3, 3])
+    ys, j = [], 0
+    while len(ys) < k and j < 50:
+        if "years3" not in ctx:  # a plan without a year quota has a one-value year list
+            ctx["years3"] = _years(random.Random(f"years3|{i}"), 300)
+        y = YEARS_POOL.pop() if YEARS_POOL else ctx["years3"][(3 * i + j) % len(ctx["years3"])]
+        j += 1
+        if y not in ys:
+            ys.append(y)
+    tpl, case = rng.choice(YEARS3_FRAMES)
+    written = ", ".join(map(str, ys[:-1])) + " та " + str(ys[-1])
+    return tpl.format(ys=written), [ordw(y, "m", case) for y in ys], ["int"] * k
+
+
 COUNT_FRAMES = [  # (template with {n} {w}, case, nouns)
     ("На дорогу до роботи я витрачаю {n} {w}.", "acc", ["хвилина", "година"]),
     ("Нарада тривала близько {n} {w}, і всі втомилися.", "gen", ["хвилина", "година"]),
@@ -414,7 +441,9 @@ def g_range(rng, i, ctx):
     return rng.choice(RANGE_FRAMES[u]).format(r=w), [read], KINDS["range"]
 
 
-GEN = {"year": g_year, "count": g_count, "big": g_big, "price": g_price, "clock": g_clock, "phone": g_phone,
+# classes whose span kind plan relabels after the candidate check (written-shape kind -> census kind)
+RELABEL_KIND = {"phone_sp": "phone"}
+GEN = {"phone_sp": lambda rng, i, ctx: g_phone(rng, i, ctx), "year": g_year, "count": g_count, "big": g_big, "price": g_price, "clock": g_clock, "phone": g_phone, "years3": g_years3,
        "date": g_date, "pct": g_pct, "dec": g_dec, "ord": g_ord, "range": g_range}
 
 
@@ -564,6 +593,8 @@ def plan(n: int, seed: int, report: dict | None = None, classes: tuple = (), tag
                 drops[cls][why] += 1
                 continue
             label, spans, offs = res
+            if cls in RELABEL_KIND:
+                spans = [dict(sp, kind=RELABEL_KIND[cls]) for sp in spans]
             if not (WORDS_MIN <= len(label.split()) <= WORDS_MAX):
                 drops[cls]["length"] += 1
                 continue

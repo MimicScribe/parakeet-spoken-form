@@ -43,7 +43,9 @@ class SynShareLang(unittest.TestCase):
         de = check(self._gate("de"), "unit synthetic share")
         self.assertTrue(es[0]["pass"], es)
         self.assertEqual(es[0]["want"], 0.5)
-        self.assertFalse(de[0]["pass"], de)
+        # de unit is far under its 150 bar (6 real spans): fill-to-bar passes it (owner 2026-10-17), at the 30% cap
+        self.assertTrue(de[0]["pass"], de)
+        self.assertIn("filled to bar (synthetic 4, real 6)", de[0]["got"])
         self.assertEqual(de[0]["want"], 0.30)
 
 
@@ -123,7 +125,9 @@ class ShareExceptions(unittest.TestCase):
                 return [c for c in G.gate_lang(d, lang, "full")["checks"] if c["check"].startswith("phone synthetic")][0]
         self.assertTrue(gate("en", 292)["pass"])  # 97% synthetic, 292 <= 300
         self.assertFalse(gate("en", 301)["pass"])  # above the floor
-        self.assertFalse(gate("es", 100)["pass"])  # only English phone is exempt
+        # es phone: no floor exemption, but fill-to-bar (owner 2026-10-17) allows 300 - 8 real = 292 synthetic
+        self.assertTrue(gate("es", 100)["pass"])
+        self.assertFalse(gate("es", 293)["pass"])
         self.assertTrue(gate("es", 8)["pass"])
 
     def test_es_fr_frac_amp_may_be_mostly_synthetic_up_to_the_floor(self):

@@ -25,7 +25,8 @@ import numpy as np
 
 from census_common import (EXT_BY, GROUP_CAP, GROUP_CAP_LANG, TEMPLATE_CAP, TEMPLATE_MIN_WORDS, ext_row,  # noqa: F401
                            ext_span, gate_class, gate_class_value, group_cap, group_id, held_unit, span_class,
-                           SYN_SHARE_KIND, SYN_SHARE_LANG, syn_limit, syn_ok, template_key, year_of, read_held_list)
+                           SYN_SHARE_KIND, SYN_SHARE_LANG, class_bar, filled_to_bar, syn_limit, syn_ok, template_key,
+                           year_of, read_held_list)
 from census_common import synthetic as _synthetic
 from common import NUMBER_WORDS, WRITTEN_FORM
 
@@ -886,29 +887,37 @@ TTS_ENOUGH_H = 0.25  # h of real speech in a class above which no synthetic rows
 # waiver) and post_build_check reports it as "waived_synthetic_floor"
 TTS_FLOOR_H = 0.15
 RARE_REAL_MAX = 19  # real spans at or under which a class has (almost) no real speech: under the gate's 20-span floor
+# one cloud voice per language kept entirely out of training (owner 2026-10-17): its rows are the language's held-out
+# synthetic decision set (split "dev": tts_dev, seam_crops --heldout-tts); a train-split row in that voice never trains
+HELDOUT_VOICES = {
+    "cs": "cs-CZ-Chirp3-HD-Achird", "de": "de-DE-Chirp3-HD-Algieba", "es": "es-US-Chirp3-HD-Erinome",
+    "fi": "fi-FI-Chirp3-HD-Laomedeia", "hr": "hr-HR-Chirp3-HD-Alnilam",
+    "hu": "hu-HU-Chirp3-HD-Erinome", "it": "it-IT-Chirp3-HD-Alnilam", "nl": "nl-NL-Chirp3-HD-Iapetus",
+    "pl": "pl-PL-Chirp3-HD-Orus", "pt": "pt-BR-Chirp3-HD-Iapetus", "ro": "ro-RO-Chirp3-HD-Kore",
+    "ru": "ru-RU-Chirp3-HD-Aoede", "sk": "sk-SK-Chirp3-HD-Achird", "sv": "sv-SE-Chirp3-HD-Rasalgethi",
+    "uk": "uk-UA-Chirp3-HD-Achird"}
 GRAMMAR_REJECTS = "grammar_reject_ids.txt"  # per language in ml/p3v2/<lang>/: synthetic rows whose audio speaks a
 # grammar slip of an old generator (grammar_scan.py); they never train
 
 
-# long-number waiver (owner 2026-10-17): numbers must survive window seams, and real speech has few long numbers, so
-# in these classes the synthetic share may reach LONG_SYN_SHARE in every language but LONG_WAIVER_EXCEPT; real rows of
-# these classes are never dropped for it (only synthetic rows are selected / trimmed); every other class keeps its cap.
-# The gate's share check fails there by design; post_build_check reports it as "waived_long_synthetic"
-LONG_CLASSES = {"int_big", "cur", "phone", "date"}
-LONG_SYN_SHARE = 0.85
-LONG_WAIVER_EXCEPT = {"bg"}
-
-
-def long_waiver_ok(lang: str, c: str, syn: int, real: int) -> bool:
-    """The long-number waiver: class c of `lang` may hold `syn` synthetic spans beside `real` real ones."""
-    return c in LONG_CLASSES and lang not in LONG_WAIVER_EXCEPT and syn <= LONG_SYN_SHARE * (real + syn) + 1e-9
-
-
-def syn_room(lang: str, c: str, syn: int, real: int, syn_h: float) -> bool:
+def syn_room(lang: str, c: str, syn: int, real: int, syn_h: float, real_vals=None, syn_vals=None) -> bool:
     """May class c hold `syn` synthetic spans (in rows of `syn_h` hours) beside `real` real spans: the gate's rule
-    (syn_ok), the rare-class floor (real <= RARE_REAL_MAX and syn_h <= TTS_FLOOR_H), or the long-number waiver."""
-    return (syn_ok(lang, c, syn, real + syn) or (real <= RARE_REAL_MAX and syn_h <= TTS_FLOOR_H + 1e-9)
-            or long_waiver_ok(lang, c, syn, real))
+    (census_common.syn_ok: the share caps, or fill-to-bar: up to the class bar and the thin values' floors; the
+    {value: spans} counts real_vals / syn_vals), or the rare-class floor for a class with no bar (real <= RARE_REAL_MAX
+    and syn_h <= TTS_FLOOR_H)."""
+    return (syn_ok(lang, c, syn, real + syn, real_vals=real_vals, syn_vals=syn_vals)
+            or (real <= RARE_REAL_MAX and syn_h <= TTS_FLOOR_H + 1e-9))
+
+
+def class_values(rows: list, lang: str) -> tuple:
+    """({class: spans}, {class: Counter(value -> spans)}) in the gate's classes."""
+    n, vals = Counter(), {}
+    for x in rows:
+        for sp in x.get("spans") or []:
+            c, v = gate_class_value(x, sp, lang)
+            n[c] += 1
+            vals.setdefault(c, Counter())[v] += 1
+    return n, vals
 
 
 def _syn_hours(rows: list, lang: str) -> Counter:
@@ -1645,14 +1654,18 @@ def post_build_check(rows: list, syn: list, lang: str, before: dict | None = Non
     g = gate_counts(rows, syn, lang)
     cls_n, cls_e, cls_s = g["spans"], g["ext"], g["syn"]
     ext = {c: round(cls_e[c] / cls_n[c], 3) for c in cls_n if cls_n[c] >= 20 and cls_e[c]}
-    syn_bad = {c: round(cls_s[c] / cls_n[c], 3) for c in cls_n if not syn_ok(lang, c, cls_s[c], cls_n[c])}
-    # classes with no real speech held at the rare-class floor: the gate's share check fails there by design
+    _, rv = class_values(rows, lang)
+    _, sv = class_values(syn, lang)
+    syn_bad = {c: round(cls_s[c] / cls_n[c], 3) for c in cls_n
+               if not syn_ok(lang, c, cls_s[c], cls_n[c], real_vals=rv.get(c), syn_vals=sv.get(c))}
+    # fill-to-bar: a thin class over its share cap, synthetic up to its bar (the gate shows it as "filled to bar")
+    filled = {c: {"synthetic": cls_s[c], "real": cls_n[c] - cls_s[c], "bar": class_bar(lang, c)} for c in cls_n
+              if filled_to_bar(lang, c, cls_s[c], cls_n[c], rv.get(c), sv.get(c))}
+    # classes with no bar and no real speech held at the rare-class floor: the gate's share check fails there
     syn_h = _syn_hours(syn, lang)
-    waived_long = {c: {"synthetic": cls_s[c], "real": cls_n[c] - cls_s[c], "share": v} for c, v in syn_bad.items()
-                   if long_waiver_ok(lang, c, cls_s[c], cls_n[c] - cls_s[c])}
     waived = {c: {"synthetic": cls_s[c], "real": cls_n[c] - cls_s[c], "synthetic_h": round(syn_h[c], 3)}
-              for c in syn_bad if c not in waived_long and syn_room(lang, c, cls_s[c], cls_n[c] - cls_s[c], syn_h[c])}
-    syn_bad = {c: v for c, v in syn_bad.items() if c not in waived and c not in waived_long}
+              for c in syn_bad if syn_room(lang, c, cls_s[c], cls_n[c] - cls_s[c], syn_h[c])}
+    syn_bad = {c: v for c, v in syn_bad.items() if c not in waived}
     tmpl = sum(c - TEMPLATE_CAP for c in g["templates"].values() if c > TEMPLATE_CAP)
     grp = sum(1 for k, c in g["groups"].items() if not k.startswith("id:") and c > group_cap(lang, k))
     top = top_year_share(g["years"])
@@ -1668,8 +1681,7 @@ def post_build_check(rows: list, syn: list, lang: str, before: dict | None = Non
         t0 = top_year_share(before["years"])
         if t0 <= GATE_TOP_YEAR < top:
             reg.append(f"top year {t0:.3f} -> {top:.3f}")
-    return {"ext_share": ext, "synthetic_over": syn_bad, "waived_synthetic_floor": waived,
-            "waived_long_synthetic": waived_long,
+    return {"ext_share": ext, "synthetic_over": syn_bad, "waived_synthetic_floor": waived, "filled_to_bar": filled,
             "rows_over_template_cap": tmpl, "groups_over_cap": grp, "top_year": round(top, 4), "fail": fail, "regressions": reg}
 
 
@@ -1681,32 +1693,39 @@ def select_synthetic(tts: list, real: list, lang: str, real_h: dict, enough_h: f
     not used (lesson v12: synthetic speech only FILLS what real speech
     lacks). Rows carry "_targeted". Returns the chosen rows."""
     enough_h = TTS_ENOUGH_H if enough_h is None else enough_h
-    real_n = Counter(gate_class(x, sp, lang) for x in real for sp in x.get("spans") or [])
-    syn_n, syn_h, took = Counter(), Counter(), []
+    real_n, real_v = class_values(real, lang)
+    syn_n, syn_h, syn_v, took = Counter(), Counter(), {}, []
     for x in tts:
         ks = {sp["kind"] for sp in x.get("spans", [])} or {"?"}
         if not x.get("_targeted") and any(real_h.get(k, 0) >= enough_h and k not in TTS_SHARE_KIND for k in ks):
             continue
-        add = Counter(gate_class(x, sp, lang) for sp in x.get("spans") or [])
+        add, add_v = class_values([x], lang)
         dh = x.get("duration", 0.0) / 3600
-        if all(syn_room(lang, c, syn_n[c] + k, real_n[c], syn_h[c] + dh) for c, k in add.items()):
+        if all(syn_room(lang, c, syn_n[c] + k, real_n[c], syn_h[c] + dh, real_v.get(c),
+                        syn_v.get(c, Counter()) + add_v[c]) for c, k in add.items()):
             took.append(x)
             syn_n.update(add)
             for c in add:
                 syn_h[c] += dh
+                syn_v.setdefault(c, Counter()).update(add_v[c])
     return took
 
 
 def trim_synthetic(took: list, real: list, lang: str) -> tuple:
     """Drop chosen synthetic rows (last chosen first) holding a class whose synthetic share no longer passes syn_ok
     (real rows a later cap removed), until every class passes. Returns (rows, n dropped)."""
-    real_n = Counter(gate_class(x, sp, lang) for x in real for sp in x.get("spans") or [])
-    cl = [Counter(gate_class(x, sp, lang) for sp in x.get("spans") or []) for x in took]
+    real_n, real_v = class_values(real, lang)
+    cv = [class_values([x], lang) for x in took]
+    cl = [a for a, _ in cv]
     syn_n = sum(cl, Counter())
+    syn_v = {}
+    for _, v in cv:
+        for c, cnt in v.items():
+            syn_v.setdefault(c, Counter()).update(cnt)
     syn_h = _syn_hours(took, lang)
     keep = [True] * len(took)
     for i in range(len(took) - 1, -1, -1):
-        bad = {c for c in syn_n if not syn_room(lang, c, syn_n[c], real_n[c], syn_h[c])}
+        bad = {c for c in syn_n if not syn_room(lang, c, syn_n[c], real_n[c], syn_h[c], real_v.get(c), syn_v.get(c))}
         if not bad:
             break
         if bad & set(cl[i]):
@@ -1714,6 +1733,8 @@ def trim_synthetic(took: list, real: list, lang: str) -> tuple:
             syn_n.subtract(cl[i])
             for c in cl[i]:
                 syn_h[c] -= took[i].get("duration", 0.0) / 3600
+                syn_v[c].subtract(cv[i][1][c])
+                syn_v[c] = +syn_v[c]
     return [x for x, k in zip(took, keep) if k], keep.count(False)
 
 
@@ -1966,6 +1987,10 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
                 real_h[sp["kind"]] = real_h.get(sp["kind"], 0) + x["duration"] / 3600
         stats.setdefault("grammar_rejected", {})[lang] = len(all_tts_ids & gram_rej)
         tts = [x for x in tts if x["id"] not in gram_rej]  # a grammar slip in the audio: neither train nor dev
+        hv = HELDOUT_VOICES.get(lang)
+        stats.setdefault("heldout_voice_train_dropped", {})[lang] = sum(1 for x in tts if hv and x.get("voice") == hv
+                                                                         and x.get("split", "train") != "dev")
+        tts = [x for x in tts if not (hv and x.get("voice") == hv and x.get("split", "train") != "dev")]
         _write(f"{vol}/{mix_dir}/tts_dev_{lang}.jsonl", [x for x in tts if x.get("split") == "dev"])  # held-out voices
         tts = [x for x in tts if x.get("split", "train") == "train" and x["id"] not in rej]  # judged like real rows
         if dedupe:  # a synthetic text equal to a held-out / eval text leaves training too (text keys only)

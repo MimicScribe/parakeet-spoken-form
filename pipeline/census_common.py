@@ -336,9 +336,94 @@ def syn_floor(lang, k, tier=None):
     return round(CLASS_MIN.get(k, SYN_FLOOR_SPANS.get(k, 0)) * TIER_FACTOR.get(tier or tier_of(lang), 1.0))
 
 
-def syn_ok(lang, k, syn, spans, tier=None) -> bool:
-    """The gate's synthetic check of one class: share <= syn_limit, or (exempt classes) synthetic spans <= syn_floor."""
+# ---------------------------------------------------------------- fill-to-bar (owner 2026-10-17)
+# Synthetic spans of a class may fill it up to its training bar: allowed synthetic = max(the share rule, bar - real
+# spans, the value floors' shortfall). Real rows always count first; where real speech already meets the bar the
+# share caps above still decide. Value-level bars (every year 1990-2030 / 2031-2060 / the key years, each 0-100 and
+# hundred count, distinct int_big values) count as part of the bar: a synthetic span of a thin value may fill it up to
+# its floor. bg stays at the share caps. These are the data gate's bars (data_gate TIER_P / MOD mirror them).
+FILL_EXCEPT = {"bg"}
+BAR_YEARS = {"de": 2000, "it": 2000, "nl": 2000}  # year-span bar of a full / next language (default 1500) x tier factor
+WAVE_BARS = {"full": dict(f=1.0, each=40, fwd=10, key=40, ints=2500, i100=10, hund=5, big=400, bigd=200),
+             "next": dict(f=0.55, each=20, fwd=5, key=20, ints=1375, i100=6, hund=3, big=220, bigd=110)}
+MOD_BARS = dict(year=375, int_small=625, int_big=100, dec=75, pct=75, clock=75, cur=75, each=8, fwd_key=5)
+FORWARD_KEY = (2030, 2035, 2040, 2050)
+
+
+def class_bar(lang, k, tier=None) -> int:
+    """The training-span bar of gate class k in `lang` (0 = no bar: the class only has the share rule)."""
+    tier = tier or tier_of(lang)
+    if lang in FILL_EXCEPT:
+        return 0
+    if tier in WAVE_BARS:
+        P = WAVE_BARS[tier]
+        if k == "year":
+            return round(BAR_YEARS.get(lang, 1500) * P["f"])
+        if k == "int_small":
+            return P["ints"]
+        if k == "int_big":
+            return P["big"]
+        return round(CLASS_MIN[k] * P["f"]) if k in CLASS_MIN else 0
+    if tier == "moderate":
+        return MOD_BARS.get(k, 0) if k in ("year", "int_small", "int_big", "dec", "pct", "clock", "cur") else 0
+    return 0
+
+
+def value_floor(lang, k, v, tier=None) -> int:
+    """The per-value bar of value v of class k (years, 0-100 / hundreds counts); 0 = no floor."""
+    tier = tier or tier_of(lang)
+    if lang in FILL_EXCEPT or not isinstance(v, int):
+        return 0
+    if tier in WAVE_BARS:
+        P = WAVE_BARS[tier]
+        if k == "year":
+            f = P["each"] if 1990 <= v <= 2030 else P["fwd"] if 2031 <= v <= 2060 else 0
+            return max(f, P["key"]) if v in FORWARD_KEY else f
+        if k == "int_small":
+            return P["i100"] if 0 <= v <= 100 else P["hund"] if v in range(100, 1000, 100) else 0
+        return 0
+    if tier == "moderate" and k == "year":
+        f = MOD_BARS["each"] if 1990 <= v <= 2030 else 0
+        return max(f, MOD_BARS["fwd_key"]) if v in FORWARD_KEY else f
+    return 0
+
+
+def distinct_bar(lang, k, tier=None) -> int:
+    tier = tier or tier_of(lang)
+    return WAVE_BARS[tier]["bigd"] if k == "int_big" and tier in WAVE_BARS and lang not in FILL_EXCEPT else 0
+
+
+def syn_allowed(lang, k, real, real_vals=None, syn_vals=None, tier=None) -> int:
+    """Synthetic spans class k may hold beside `real` real spans: max(the share rule, bar - real, value fill). The
+    value fill counts the synthetic spans of thin values up to their floors (real_vals / syn_vals: {value: spans}) and,
+    for int_big, synthetic spans of new distinct values up to the distinct bar."""
+    lim = syn_limit(lang, k)
+    share = int(lim * real / (1 - lim) + 1e-9) if lim < 1 else 10 ** 9
+    fl = syn_floor(lang, k, tier)
+    share = max(share, fl or 0)
+    bar = max(0, class_bar(lang, k, tier) - real)
+    vfill = 0
+    if syn_vals:
+        rv = real_vals or {}
+        for v, c in syn_vals.items():
+            vfill += min(c, max(0, value_floor(lang, k, v, tier) - rv.get(v, 0)))
+        db = distinct_bar(lang, k, tier)
+        if db:
+            new_d = sum(1 for v in syn_vals if not rv.get(v))
+            vfill += min(new_d, max(0, db - len([v for v, c in rv.items() if c])))
+    return max(share, bar, vfill)
+
+
+def filled_to_bar(lang, k, syn, spans, real_vals=None, syn_vals=None, tier=None) -> bool:
+    """A class over its share cap that fill-to-bar allows (the data gate's "filled to bar" PASS)."""
+    real = spans - syn
+    return bool(syn) and syn / max(spans, 1) > syn_limit(lang, k) and syn <= syn_allowed(
+        lang, k, real, real_vals, syn_vals, tier)
+
+
+def syn_ok(lang, k, syn, spans, tier=None, real_vals=None, syn_vals=None) -> bool:
+    """The gate's synthetic check of one class: synthetic spans <= syn_allowed (the share rule, the exempt floors,
+    fill-to-bar)."""
     if not syn:
         return True
-    fl = syn_floor(lang, k, tier)
-    return syn / max(spans, 1) <= syn_limit(lang, k) or (fl is not None and syn <= fl)
+    return syn <= syn_allowed(lang, k, spans - syn, real_vals, syn_vals, tier)

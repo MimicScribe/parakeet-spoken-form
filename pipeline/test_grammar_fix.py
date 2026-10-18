@@ -4,6 +4,7 @@ uv run --no-project --with modal==1.6.1 --with numpy python test_grammar_fix.py"
 import json
 import random
 import unittest
+from collections import Counter
 
 import census_common as CC
 import grammar_rules as G
@@ -232,31 +233,91 @@ class Build(unittest.TestCase):
         self.assertFalse([f for f in chk["fail"] if "amp" in f])
         self.assertEqual(MB.trim_synthetic(took, real, "de")[1], 0)  # the floor holds after the later caps too
         # a class WITH real speech keeps the share rule
-        self.assertIn("year", MB.post_build_check(
-            [{"id": "r", "text": "x", "spans": [{"kind": "int", "text": "2015"}]} for _ in range(40)],
-            [{"id": f"y{i}", "text": "x", "duration": 1.0, "spans": [{"kind": "int", "text": "2016"}]} for i in range(40)],
+        self.assertIn("pct", MB.post_build_check(
+            [{"id": "r", "text": "x", "spans": [{"kind": "pct", "text": "45 %"}]} for _ in range(400)],
+            [{"id": f"y{i}", "text": "x", "duration": 1.0, "spans": [{"kind": "pct", "text": "46 %"}]} for i in range(200)],
             "de")["synthetic_over"])
 
 
-class LongWaiver(unittest.TestCase):
-    def test_long_classes_up_to_085(self):
-        # red-on-base: a long-number class (int_big / cur / phone / date) stopped at the 30% / 50% share
-        real = [{"id": f"r{i}", "text": "x", "spans": [{"kind": "int", "text": "1250000"}]} for i in range(30)]
-        tts = [{"id": f"t{i}", "text": "x", "src": "tts", "_targeted": True, "duration": 6.0,
-                "spans": [{"kind": "int", "text": str(3450000 + i)}]} for i in range(300)]
-        took = MB.select_synthetic(tts, real, "nl", {"int": 9.0})
-        self.assertEqual(len(took), 170)  # 170 / 200 = 0.85; a 171st would be 0.851
+class FillToBar(unittest.TestCase):
+    """Owner rule 2026-10-17: synthetic may fill a thin class up to its bar; rich classes keep the share caps."""
+
+    def test_thin_class_fills_to_bar(self):
+        # red-on-base: nl range (real 60 of a 150 bar) stopped at 30% synthetic (25 spans)
+        real = [{"id": f"r{i}", "text": "x", "spans": [{"kind": "range", "text": "20-25"}]} for i in range(60)]
+        tts = [{"id": f"t{i}", "text": "x", "src": "tts", "_targeted": True, "duration": 5.0,
+                "spans": [{"kind": "range", "text": f"{30 + i}-{40 + i}"}]} for i in range(200)]
+        took = MB.select_synthetic(tts, real, "nl", {"range": 9.0})
+        self.assertEqual(len(took), 90)  # 60 real + 90 synthetic = the 150 bar
         chk = MB.post_build_check(real, took, "nl")
         self.assertEqual(chk["synthetic_over"], {})
-        self.assertEqual(set(chk["waived_long_synthetic"]), {"int_big"})
+        self.assertEqual(chk["filled_to_bar"]["range"], {"synthetic": 90, "real": 60, "bar": 150})
         self.assertEqual(MB.trim_synthetic(took, real, "nl")[1], 0)
-        # bg keeps the gate's cap; a short class (int_small) keeps 30%
-        self.assertEqual(len(MB.select_synthetic(tts, real, "bg", {"int": 9.0})), 12)  # 12 / 42 = 0.286
-        small = [dict(x, spans=[{"kind": "int", "text": "45"}]) for x in tts]
-        self.assertEqual(len(MB.select_synthetic(small, [dict(x, spans=[{"kind": "int", "text": "45"}]) for x in real],
-                                                 "nl", {"int": 9.0})), 12)
+        self.assertEqual(len(MB.select_synthetic(tts, real, "bg", {"range": 9.0})), 25)  # bg keeps the caps
+
+    def test_rich_class_keeps_the_cap(self):
+        # red-on-base (control on the share arithmetic): a class whose real spans meet the bar stays at 30%
+        real = [{"id": f"r{i}", "text": "x", "spans": [{"kind": "pct", "text": "45 %"}]} for i in range(400)]
+        tts = [{"id": f"t{i}", "text": "x", "src": "tts", "_targeted": True,
+                "spans": [{"kind": "pct", "text": f"{i % 90} %"}]} for i in range(400)]
+        self.assertEqual(len(MB.select_synthetic(tts, real, "de", {"pct": 9.0})), 171)  # 171 / 571 = 0.2995
+
+    def test_thin_values_fill_to_their_floor(self):
+        # red-on-base: sv years (real 380 spans, all 1980: the class bar met) took 30% synthetic whatever the values
+        real = [{"id": f"r{i}", "text": "x", "spans": [{"kind": "int", "text": "1980"}]} for i in range(380)]
+        tts = [{"id": f"t{i}", "text": "x", "src": "tts", "_targeted": True,
+                "spans": [{"kind": "int", "text": str(1990 + i % 41)}]} for i in range(41 * 12)]
+        took = MB.select_synthetic(tts, real, "sv", {"int": 9.0})
+        vals = Counter(int(x["spans"][0]["text"]) for x in took)
+        self.assertTrue(all(vals[v] >= 8 for v in range(1990, 2031)), vals)  # the moderate floor of 8 per value
+        self.assertGreater(len(took), 162)  # more than the 30% share alone (162)
+
+    def test_real_rows_never_displaced(self):
+        # red-on-base: a thin class stopped at the 0.15 h floor (270 rows) instead of filling to its bar; real rows stay
+        vol = _fixture(n_win=0)
+        from test_census_common import wj
+        tts = [{"id": f"tts1_de_{k}", "text": "fünfzig Prozent da", "duration": 2.0, "src": "tts", "origin": "tts",
+                "audio_filepath": "t.wav", "split": "train", "num_chars": [[0, 15]],
+                "spans": [{"kind": "pct", "text": f"{k % 99} %", "by": "tts"}]} for k in range(400)]
+        wj(vol, "ml/tts1/de/rows.jsonl", tts)
+        aug, MB.TTS_AUG_FRAC = MB.TTS_AUG_FRAC, 0.0
+        self.addCleanup(setattr, MB, "TTS_AUG_FRAC", aug)
+        before = {x["id"] for x in rj(f"{vol}/ml/p3v2/de/rows.jsonl")}
+        MB.build4(vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True)
+        p3 = {x["id"] for x in rj(f"{vol}/mix4/p3_de.jsonl")}
+        self.assertEqual(len(rj(f"{vol}/mix4/tts_de.jsonl")), 292)  # 8 real + 292 synthetic = the 300 pct bar
+        self.assertEqual(len(p3), 8)  # every real row kept, with the synthetic rows beside them
+        self.assertTrue(p3 <= before)
 
 
+    def test_gate_shows_filled_to_bar(self):
+        # red-on-base: the data gate failed a thin class's synthetic share however short of its bar the class was
+        import importlib.util
+        import os
+        import tempfile
+
+        from test_census_common import wj
+        spec = importlib.util.spec_from_file_location("data_gate", os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "eval", "quality", "data_gate.py"))
+        DG = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(DG)
+        d = tempfile.mkdtemp()
+        wj(d, "p3_nl.jsonl", [{"id": f"r{i}", "text": "x", "duration": 3.0, "spans": [{"kind": "range", "text": "20-25"}]}
+                              for i in range(60)])
+        wj(d, "tts_nl.jsonl", [{"id": f"t{i}", "text": "x", "duration": 3.0, "spans": [{"kind": "range", "text": "1-9"}]}
+                               for i in range(90)])
+        res = DG.gate_lang(d, "nl")
+        c = [x for x in res["checks"] if x["check"].startswith("range synthetic share")]
+        self.assertEqual(len(c), 1)
+        self.assertTrue(c[0]["pass"], c)
+        self.assertIn("filled to bar (synthetic 90, real 60)", str(c[0]["got"]))
+        wj(d, "tts_nl.jsonl", [{"id": f"t{i}", "text": "x", "duration": 3.0, "spans": [{"kind": "range", "text": "1-9"}]}
+                               for i in range(91)])
+        c = [x for x in DG.gate_lang(d, "nl")["checks"] if x["check"].startswith("range synthetic share")]
+        self.assertFalse(c[0]["pass"])  # one over the bar
+
+
+class LongSets(unittest.TestCase):
     def test_long_sets_degraded_more(self):
         # red-on-base: every set had the same 0.6 degraded share
         self.assertEqual(MB.aug_frac({"_set": "ttsLNw"}), MB.TTS_AUG_FRAC_LONG)
@@ -289,6 +350,25 @@ class LongGenerators(unittest.TestCase):
         self.assertGreater(len(set(vals)), 350)
         self.assertIn("never first", B.HINTS["big"])
 
+    def test_years_two_or_three_per_sentence(self):
+        # red-on-base: no multi-year class (one year per voiced sentence)
+        import ml_tts_multi as B
+        import ml_tts_ru as R
+        import ml_tts_uk as U
+
+        rng = random.Random(4)
+        fr = [B.fragment("years", "pl", rng) for _ in range(50)]
+        self.assertTrue(all(2 <= len(f["years"]) <= 3 and f["check"] == "years" for f in fr))
+        r = {"text_written": "W latach 2015 i 2031 budżet rósł.", "text": "W latach dwa tysiące piętnastym i dwa tysiące "
+             "trzydziestym pierwszym budżet rósł.", "check": "years", "years": [2015, 2032], "cls": "years", "written": ""}
+        self.assertIn("fragment_missing", B.check_row(dict(r), "pl")[1])
+        for M_, l in ((R, "ru"), (U, "uk")):
+            rows = M_.plan(6, 5, {}, ("years3",), "x")
+            self.assertEqual(len(rows), 6)
+            for row in rows:
+                cl = [CC.gate_class(row, sp, l) for sp in row["spans"]]
+                self.assertTrue(2 <= len(cl) <= 3 and set(cl) == {"year"}, (row["text"], cl))
+
     def test_ru_phone_is_a_phone_span(self):
         # red-on-base: ru phones were "chain" spans (no census phone class)
         import ml_tts_ru as R
@@ -297,6 +377,28 @@ class LongGenerators(unittest.TestCase):
         self.assertEqual(len(rows), 6)
         for r in rows:
             self.assertEqual([CC.gate_class(r, sp, "ru") for sp in r["spans"]], ["phone"])
+
+
+class HeldoutVoice(unittest.TestCase):
+    def test_heldout_voice_never_trains(self):
+        # red-on-base: every voice could train; no language had a voice kept out of training
+        vol = _fixture(n_win=0)
+        tts, _ = _tts_fixture(vol)
+        hv = MB.HELDOUT_VOICES["de"]
+        rows = [dict(tts[0], voice="de-DE-Chirp3-HD-Puck"), dict(tts[0], id="tts1_de_hv", voice=hv),
+                dict(tts[0], id="tts1_de_hvdev", voice=hv, split="dev")]
+        from test_census_common import wj
+        wj(vol, "ml/tts1/de/rows.jsonl", rows)
+        aug, MB.TTS_AUG_FRAC = MB.TTS_AUG_FRAC, 0.0
+        self.addCleanup(setattr, MB, "TTS_AUG_FRAC", aug)
+        st = MB.build4(vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True)
+        train = rj(f"{vol}/mix4/tts_de.jsonl")
+        self.assertFalse([x for x in train if x.get("voice") == hv])
+        self.assertIn("tts1_de_hvdev", {x["id"] for x in rj(f"{vol}/mix4/tts_dev_de.jsonl")})
+        self.assertEqual(st["heldout_voice_train_dropped"]["de"], 1)
+        self.assertNotIn("bg", MB.HELDOUT_VOICES)
+        for l in ("nl", "it", "pt", "de", "es", "ru", "uk", "pl", "ro", "sv", "cs", "hu", "fi", "sk", "hr"):
+            self.assertIn(l, MB.HELDOUT_VOICES)
 
 
 class Census(unittest.TestCase):

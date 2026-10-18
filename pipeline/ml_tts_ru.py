@@ -121,6 +121,33 @@ def g_year(rng, i, ctx):
     return tpl.format(y=y), [ordw(y, "m", c)], KINDS["year"]
 
 
+YEARS3_FRAMES = [  # (template with {a} {b} [{c}], case of each year, closing noun) -- tense-neutral, years mid / late
+    ("В документе упоминаются {ys} годы, и это важно.", "nom"),
+    ("Таблица охватывает {ys} годы по всем регионам.", "nom"),
+    ("Эксперты сравнили показатели {ys} годов между собой.", "gen"),
+    ("В отчёте собраны данные за {ys} годы.", "nom"),
+    ("Комиссия отдельно рассмотрела итоги {ys} годов.", "gen"),
+    ("Особое внимание в докладе уделено {ys} годам.", "dat"),
+]
+YEARS_POOL: list = []  # year values g_years3 draws (pop order); empty = ctx["years"]
+
+
+def g_years3(rng, i, ctx):
+    """2-3 years in one sentence (cheaper per year span), each an ordinal in the frame's case, at normal rates."""
+    k = rng.choice([2, 3, 3])
+    ys, j = [], 0
+    while len(ys) < k and j < 50:
+        if "years3" not in ctx:  # a plan without a year quota has a one-value year list
+            ctx["years3"] = _years(random.Random(f"years3|{i}"), 300)
+        y = YEARS_POOL.pop() if YEARS_POOL else ctx["years3"][(3 * i + j) % len(ctx["years3"])]
+        j += 1
+        if y not in ys:
+            ys.append(y)
+    tpl, case = rng.choice(YEARS3_FRAMES)
+    written = ", ".join(map(str, ys[:-1])) + " и " + str(ys[-1])
+    return tpl.format(ys=written), [ordw(y, "m", case) for y in ys], ["int"] * k
+
+
 COUNT_FRAMES = [  # (template with {n} {w}, case, nouns)
     ("На дорогу до работы я трачу {n} {w}.", "acc", ["минута", "час"]),
     ("Совещание длилось около {n} {w}, и все устали.", "gen", ["минута", "час"]),
@@ -402,7 +429,7 @@ def g_range(rng, i, ctx):
     return rng.choice(RANGE_FRAMES[u]).format(r=w), [read], KINDS["range"]
 
 
-GEN = {"year": g_year, "count": g_count, "big": g_big, "price": g_price, "clock": g_clock, "phone": g_phone, "phone_sp": g_phone_sp,
+GEN = {"year": g_year, "count": g_count, "big": g_big, "price": g_price, "clock": g_clock, "phone": g_phone, "years3": g_years3, "phone_sp": g_phone_sp,
        "date": g_date, "pct": g_pct, "dec": g_dec, "ord": g_ord, "range": g_range}
 
 

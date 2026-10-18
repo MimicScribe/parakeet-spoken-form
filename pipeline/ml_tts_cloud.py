@@ -137,6 +137,8 @@ def main():
     ap.add_argument("--count-quota", help="json {lang: {value: rows}}: weights the count values (ml_tts.COUNT_QUOTA)")
     ap.add_argument("--normal-rates", action="store_true", help="normal speaking rates only (SPEEDS_YEAR)")
     ap.add_argument("--natural-dates", action="store_true", help="with --class-n: dates read with a month name only")
+    ap.add_argument("--heldout-voice", default="", help="every row in this one voice, split dev: the language's "
+                    "held-out decision-set voice (mix_build.HELDOUT_VOICES; it never trains)")
     ap.add_argument("--voice-cycle", action="store_true", help="every voice in turn (round robin per split) instead of "
                     "a random voice per row: the most voices for a small set")
     a = ap.parse_args()
@@ -185,7 +187,12 @@ def main():
             if lang == "en":  # accent weights, then a voice of that accent
                 loc = rng.choices(sorted({l for _, l in pool}), [EN_LOCALE_W[l] for l in sorted({l for _, l in pool})])[0]
                 pool = [v for v in pool if v[1] == loc]
-            if a.voice_cycle and lang != "en":
+            if a.heldout_voice:
+                r["split"] = "dev"
+                hit = [v for v in vs if v[0] == a.heldout_voice]
+                assert hit, f"{a.heldout_voice} is not a voice of {lang}"
+                name, loc = hit[0]
+            elif a.voice_cycle and lang != "en":
                 k = "dev" if r["split"] == "dev" else "train"
                 name, loc = pool[turn[k] % len(pool)]
                 turn[k] += 1

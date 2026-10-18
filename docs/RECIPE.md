@@ -81,7 +81,7 @@ Build window crops and seam pairs (`ml_p3.windows2`, `seam_crops`; English: `en_
 
 ## 11. Mix
 
-`modal_app.py::build_mix4` calls `mix_build.build4`. Always on: one row per id, held-out and rejected rows out, the second-recognizer share cap per class, the per-value year cap (3%), the synthetic share caps (30% per class; 50% for clock, price, phone, date; 50% for any class in en / es / fr), and 60% of synthetic degraded.
+`modal_app.py::build_mix4` calls `mix_build.build4`. Always on: one row per id, held-out and rejected rows out, the second-recognizer share cap per class, the per-value year cap (3%), the synthetic share caps (30% per class; 50% for clock, price, phone, date; 50% for any class in en / es / fr) with fill-to-bar for a class or value short of its bar (`census_common.syn_allowed`; not bg), one voice per language kept out of training (`HELDOUT_VOICES`), and 60% of synthetic degraded (75% for the long-number sets).
 
 Off unless asked for:
 

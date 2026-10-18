@@ -60,7 +60,7 @@ A run is only as good as its thinnest cell. Before training, count per language 
 - years by value (each value in 1990-2030 at a minimum count), forward years (2031-2060), numbers 0-100;
 - clock times, prices, phones, decimals, millions and billions;
 - template and session caps, so one carrier sentence or one video cannot dominate;
-- synthetic share caps per class (30%, or 50% for shapes real speech rarely has);
+- synthetic share caps per class (30%, or 50% for shapes real speech rarely has), except that a class short of its bar may be filled with synthetic speech up to the bar (fill-to-bar; real rows always count first);
 - a cap on the share of rows decided by the second recognizer, per class.
 
 Counts alone are not enough; check the spread of values. Many repeated failures were data that had the right count and the wrong shape (one clean voice for years, one common price, skewed phone lengths). `eval/quality/data_gate.py` is that check. Fix or mask labels rather than filtering data to pass it.

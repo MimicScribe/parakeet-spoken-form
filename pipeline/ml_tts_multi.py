@@ -49,6 +49,7 @@ FMT = {
     "sv": (",", " ", [("kr", True), ("kronor", True), ("€", True)], ["08-### ## ##", "070-### ## ##", "031-## ## ##"]),
 }
 MONTHS_HINT = "write the month as a word"
+YEARS_POOL: list = []  # year values the "years" class draws from (pop order); empty = a spread 1900-2060
 CLASSES = {"price": 12, "clock": 12, "phone": 10, "date": 8, "code": 6, "version": 6, "temp": 6}
 SPEEDS = [(0.9, 1), (1.0, 2), (1.15, 2), (1.35, 1)]
 DEV_VOICES = 3
@@ -69,8 +70,13 @@ def _group(n: int, sep: str) -> str:
 
 
 # the source sentence of each class comes from parliament captions of a related kind, so the shape fits its topic
-SOURCE_KIND = {"big": "cur", "price": "cur", "clock": "clock", "date": "years", "phone": None, "code": None, "version": None, "temp": None}
+SOURCE_KIND = {"years": "years", "dec": None, "pct": None, "ord": None, "range": None, "big": "cur", "price": "cur", "clock": "clock", "date": "years", "phone": None, "code": None, "version": None, "temp": None}
 HINTS = {
+    "years": "years the sentence compares or lists (each written in digits)",
+    "dec": "a decimal number (a measurement, a rate, an average)",
+    "pct": "a percentage",
+    "ord": "an ordinal number (a place in a ranking, a floor, an anniversary, a point of an agenda)",
+    "range": "a range of two numbers (from ... to ...)",
     "big": "a large amount (people, euros, tonnes, households, jobs, kilometres); put it in the middle or near the end "
            "of the sentence, never first",
     "price": "the price or cost of a concrete thing (a ticket, a product, a fee, a meal)",
@@ -86,6 +92,32 @@ HINTS = {
 def fragment(cls: str, lang: str, rng: random.Random) -> dict:
     """One written fragment of class `cls` and its value check: {"written", "check": "values"|"digits", "hint"}."""
     dec, th, curs, phones = FMT[lang]
+    if cls == "years":  # 2-3 years per sentence (cheaper per year span); YEARS_POOL (a planned spread) when set
+        k = rng.choice([2, 3, 3])
+        pool = YEARS_POOL or [rng.choice([rng.randint(1990, 2030), rng.randint(2031, 2060), rng.randint(1900, 1989)])
+                              for _ in range(12)]
+        ys = []
+        while len(ys) < k:
+            y = pool.pop() if YEARS_POOL else rng.choice(pool)
+            if y not in ys:
+                ys.append(y)
+        return {"written": ", ".join(map(str, ys)), "check": "years", "years": ys,
+                "hint": f"the years {', '.join(map(str, ys))}, each written in digits in the same sentence"}
+    if cls == "dec":
+        n = rng.choice([rng.randint(0, 99), rng.randint(100, 999)])
+        f = rng.choice([str(rng.randint(1, 9)), f"{rng.randint(1, 99):02d}"])
+        return {"written": f"{n}{dec}{f}", "check": "values", "hint": "a decimal number"}
+    if cls == "pct":
+        v = rng.choice([str(rng.randint(1, 100)), f"{rng.randint(0, 99)}{dec}{rng.randint(1, 9)}"])
+        return {"written": f"{v} %" if rng.random() < 0.6 else f"{v}%", "check": "values", "hint": "a percentage"}
+    if cls == "ord":
+        n = rng.choice([rng.randint(2, 31), rng.randint(32, 120)])
+        w = {"sv": f"{n}:e", "ro": f"al {n}-lea"}.get(lang, f"{n}.")
+        return {"written": w, "check": "values", "hint": "an ordinal number"}
+    if cls == "range":
+        a = rng.choice([rng.randint(2, 90), rng.randint(100, 900), rng.randint(1000, 90000)])
+        b = a + rng.choice([2, 3, 5, 10, 20, 50]) * max(1, a // 10)
+        return {"written": f"{_group(a, th)}–{_group(b, th)}", "check": "values", "hint": "a range of two numbers"}
     if cls == "big":
         while True:  # thousands to billions; never a 4-digit 1100-2099 (a year to the census)
             a = rng.choice([rng.randint(1000, 9999), rng.randint(10000, 999999), rng.randint(1000000, 999999999),
@@ -158,7 +190,7 @@ def write_rows(lang: str, sentences: list, n: int, seed: int = 1, batch: int = 1
     items = []
     for i, cls in enumerate(plan):
         fr = fragment(cls, lang, rng)
-        fr["hint"] = HINTS[cls] + (f" ({fr['hint']})" if cls == "date" else "")
+        fr["hint"] = HINTS[cls] + (f" ({fr['hint']})" if cls in ("date", "years") else "")
         items.append({"id": f"{lang}_{seed}_{i:04d}", "cls": cls, "sentence": rng.choice(by_kind[SOURCE_KIND[cls]]), **fr})
     rows = []
     name = __import__("ml_multi_lexgen").NAMES[lang]
@@ -216,6 +248,10 @@ def check_row(r: dict, lang: str) -> tuple:
         nums = re.findall(r"\d+", w)
         if str(r["day"]) not in nums or str(r["year"]) not in nums:
             why.append("fragment_missing")
+    elif r["check"] == "years":
+        nums = re.findall(r"\d+", w)
+        if not all(str(y) in nums for y in r["years"]):
+            why.append("fragment_missing")
     elif _norm_frag(r["written"]) not in _norm_frag(w):
         why.append("fragment_missing")
     if not s or re.search(r"\d", s):
@@ -244,7 +280,7 @@ def check_row(r: dict, lang: str) -> tuple:
     return (not why), why
 
 
-CLS_KIND = {"price": "cur", "clock": "clock", "phone": "phone", "date": "date", "code": "code", "version": "version",
+CLS_KIND = {"years": "int", "dec": "dec", "pct": "pct", "ord": "ord", "range": "range", "big": "int", "price": "cur", "clock": "clock", "phone": "phone", "date": "date", "code": "code", "version": "version",
             "temp": "unit"}
 
 
@@ -288,9 +324,11 @@ def in_language(sent: str, lang: str) -> bool:
 
 
 # ------------------------------------------------------------------ voices
-def synth_rows(rows: list, lang: str, wav_dir: str, seed: int = 1, threads: int = 8, cycle: bool = False) -> list:
+def synth_rows(rows: list, lang: str, wav_dir: str, seed: int = 1, threads: int = 8, cycle: bool = False,
+               voice: str = "") -> list:
     """Voice rows with the language's cloud voices (3 held out for dev rows); cycle: every voice in turn (round robin
-    per split) instead of a random one per row."""
+    per split) instead of a random one per row; voice: every row in that one voice, split dev (the language's
+    held-out decision-set voice, mix_build.HELDOUT_VOICES)."""
     import ml_tts_cloud as C
     from concurrent.futures import ThreadPoolExecutor
 
@@ -305,8 +343,11 @@ def synth_rows(rows: list, lang: str, wav_dir: str, seed: int = 1, threads: int 
     turn = {"dev": 0, "train": 0}
     for i, r in enumerate(rows):
         r["split"] = "dev" if i % 10 == 9 else "train"
+        if voice:
+            assert voice in vs, f"{voice} is not a voice of {lang}"
+            r["split"] = "dev"
         pool = dev_v if r["split"] == "dev" else train_v
-        v = pool[turn[r["split"]] % len(pool)] if cycle else rng.choice(pool)
+        v = voice or (pool[turn[r["split"]] % len(pool)] if cycle else rng.choice(pool))
         turn[r["split"]] += 1
         r.update(voice=v, speed=rng.choices(speeds, wts)[0],
                  locale=LOCALE[lang], engine="presynth", origin="tts", wav=os.path.join(wav_dir, r["id"] + ".wav"))
