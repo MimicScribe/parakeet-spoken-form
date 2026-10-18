@@ -489,6 +489,25 @@ def en_num_piece_ids(spm) -> list[int]:
     return [i for i in range(spm.get_piece_size()) if spm.id_to_piece(i) in want]
 
 
+def num_piece_ids(spm, labels_flags, min_count: int = 20, min_share: float = 0.5) -> tuple[list[int], int]:
+    """Pieces that mostly spell spoken numbers in non-English rows: `labels_flags` = [(token ids, per-word number flags)]
+    (nonen_span rows, word_flags). A piece qualifies with >= min_count occurrences inside number words and at least
+    min_share of all its occurrences in those rows inside them. Returns (ids, rows skipped on a word-split mismatch, ids
+    with a share in [min_share / 2, min_share): logged so the boundary is visible)."""
+    num, other, mis = collections.Counter(), collections.Counter(), 0
+    for ids, flags in labels_flags:
+        words = row_words(spm, ids)
+        if len(words) != len(flags):
+            mis += 1
+            continue
+        for (_, a, b), f in zip(words, flags):
+            for j in range(a, b + 1):
+                (num if f else other)[int(ids[j])] += 1
+    keep = [i for i, c in num.items() if c >= min_count and c / (c + other[i]) >= min_share]
+    near = [i for i, c in num.items() if c >= min_count and min_share / 2 <= c / (c + other[i]) < min_share]
+    return sorted(keep), mis, sorted(near)
+
+
 def word_start_counts(spm, labels, only=None) -> collections.Counter:
     """How often each word-initial piece ("▁...") occurs over `labels` (token-id sequences), counting only ids in
     `only` when given."""
@@ -1330,7 +1349,8 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           l2sp_anchor: str = "", accumulate: int = 1, dur_weight: float = 0.0, suffix_anchor: bool = False,
           anchor_after: int = 1, gate: float = 0.9, gate_human: float = 0.0, cons_weight: float = 0.0,
           cons_pairs: str = "", cons_per_batch: int = 1, en_set: str = "whole", r3_sub_batch: int = 2,
-          comma_weight: float = 0.0, wf_en_weight: float = 1.0, unfreeze_top: int = 0, kl_mask_space: bool = False):
+          comma_weight: float = 0.0, wf_en_weight: float = 1.0, unfreeze_top: int = 0, kl_mask_space: bool = False,
+          l2sp_exempt_num: bool = False):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
     entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists.
@@ -1341,7 +1361,9 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     comma_weight (r3): the decimal-comma penalty's weight (add_r3_losses; 0 = off). wf_en_weight (r3): wf_pen's factor
     on English rows (add_r3_losses; 1 = off). unfreeze_top > 0 (r3 only): the last unfreeze_top conformer blocks of the
     encoder train too (unfreeze_top_layers: eval mode, L2-SP to their stock values, saved in every step checkpoint; the r3
-    KL teacher keeps the stock blocks); 0 = the frozen encoder, unchanged."""
+    KL teacher keeps the stock blocks); 0 = the frozen encoder, unchanged. l2sp_exempt_num (r3 + l2sp_c): the joint's
+    output rows of the pieces that mostly spell non-English spoken numbers (num_piece_ids over the nonen_span labels) and
+    of the bare "▁" piece are exempt from the L2-SP pull too, like the written-form rows; False = unchanged."""
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
@@ -1455,6 +1477,18 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         if l2sp_c:
             last_layer = m.joint.joint_net[-1].weight.shape[0]
             exempt = [i for i in wf_piece_ids(m.tokenizer.tokenizer) if i < last_layer]
+            if l2sp_exempt_num:
+                spm = m.tokenizer.tokenizer
+                lf = [(ids(t), fl) for t, fl in tagged.get("_nspan_words", {}).items()]
+                num_ids, nmis, near = num_piece_ids(spm, lf)
+                assert num_ids, "l2sp_exempt_num but no number piece found in the nonen_span labels"
+                assert nmis <= 0.2 * len(lf), f"l2sp_exempt_num: {nmis}/{len(lf)} labels with a word-split mismatch"
+                # the bare "▁" (digit-mode entry) row too: kl_mask_space frees it from the KL, this from the pull
+                space = [i for i in range(spm.get_piece_size()) if spm.id_to_piece(i) == "▁"]
+                exempt = sorted(set(exempt) | {i for i in num_ids + space if i < last_layer})
+                print(f"l2sp_exempt_num: {len(num_ids)} number pieces + '▁' {space} exempt from {len(lf)} nonen_span "
+                      f"labels ({nmis} word-split mismatches): {[spm.id_to_piece(i) for i in num_ids]}; below the share "
+                      f"cut (not exempt): {[spm.id_to_piece(i) for i in near]}", flush=True)
             extra_cb.append(L2SP(l2sp_anchor, l2sp_c, exempt, extra_anchor=enc_stock))
             weight_decay = 0.0
             print(f"L2SP toward {l2sp_anchor} c={l2sp_c}, {len(exempt)} written-form rows exempt; AdamW decay 0")

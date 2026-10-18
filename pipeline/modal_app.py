@@ -1604,6 +1604,22 @@ R3_ARMS.update({
     # onsets). One change against R8-s-denl.
     "R8-s-denl-m": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_DENL_RECIPE, build_langs=",".join(RUN2_LANGS),
                         kl_mask_space=True),
+    # R8-s-denl-mx = R8-s-denl-m + l2sp_exempt_num: the joint's output rows of the pieces that spell de/nl spoken numbers
+    # are free of the L2-SP pull (2026-10-18 spike_m_denl: the mask fix left digit mode but the units word still did not
+    # win; the units rows learn slowly under the pull). One change against R8-s-denl-m.
+    "R8-s-denl-mx": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_DENL_RECIPE, build_langs=",".join(RUN2_LANGS),
+                         kl_mask_space=True, l2sp_exempt_num=True),
+    # Diagnostics (2026-10-18 second look on spike_m_denl; not product recipes), one change each against R8-s-denl-m:
+    # R8-s-denl-m0 = every anchor off (L2-SP c 0, blank/punct/token KL x0): are the anchors the throttle?
+    # R8-s-denl-m5 = anchors on, lr x5: is it the update rate (the top-2 encoder spike ran ~8x the gradient norm)? The L2-SP
+    # pull scales with lr too, so this also reaches the pull's equilibrium ~5x sooner (not a free rate test).
+    "R8-s-denl-m0": dict(_R8, lr=1e-4, l2sp_c=0.0, recipe=_R8S_DENL_RECIPE, build_langs=",".join(RUN2_LANGS),
+                         kl_mask_space=True, kl_scale=0.0),
+    "R8-s-denl-m5": dict(_R8, lr=5e-4, l2sp_c=10.0, recipe=_R8S_DENL_RECIPE, build_langs=",".join(RUN2_LANGS),
+                         kl_mask_space=True),
+    # R8-s-denl-m05 = both: anchors off AND lr x5, the decoder+joint ceiling at 500 steps (2x2 with m, m0, m5)
+    "R8-s-denl-m05": dict(_R8, lr=5e-4, l2sp_c=0.0, recipe=_R8S_DENL_RECIPE, build_langs=",".join(RUN2_LANGS),
+                          kl_mask_space=True, kl_scale=0.0),
 })
 R3_ARMS.update({
     "R8-s3e": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, wf_en_weight=3.0),
@@ -1655,6 +1671,8 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     cfg.setdefault("comma_weight", 0.0)
     cfg.setdefault("wf_en_weight", 1.0)
     cfg.setdefault("kl_mask_space", False)
+    cfg.setdefault("l2sp_exempt_num", False)
+    cfg.setdefault("kl_scale", 1.0)
     given = dict(mix=mix, init_from=init_from, anchor_init=anchor_init, dur_weight=dur_weight, warmup=warmup,
                  langs=",".join(_langs(langs)))
     bad = {k: (given[k], v) for k, v in cfg.pop("recipe", {}).items() if given[k] != v}
@@ -1704,11 +1722,13 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
         assert 0.35 <= en["share"] <= 0.40, f"English number share {en['share']} outside 35-40%"
     ft_train.train(VOL, ultra_path(), run, mix=mix, max_steps=max_steps, lr=cfg["lr"], warmup=warmup, seed=seed,
                    init_from="" if init_from == "ultra" else init_from, batch_duration=200, accumulate=2,
-                   spec_augment=False, kl_weight=10.0, kl_punct=30.0, kl_tok=1.0, save_every=save_every,
+                   spec_augment=False, kl_weight=10.0 * cfg["kl_scale"], kl_punct=30.0 * cfg["kl_scale"],
+                   kl_tok=1.0 * cfg["kl_scale"], save_every=save_every,
                    on_save=vol.commit, stage_dir="/tmp/stage", r3=True, wf_weight=cfg["wf_weight"],
                    en_weight=en_weight, l2sp_c=cfg["l2sp_c"], l2sp_anchor=anchor, dur_weight=dur_weight,
                    en_set=cfg["en_set"], r3_sub_batch=r3_sub_batch, comma_weight=cfg["comma_weight"],
                    wf_en_weight=cfg["wf_en_weight"], unfreeze_top=unfreeze_top, kl_mask_space=cfg["kl_mask_space"],
+                   l2sp_exempt_num=cfg["l2sp_exempt_num"],
                    **r4)
     vol.commit()
 
