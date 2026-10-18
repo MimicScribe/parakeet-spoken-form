@@ -2037,6 +2037,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
       "it+" / "it-" force the elided forms split / whole ("it-" reproduces mix4final8), "it" follows
       compound_split.IT_SPLIT_ELIDED (ON); stats["italian_split_elided"] records the form written.
     - win15_share > 0 (2026-10-18): mix4/win15_<lang>.jsonl, 15 s multi-number windows (win15.py, <win15_dir>/<lang>/
+      (win15_dir may list several dirs, "ml/win15b,ml/win15sym"; one share over all of them)
       windows.jsonl) whose every parent is a row this build trains on with the same label, none held out / rejected /
       ext; <= win15_share x the language's number hours (rows + synthetic + windows + seam parts), synthetic windows
       <= TTS_SHARE of that target, the year value spread kept (win15.select_for_build).
@@ -2474,7 +2475,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         if win15_share > 0:
             import win15 as W15
 
-            w15 = _rows(f"{vol}/{win15_dir}/{lang}/windows.jsonl")
+            w15 = [x for d_ in win15_dir.split(",") if d_ for x in _rows(f"{vol}/{d_}/{lang}/windows.jsonl")]  # dirs "a,b"
             if dedupe:
                 w15, _ = B.dedupe(w15, protect[lang], within=False, part_of=lambda x: "win15")
             w15_h = win15_share * (_h(tr) + _h(took) + _h(win) + _h(seam) + _h(seam_long))

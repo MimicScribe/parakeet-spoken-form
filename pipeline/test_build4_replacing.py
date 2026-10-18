@@ -84,6 +84,22 @@ class EdgeFix(unittest.TestCase):
         self.assertEqual((st["edge_fix"]["de"]["fixed"], st["edge_fix"]["de"]["trim"]), (1, 1))
 
 
+class Win15Dirs(unittest.TestCase):
+    def test_two_window_dirs(self):
+        import win15 as W
+
+        vol = _fixture(n_win=0)
+        rows = rj(f"{vol}/ml/p3v2/de/rows.jsonl")
+        for d, k in (("ml/w15a", 4), ("ml/w15s", 5)):
+            p = rows[k]
+            wj(vol, f"{d}/de/windows.jsonl", [{"id": f"de_{d[-4:]}", "text": p["text"], "duration": 13.0, "lang": "de",
+                                               "num_tokens": [False, False, True, True, False], "parents": [p["id"]],
+                                               "parent_sha": {p["id"]: W.sha(p["text"])}, "audio_filepath": "w.wav",
+                                               "src": [[p["id"], i] for i in range(5)]}])
+        MB.build4(vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True, win15_share=10.0, win15_dir="ml/w15a,ml/w15s")
+        self.assertEqual(sorted(x["id"] for x in rj(f"{vol}/mix4/win15_de.jsonl")), ["de_w15a", "de_w15s"])
+
+
 class Inputs(unittest.TestCase):
     """extra_passes (judged, read with the language's passes), relabel_rows (source rows replaced by id), relabel_parts_dir
     (written windows replaced by id) and relabel_tts (letter+digit policy on the chosen synthetic rows)."""
