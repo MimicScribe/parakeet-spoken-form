@@ -163,9 +163,16 @@ class VarietyReadings(unittest.TestCase):
     def test_fill_readings(self):
         for lang, cap, lab, hyp, span, ch in [
                 ("de", "Er kommt um 14:30 an.", "Er kommt um vierzehn Uhr dreißig an.", "er kommt um halb drei an", "14:30", (12, 32)),
-                ("de", "Es kostet 2,50 € heute.", "Es kostet zwei Euro fünfzig heute.", "es kostet zwei fünfzig heute", "2,50 €", (10, 27)),
+                ("de", "Es kostet 2,50 € heute.", "Es kostet zwei Euro fünfzig heute.", "es kostet zwei fünfzig euro heute", "2,50 €", (10, 27)),
                 ("es", "Mide 3,5 metros.", "Mide tres coma cinco metros.", "mide tres con cinco metros", "3,5", (5, 20))]:
             self.assertEqual(self.one(lang, cap, lab, hyp, [(span, ch)]), {"WORDS_RIGHT_VALUE": 1}, (lang, hyp))
+
+    def test_bare_price_without_its_unit_is_its_own_outcome(self):
+        # the unit-less reading is a right reading only with the currency unit next to it; without it the amount is
+        # heard but the unit dropped: BARE_PRICE, not value-right
+        got = self.one("de", "Es kostet 2,50 € heute.", "Es kostet zwei Euro fünfzig heute.", "es kostet zwei fünfzig heute",
+                       [("2,50 €", (10, 27))])
+        self.assertEqual(got, {"BARE_PRICE": 1})
 
 
 if __name__ == "__main__":

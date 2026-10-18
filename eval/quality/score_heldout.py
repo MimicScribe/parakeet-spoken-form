@@ -78,7 +78,7 @@ def fetch(run: str, lang: str, work: Path, set_: str = "heldout") -> list:
 
 # Italian elision (2026-10-18): the split label form "venti uno" / "cento ottanta" and a joined "ventiuno" are the
 # same number words as "ventuno" / "centottanta"; the audio cannot tell them apart
-_IT_ELIDE = re.compile(r"(vent)i(?=[uo])|(trent|quarant|cinquant|sessant|settant|ottant|novant)a(?=[uo])|(cent)o(?=ottant)")
+_IT_ELIDE = re.compile(r"(vent)i(?=[uo])|(trent|quarant|cinquant|sessant|settant|ottant|novant)a(?=[uo])|(cent)o(?=[uo])")
 
 
 def _elide(k: str) -> str:
@@ -132,6 +132,18 @@ def _nw(w: str) -> str:
     return D.DIALECT.get(D.norm_word(w), D.norm_word(w))
 
 
+def _heard(cands: list, hw_all: list, i0: int, j0: int, i: int, j: int) -> bool:
+    return (any(_whole(x, hw_all[i0:j0]) for x in cands)
+            or any(len(D.key(x)) >= 5 and _whole(x, hw_all[i:j]) for x in cands))
+
+
+def _unit_words(cands: list, lang: str) -> set:
+    """The currency-unit words of a price's readings ("euro", "cent"): reading words that are no number word and no
+    joiner. A price heard through its unit-less reading (cur_bare) with none of these in the region lost the unit."""
+    return {w for x in cands for w in map(_nw, x.split()) if len(w) >= 3 and w not in N._CURCONN
+            and N.parse_value(w, lang) is None}
+
+
 def _digit_groups_match(dig: str, text: str) -> bool:
     """True when `dig` equals one digit group of `text` or several consecutive ones joined ("06 12 34" = "061234")."""
     gs = re.findall(r"\d+", text)
@@ -156,7 +168,7 @@ def span_form(outcome: str, region: str, lang: str) -> str:
 
 def _span_forms(outcome: str, region: str, lang: str) -> tuple:
     """(form, form_old): form_old is the reading before words with a wrong value stopped counting as converted."""
-    if outcome == "WORDS_RIGHT_VALUE":
+    if outcome in ("WORDS_RIGHT_VALUE", "BARE_PRICE"):  # a bare price is words with the value right (its unit is counted apart)
         return "converted", "converted"
     f = N.form_class(region, lang)
     old = "digits_left" if f == "other" and outcome == "DIGITS_RIGHT_VALUE" else f
@@ -185,7 +197,9 @@ def score_spans(rows: list, lang: str, caps: dict, per_span: list = None, forms:
     hypothesis words that stand where its label words stand (`_region`, +-1 word), never on the whole hypothesis.
     WORDS_RIGHT_VALUE: the region holds ANY candidate reading of the span as whole words (a valid variant is not a
     wrong value); DIGITS_RIGHT_VALUE: a region token carries exactly the caption's digits; WRONG_VALUE: something
-    number-like (digits, number words, a broken number word) stands there instead; DROPPED: nothing does. WRONG and
+    number-like (digits, number words, a broken number word) stands there instead; DROPPED: nothing does; BARE_PRICE
+    (own outcome, not value-right): the price was heard only through its unit-less reading ("zwei fünfzig" for "2,50 €")
+    and none of the currency-unit words stands in the region. WRONG and
     DROPPED spans are listed for a listen. A span that cannot be placed (no label position) is scored on the whole
     hypothesis and counted as `unplaced`."""
     c, check = collections.defaultdict(collections.Counter), []
@@ -198,7 +212,8 @@ def score_spans(rows: list, lang: str, caps: dict, per_span: list = None, forms:
         hw_all = [_nw(w) for w in hyp_raw]
         row_spans, nc = m.get("spans") or [], m.get("num_chars") or []
         k = 0
-        for sp in M.spans_regional(cap, lang, READINGS):
+        nobare = M.spans_regional(cap, lang, READINGS - {"cur_bare"})  # the same spans without the unit-less price reading
+        for sp, sp0 in zip(M.spans_regional(cap, lang, READINGS), nobare):
             if not sp.cands:
                 continue
             place = None
@@ -218,9 +233,11 @@ def score_spans(rows: list, lang: str, caps: dict, per_span: list = None, forms:
             # "één" / "un" must not be matched by a neighbouring article). Digits: the span's digits as whole digit
             # groups of the region, one or several in a row (phone groups, "15h30", "2,80 €"); "5" inside "15" or
             # "2015" is a wrong value, not a right one.
-            if (any(_whole(x, hw_all[i0:j0]) for x in sp.cands)
-                    or any(len(D.key(x)) >= 5 and _whole(x, hw_all[i:j]) for x in sp.cands)):
+            if _heard(sp.cands, hw_all, i0, j0, i, j):
                 o = "WORDS_RIGHT_VALUE"
+                if sp.kind == "cur" and not _heard(sp0.cands, hw_all, i0, j0, i, j) and not (
+                        _unit_words(sp0.cands, lang) & set(hw_all[i:j])):
+                    o = "BARE_PRICE"  # "zwei fünfzig" for "2,50 €": the amount heard, the currency unit dropped
             elif dig and _digit_groups_match(dig, reg):
                 o = "DIGITS_RIGHT_VALUE"
             elif re.search(r"\d", reg) or N.extract_numbers(reg, lang, keep_weak=False, garbles=True):
@@ -242,7 +259,7 @@ def score_spans(rows: list, lang: str, caps: dict, per_span: list = None, forms:
                     fb["converted_old"] = fb.get("converted_old", 0) + (fold == "converted")
             if per_span is not None:  # paired comparisons (bootstrap / McNemar between two runs on the same spans)
                 per_span.append((r["id"], sp.text, sp.kind, o))
-            if o in ("WRONG_VALUE", "DROPPED"):
+            if o in ("WRONG_VALUE", "DROPPED", "BARE_PRICE"):
                 check.append({"id": r["id"], "kind": sp.kind, "outcome": o, "caption_span": sp.text,
                               "hyp_region": reg, "ref": r["ref"], "hyp": r["hyp"]})
     return {k: dict(v) for k, v in c.items()}, check
@@ -514,7 +531,7 @@ def main(argv=None):
             al = sc.get("all", {})
             n = sum(al.values()) or 1
             print(f"{run:24s} {lang:4s} {n:5d} {100 * al.get('WORDS_RIGHT_VALUE', 0) / n:7.1f} "
-                  f"{100 * al.get('DIGITS_RIGHT_VALUE', 0) / n:7.1f} {al.get('WRONG_VALUE', 0):5d} {al.get('DROPPED', 0):5d}   "
+                  f"{100 * al.get('DIGITS_RIGHT_VALUE', 0) / n:7.1f} {al.get('WRONG_VALUE', 0):5d} {al.get('DROPPED', 0):5d} bare-price {al.get('BARE_PRICE', 0):3d}  "
                   + " ".join(f"{k}:{v.get('WORDS_RIGHT_VALUE', 0)}/{sum(v.values())}" for k, v in sorted(sc.items()) if k not in ("all", "unplaced"))
                   + f"   | lost {di['lost_per100']} invented {di['invented_per100']} per 100 words (n={di['ref_content_words']})")
             sh = N.form_shares(fm)

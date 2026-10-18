@@ -23,7 +23,7 @@ def norm(s: str) -> str:
     return re.sub(r"[^a-z' ]+", " ", s).replace("'", " ' ").strip()
 
 
-_IT_ELIDE = re.compile(r"(vent)i(?=[uo])|(trent|quarant|cinquant|sessant|settant|ottant|novant)a(?=[uo])|(cent)o(?=ottant)")
+_IT_ELIDE = re.compile(r"(vent)i(?=[uo])|(trent|quarant|cinquant|sessant|settant|ottant|novant)a(?=[uo])|(cent)o(?=[uo])")
 
 
 def joined(s: str) -> str:
@@ -36,7 +36,7 @@ def toks(s: str) -> list[str]:
 
 
 _CARD: dict = {}
-ALT = {"de": {"zwo": 2, "ein": 1, "eine": 1}, "es": {"un": 1, "una": 1, "uno": 1}, "pt": {"uma": 1, "duas": 2, "um": 1},
+ALT = {"de": {"zwo": 2, "ein": 1, "eine": 1}, "es": {"un": 1, "una": 1, "uno": 1}, "pt": {"uma": 1, "duas": 2, "um": 1, "meia": 6},
        "it": {"un": 1, "una": 1}, "fr": {"une": 1}, "nl": {"een": 1}}
 
 

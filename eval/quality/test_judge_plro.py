@@ -251,7 +251,38 @@ def test_long_number_ranges():
     assert got == {"s": "kept", "t": "span_missing"}, got
 
 
+def test_core_language_transcripts_with_digits_and_words():
+    # 2026-10-18: the second transcript writes digits for words ("half 7"), splits compounds ("ottanta tre"), says
+    # "coma" for "con", writes "80 cent" for "0,80 €". red-on-base: every id marked kept below was span_missing before.
+    def one(i, text, span):
+        return row(i, text, [span])
+    nl = one("nlc", "We spreken om half zeven af voor de bioscoop.", {"text": "6:30", "kind": "clock", "reading": "half zeven"})
+    nl5 = one("nlh", "De vergadering begint om vijf na elf in de zaal.", {"text": "11:05", "kind": "clock", "reading": "vijf na elf"})
+    nlc = one("nlcent", "Het bedrijf stak tachtig cent in de renovatie.", {"text": "€ 0,80", "kind": "cur", "reading": "tachtig cent"})
+    es = one("es", "Mide cuarenta y cuatro con cuatro litros.", {"text": "44,4", "kind": "dec", "reading": "cuarenta y cuatro con cuatro"})
+    it = one("it", "Chiami il tre sette ottantatré trentanove settantotto novantasei.",
+             {"text": "37 83 39 78 96", "kind": "phone", "reading": "tre sette ottantatré trentanove settantotto novantasei"})
+    de = one("dey", "Die Firma wurde zwanzig fünfundfünfzig gegründet.", {"text": "2055", "kind": "int", "reading": "zwanzig fünfundfünfzig"})
+    dew = one("dew", "Der Preis ist neunundfünfzig fünfundzwanzig heute.", {"text": "59,25 €", "kind": "cur", "reading": "neunundfünfzig fünfundzwanzig"})
+    # controls (rejected before and after): a different value, a different word, a declined "ein"
+    bad1 = one("bad1", "Die Firma steckte fünf neunzig in die Sanierung.", {"text": "5,90 €", "kind": "cur", "reading": "fünf neunzig"})
+    bad2 = one("bad2", "Der Zug fährt um einem Uhr ab.", {"text": "13:00", "kind": "clock", "reading": "einem Uhr"})
+    bad3 = one("bad3", "Ruf mich an unter sechs drei trinta e cinco.", {"text": "63 35", "kind": "phone", "reading": "sechs drei"})
+    rows_ = [nl, nl5, nlc, es, it, de, dew, bad1, bad2, bad3]
+    ext = {"nlc": "we spreken om half 7 af voor de bioscoop", "nlh": "de vergadering begint om 5 na 11 in de zaal",
+           "nlcent": "het bedrijf stak 80 cent in de renovatie", "es": "mide cuarenta y cuatro coma cuatro litros",
+           "it": "chiami il tre sette ottanta tre trentanove settantotto novantasei",
+           "dey": "die firma wurde zweitausendfünfundfünfzig gegründet", "dew": "der preis ist neunundfünfzig euro fünfundzwanzig heute",
+           "bad1": "die firma steckte fünfundneunzig in die sanierung", "bad2": "der zug fährt um ein uhr ab",
+           "bad3": "ruf mich an unter sechs drei dreißig fünf"}
+    for lang, ids in [("nl", ["nlc", "nlh", "nlcent"]), ("es", ["es"]), ("it", ["it"]), ("de", ["dey", "dew", "bad1", "bad2"])]:
+        got = run(lang, [x for x in rows_ if x["id"] in ids], {k: v for k, v in ext.items() if k in ids})
+        for i in ids:
+            assert got[i] == ("span_missing" if i.startswith("bad") else "kept"), (lang, i, got)
+
+
 if __name__ == "__main__":
+    test_core_language_transcripts_with_digits_and_words()
     test_long_number_ranges()
     test_long_number_scale_words()
     test_long_number_langs_month_names_and_cents()

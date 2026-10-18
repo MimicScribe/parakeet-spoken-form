@@ -1,5 +1,7 @@
 """pl / ro judge (next tier, like the ru judge): the second transcript (sliced to the row span; it writes digits) must
-(1) hold every span's VALUE (caption digits) as a number, or the span's reading as words, checked on EVERY row, and (2)
+(1) hold every span's VALUE (caption digits) as a number, or the span's reading as words, checked on EVERY row (a row that
+fails it is still kept when value_agree says the transcript says the label: same non-number words, every number of the
+label right, so digits for words, split tens, "coma" for "con" and relative clocks written with digits pass), and (2)
 for real speech, the tightening's run-scoped cer_ext <= 0.10. The slice's word agreement with the label (WER of the
 non-number words) is a cross-check only: a real row over 0.25 is kept but FLAGGED ("wer_flag" in judge_rows, counted in
 judge_stats "kept_wer_flagged"): on the local sample those rows were slicing / scale-word artefacts of the WER, not label
@@ -16,6 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import volume_io as V  # noqa: E402
 sys.path.insert(0, str(V.PIPE))
 from census_common import synthetic  # noqa: E402
+import number_outcomes as N  # noqa: E402
+import value_agree as VA  # noqa: E402
 lang, name = sys.argv[1], sys.argv[2]
 up = "--upload" in sys.argv
 W = Path(os.environ.get("SPOKEN_FORM_JUDGE_ROOT", "/tmp/spoken_form_judge")) / lang / name
@@ -190,6 +194,8 @@ def alt_ok(sp, et, en, scaled, row_phone="", synthetic=False, row_groups=()):
     c = re.fullmatch(r"\D*?(\d+),(\d{2})\D*", t)
     if k == "cur" and c:
         a, b = int(c.group(1)), int(c.group(2))
+        if a == 0 and re.search(rf"(?<![\d,.:])0*{b}\s+{MINOR_WORD}(?![^\W\d_])", tl):  # "0,80 €" heard as "80 cent"
+            return True
         return bool(re.search(rf"(?<![\d:]){a}[,.]{b:02d}(?![\d:])", tl)
                     or re.search(rf"(?<![\d:]){a}\s+[^\W\d_]+\s+0?{b}(?![\d:])", tl)
                     or re.search(rf"(?<![\d:]){a}\s+[^\W\d_]+\.?\s+(?:i|och|și|si|и|і|and|et|y|e|und|en|a|és|ja)\s+0?{b}\s+(?:de\s+)?{MINOR_WORD}(?![^\W\d_])", tl))
@@ -268,6 +274,9 @@ for l in open(W / f"{name}.jsonl"):
         import ast
         spans = ast.literal_eval(spans)
     en, el = nums(et), " " + " ".join(WORD.findall(et.lower())) + " "
+    if lang in N._LEX:  # the numbers the transcript writes as WORDS count too ("ottanta tre" = 83, "zweitausendfünfundfünfzig")
+        en = en | {float(v) for x in N.extract_numbers(et, lang, keep_weak=True) if x.form == "words" for v in x.vals}
+    et_d = VA.digitize(et, lang)
     lw = WORD.findall(r["text"].lower())
     lab_words = list(lw)
     for s_ in spans:  # drop each span's reading words before the word check
@@ -297,8 +306,13 @@ for l in open(W / f"{name}.jsonl"):
             ok = heard or alt_ok(s_, et, en, scaled, phone, syn, groups)
         else:
             ok = (v and all(x in scaled for x in v)) or heard or alt_ok(s_, et, en, scaled, phone, syn, groups)
+        if not ok and et_d != et:  # a transcript that writes number words is read by the digit rules too ("59 euro 25")
+            en_d = nums(et_d)
+            ok = alt_ok(s_, et_d, en_d, scaled_values(en_d, et_d, s_.get("text", "")), phone, syn, groups)
         if not ok:
             bad = s_.get("text"); break
+    if bad is not None and lang in N._LEX and VA.agree(r["text"], et, lang)[0]:
+        bad = None  # the transcript says the label: same non-number words, every number of the label right (value_agree)
     if bad is not None:
         rej.append(r["id"]); reasons["span_missing"] += 1; rows_out.append({"id": r["id"], "reason": "span_missing", "span": bad}); continue
     # words (real speech): a slice that disagrees with the label (WER > 0.25) is flagged for a listen, not rejected (the

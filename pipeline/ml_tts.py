@@ -633,6 +633,8 @@ def _roman_ok(lang, written, span, reading):
 # "duas mil e três", "cincuenta y una por ciento", "el una de mayo": judge audit 2026-10-17)
 DEC_WORD_RE = re.compile(r"\b(?:komma|Komma|coma|virgule|virgola|vírgula|punto|ponto|point|Punkt|punt)\b")
 CENT_WORD_RE = re.compile(r"\b(?:[Cc]ent|cents|centimes?|céntimos?|cêntimos?|centesim[oi]|centavos?)\b")
+# French "cent" / "cents" is the number 100 / 200... ("cent euros virgule cinq"), not the minor unit: fr names it "centime(s)"
+CENT_WORD_FR_RE = re.compile(r"\bcentimes?\b")
 FEM_OK_CLS = {"count", "large", "range_between", "range_from", "unit", "frac", "temp"}
 APOCOPE_BAD = {"es": re.compile(r"\bun\b"), "it": re.compile(r"(?:un|prima)\b")}  # "el un de", "duemilaun", "il prima"
 MASC_HOUR = {"pt": re.compile(r"\b(?:um|dois) horas?\b"), "fr": re.compile(r"\bun heures?\b")}
@@ -707,7 +709,7 @@ def reading_ok(lang, grp, cls, gender, span, reading, date_pos, written=""):
         return False
     if YEAR_QUOTA and cls == "year" and re.fullmatch(r"(19|20)\d\d", span.text) and reading.strip() != span.cands[0].strip():
         return False  # a year top-up trains the full reading; the clipped "'55" and pair forms add no year value
-    if span.kind == "cur" and DEC_WORD_RE.search(reading) and CENT_WORD_RE.search(reading):
+    if span.kind == "cur" and DEC_WORD_RE.search(reading) and (CENT_WORD_FR_RE if lang == "fr" else CENT_WORD_RE).search(reading):
         return False  # "dodici euro virgola cinquanta centesimi": a decimal word AND a cents word is no reading
     if span.kind == "amp" and re.search(r"\band\b", reading):
         return False  # an English "and" in a native sentence: the voice cannot say it and the label would teach it

@@ -368,7 +368,7 @@ _DEC_ALT = {"de": {"punkt"}, "nl": {"punt"}, "it": {"punto"}, "es": {"punto"}, "
 _SCALE_VALS = {Decimal(10) ** 3, Decimal(10) ** 6, Decimal(10) ** 9, Decimal(10) ** 12}
 _WEAK = {"en": {"one", "second", "hundreds", "thousands", "millions", "billions"}, "de": {"ein", "eins", "eine", "einen", "einem", "einer", "eines"}, "nl": {"een"}, "it": {"uno", "un", "una"},
          "es": {"uno", "un", "una", "segundo", "segunda", "segundos", "segundas"}, "pt": {"um", "uma", "segundo", "segunda", "segundos", "segundas"}, "fr": {"un", "une"}}
-_PCT = {"en": r"\b(?:per ?cent|percent)\b", "de": r"\bprozent\b", "nl": r"\b(?:procent|percent)\b", "fr": r"\bpour cent\b", "es": r"\bpor cien(?:to)?\b", "it": r"\bper cento\b", "pt": r"\bpor cento\b"}
+_PCT = {"en": r"\b(?:per ?cent|percent)\b", "de": r"\bprozent\b", "nl": r"\b(?:procent|percent)\b", "fr": r"\bpour cent\b", "es": r"\bpor (cien(?:to)?)\b", "it": r"\bper cento\b", "pt": r"\bpor cento\b"}
 _CURCONN = {"e", "et", "y", "con", "und", "en", "mit", "and", "com"}
 _CUR = {"euro", "euros", "dollar", "dollars", "dolar", "dolares", "pfund", "pound", "pounds", "livre", "livres", "libra", "libras", "franc", "francs", "franken",
         "real", "reais", "gulden", "peso", "pesos", "dollari", "sterlina", "sterline", "franchi", "yen", "dolaren", "dollaro"}
@@ -574,7 +574,7 @@ _PREFIXES: dict = {}
 _HALF = {"en": [(r"(?<=[a-z]) and a half\b", " point five")],
          "de": [(r"\banderthalb\b", "eins komma funf"), (r"\b([a-z]+?)einhalb\b", r"\1 komma funf")],
          "nl": [(r"\banderhalf\b", "een komma vijf"), (r"\b([a-z]+?)enhalf\b", r"\1 komma vijf")],
-         "es": [(r"(?<=[a-z]) y medi[oa]\b", " coma cinco")], "fr": [(r"(?<=[a-z]) et demie?\b", " virgule cinq")],
+         "es": [(r"(?<=[a-z]) y medi[oa]\b", " coma cinco")], "fr": [(r"(?<=[a-z]) heures? et demie?\b", " virgule cinq heures"), (r"(?<=[a-z]) et demie?\b", " virgule cinq")],
          "it": [(r"(?<=[a-z]) e mezz[oa]\b", " virgola cinque")], "pt": [(r"(?<=[a-z]) e mei[oa]\b", " virgula cinco")]}
 _GARBLE_NOT = {"it": {"quindi"}}  # real words one or two letters short of a number word ("quindi" / "quindici")
 
@@ -624,8 +624,47 @@ def _romans(text: str) -> str:
 # context (a minute count before "nach" / "over" / "menos" ...) only count after a clock preposition ("um", "om",
 # "las", "às", "alle") or with the hour word ("heures").
 _REL_PREP = {"de": {"um", "gegen", "ab", "bis", "ist", "seit", "von"}, "nl": {"om", "rond", "tot", "vanaf", "is", "van"},
-             "es": {"las", "la"}, "pt": {"as", "a"}, "it": {"le", "alle", "dalle", "verso", "alla", "dalla", "l"},
-             "fr": set()}
+             "es": {"las", "la"}, "pt": {"as", "a"}, "it": {"le", "alle", "dalle", "verso", "alla", "dalla", "l", "all", "dall"},
+             "fr": {"a", "vers", "des", "avant", "jusqu", "est", "pour"}}  # fr: "trois heures et demie" alone is a duration
+# noon / midnight words (fr "midi", it "mezzogiorno", pt "meio-dia") are a time only after a preposition or with minutes
+# ("mezzogiorno e un quarto"); "le Midi" / "il Mezzogiorno" are regions and "l'après-midi" the afternoon
+_NOON = {"fr": {("midi",): 12, ("minuit",): 0}, "it": {("mezzogiorno",): 12, ("mezzanotte",): 0},
+         "pt": {("meio", "dia"): 12, ("meia", "noite"): 0}}
+_NOON_PREP = {"fr": {"a", "vers", "avant", "jusqu", "est", "pour", "des"},
+              "it": {"a", "verso", "fino", "entro", "dopo", "prima", "per", "era", "sara", "gia", "ormai", "quasi", "circa"},
+              "pt": {"ao", "a", "as", "ate", "antes", "depois", "perto", "por", "desde", "apos", "era", "e"}}
+# a time-span noun after "Viertel vor einem" / "kwart over drie" makes it a count ("Viertel vor einem Jahr"), not a clock
+_SPAN_NOUN = {"de": {"jahr", "jahre", "jahren", "jahres", "monat", "monate", "monaten", "woche", "wochen", "tag", "tage", "tagen",
+                     "stunde", "stunden", "minute", "minuten", "sekunden", "mal", "prozent", "euro", "personen", "leute", "leuten"},
+              "nl": {"jaar", "jaren", "maand", "maanden", "week", "weken", "dag", "dagen", "minuut", "minuten", "seconden",
+                     "keer", "procent", "euro", "personen", "mensen"}}
+_DECLINED = {"de": {"einem", "einen", "einer", "eines"}}
+
+
+def _noon_tail(lang: str, w: list, k: int, hr: int):
+    """Minutes after a noon word: "e un quarto", "et demi", "moins le quart" -> (end, hour, minute), or None."""
+    at = lambda q, *xs: q < len(w) and w[q] in xs  # noqa: E731
+    qt = "quart" if lang == "fr" else "quarto"
+    half = {"fr": ("demi", "demie"), "it": ("mezzo", "mezza"), "pt": ("meia", "meio")}[lang]
+    conn = {"fr": "et", "it": "e", "pt": "e"}[lang]
+    minus = {"fr": "moins", "it": "meno", "pt": "menos"}[lang]
+    art = {"fr": (), "it": ("un",), "pt": ("um",)}[lang]
+    marts = {"fr": ("le",), "it": ("un",), "pt": ("um",)}[lang]
+    if at(k, conn):
+        if at(k + 1, qt):
+            return k + 2, hr, 15
+        if art and at(k + 1, *art) and at(k + 2, qt):
+            return k + 3, hr, 15
+        if at(k + 1, *half):
+            return k + 2, hr, 30
+        if lang == "it" and at(k + 1, "tre") and at(k + 2, "quarti"):
+            return k + 3, hr, 45
+    if at(k, minus):
+        if at(k + 1, qt):
+            return k + 2, hr - 1, 45
+        if at(k + 1, *marts) and at(k + 2, qt):
+            return k + 3, hr - 1, 45
+    return None
 
 
 def _num_at(lang: str, w: list, i: int, lo: int, hi: int):
@@ -634,15 +673,21 @@ def _num_at(lang: str, w: list, i: int, lo: int, hi: int):
     best = None
     for j in range(i + 1, min(len(w), i + 3) + 1):
         morphs = []
+        trailing = False
         for k in range(i, j):
             seg = _segment(lang, w[k])
             if seg:
                 morphs += seg
             elif w[k] == _CONN[lang] and morphs and k + 1 < j:
                 morphs.append((w[k], "C", 0, False))
+            elif w[k] == _CONN[lang] and morphs:
+                trailing = True  # "vinte e" + "cinco": the connector ends this window, a longer one holds the number
+                break
             else:
                 morphs = None
                 break
+        if trailing:
+            continue
         if not morphs:
             break
         its = _items(lang, morphs)
@@ -654,13 +699,22 @@ def _num_at(lang: str, w: list, i: int, lo: int, hi: int):
 def _rel_at(lang: str, w: list, i: int):
     """(end index, hour 0-23, minute) of a relative clock reading starting at w[i], or None."""
     def H(k):  # an hour word 1-12 (24-hour forms only where the language says them: fr "quatorze heures moins")
-        return _num_at(lang, w, k, 1, 24 if lang == "fr" else 12) if k < len(w) else None
+        r = _num_at(lang, w, k, 1, 24 if lang == "fr" else 12) if k < len(w) else None
+        if r and (w[k] in _DECLINED.get(lang, ()) or (r[1] < len(w) and w[r[1]] in _SPAN_NOUN.get(lang, ()))):
+            return None  # "Viertel vor einem Jahr", "halb zehn Leute"
+        return r
 
     def M(k, hi=29):
         return _num_at(lang, w, k, 1, hi) if k < len(w) else None
 
     at = lambda k, *xs: k < len(w) and w[k] in xs  # noqa: E731
     prep = i > 0 and w[i - 1] in _REL_PREP[lang]
+    for words, hr in _NOON.get(lang, {}).items():
+        if tuple(w[i:i + len(words)]) == words:
+            tail = _noon_tail(lang, w, i + len(words), hr)
+            if tail:
+                return tail
+            return (i + len(words), hr, 0) if i > 0 and w[i - 1] in _NOON_PREP[lang] else None
     if lang in ("de", "nl"):
         half, quarter = ("halb", "viertel") if lang == "de" else ("half", "kwart")
         past, to = (("nach",), ("vor",)) if lang == "de" else (("over", "na"), ("voor",))
@@ -707,14 +761,8 @@ def _rel_at(lang: str, w: list, i: int):
                 return k + 3, h[0], 15
             if at(k, conn) and at(k + 1, half):
                 return k + 2, h[0], 30
-        if lang == "pt" and at(i, "meio") and at(i + 1, "dia"):
-            return i + 2, 12, 0
-        if lang == "pt" and at(i, "meia") and at(i + 1, "noite"):
-            return i + 2, 0, 0
         return None
     if lang == "it":
-        if at(i, "mezzogiorno", "mezzanotte"):
-            return i + 1, 12 if w[i] == "mezzogiorno" else 0, 0
         if prep and (h := H(i)):
             k = h[1]
             if at(k, "meno"):
@@ -730,9 +778,7 @@ def _rel_at(lang: str, w: list, i: int):
                 return k + 2, h[0], 30
         return None
     if lang == "fr":
-        if at(i, "midi", "minuit"):
-            return i + 1, 12 if w[i] == "midi" else 0, 0
-        if (h := H(i)) and at(h[1], "heure", "heures"):
+        if prep and (h := H(i)) and at(h[1], "heure", "heures"):
             k = h[1] + 1
             if at(k, "moins"):
                 if at(k + 1, "quart") or (at(k + 1, "le") and at(k + 2, "quart")):
@@ -775,6 +821,50 @@ def _rel_nums(tk: str, ti: int) -> list:
     return out
 
 
+def _meia_six(lang: str, toks: list, ti: int, in_run: bool) -> bool:
+    """pt "meia" is the digit 6 beside another number word ("nove seis meia", "meia trinta e dois"); after the article
+    "uma" / "um" and before a noun it is the article's "half" ("uma meia hora", "uma meia dúzia")."""
+    nxt = toks[ti + 1] if ti + 1 < len(toks) else None
+    nxt_num = bool(nxt) and any(m[1] != "C" for m in _segment(lang, nxt) or ())
+    prv = toks[ti - 1] if ti > 0 else None
+    prv_num = in_run and bool(prv) and any(m[1] != "C" for m in _segment(lang, prv) or ())
+    if prv in ("um", "uma") and nxt and not nxt_num:
+        return False
+    return nxt_num or prv_num
+
+
+_ES_UNIT = {"metro", "metros", "kilo", "kilos", "kilogramo", "kilogramos", "gramo", "gramos", "litro", "litros", "grado",
+            "grados", "euro", "euros", "dolar", "dolares", "peso", "pesos", "centimetro", "centimetros", "milimetro",
+            "milimetros", "kilometro", "kilometros", "segundo", "segundos", "minuto", "minutos", "hora", "horas", "por",
+            "ciento", "cien", "mil", "millon", "millones", "anos", "ano", "puntos", "punto", "toneladas", "tonelada",
+            "libras", "libra", "pulgadas", "dia", "dias", "semanas", "meses", "mes", "veces", "y", "e", "o", "a", "al"}
+
+
+def _con_decimal(lang: str, toks: list, ti: int) -> bool:
+    """es "tres con cinco" = 3.5 when the second number ends the text or is followed by a unit / currency / another
+    number; "dos con tres camas" (two ... with three beds) and "somos tres con dos niños" are counts, not 2.3."""
+    k = ti + 1
+    while k < len(toks) and (_segment(lang, toks[k]) or (toks[k] == _CONN[lang] and k + 1 < len(toks) and _segment(lang, toks[k + 1]))):
+        k += 1
+    return k >= len(toks) or toks[k] in _ES_UNIT or toks[k][0].isdigit() or toks[k] == "%"
+
+
+def _pct_words(lang: str, t: str) -> str:
+    """Percent words -> " % ". Spanish "por cien" is a percent only after a number ("el tres por cien", "cien por cien");
+    "lo vendió por cien euros" is a price of 100 and "por cien mil euros" one of 100 000 ("por ciento" is always a percent)."""
+    if lang != "es":
+        return re.sub(_PCT[lang], " % ", t)
+
+    def rep(m):
+        if m.group(1) == "ciento":
+            return " % "
+        prev = re.search(r"([^\W_]+)\W*$", t[:m.start()])
+        if prev and (prev.group(1).isdigit() or _segment(lang, prev.group(1))) and not re.match(r"\s+mil(?:lon|\b)", t[m.end():]):
+            return " % "
+        return m.group(0)
+    return re.sub(_PCT[lang], rep, t)
+
+
 def _digit_word(lang: str, tok: str) -> bool:
     seg = _segment(lang, tok)
     return bool(seg) and len(seg) == 1 and seg[0][1] in ("U", "Z")
@@ -791,7 +881,7 @@ def extract_numbers(text: str, lang: str, keep_weak: bool = True, garbles: bool 
     for pat, rep in _HALF.get(lang, ()):
         t = re.sub(pat, rep, t)
     if lang in _PCT:
-        t = re.sub(_PCT[lang], " % ", t)
+        t = _pct_words(lang, t)
     t = re.sub(r"(\d):00\b", r"\1", t)
     # a plain-space thousands group ("800 000", "1 000 000") is one number (FLEURS references)
     for _ in range(3):
@@ -820,9 +910,8 @@ def extract_numbers(text: str, lang: str, keep_weak: bool = True, garbles: bool 
             rep = 1
             continue
         seg = _segment(lang, tk) if words else None
-        if lang == "pt" and tk == "meia" and (ti == 0 or toks[ti - 1] != "e") and (
-                (cur and ti > 0 and _digit_word(lang, toks[ti - 1])) or (ti + 1 < len(toks) and _digit_word(lang, toks[ti + 1]))):
-            seg = [("meia", "U", 6, False)]  # Brazilian "meia" (meia dúzia) = 6 among digits said one by one
+        if lang == "pt" and tk == "meia" and (ti == 0 or toks[ti - 1] != "e") and _meia_six(lang, toks, ti, bool(cur)):
+            seg = [("meia", "U", 6, False)]  # Brazilian "meia" (meia dúzia) = 6 among numbers said one by one
         if lang == "en" and seg is None:  # UK / AU digit forms (2026-10-17): "nought", "oh" inside digit runs, doubles
             if tk in ("nought", "naught"):
                 seg = _segment(lang, "zero")
@@ -842,7 +931,8 @@ def extract_numbers(text: str, lang: str, keep_weak: bool = True, garbles: bool 
             cur.append((ti, (tk, "C", 0, False)))
         elif words and (tk == _DEC[lang] or tk in _DEC_ALT.get(lang, ())) and cur:
             cur.append((ti, (tk, "P", 0, False)))
-        elif words and lang == "es" and tk == "con" and cur and ti + 1 < len(toks) and _segment(lang, toks[ti + 1]):
+        elif words and lang == "es" and tk == "con" and cur and ti + 1 < len(toks) and _segment(lang, toks[ti + 1]) \
+                and _con_decimal(lang, toks, ti):
             cur.append((ti, (tk, "P", 0, False)))  # "tres con cinco" = 3.5 (a number on both sides)
         else:
             flush()

@@ -113,6 +113,12 @@ DEC_SAID = {"de": re.compile(r"\b(?:komma|punkt)\b"), "nl": re.compile(r"\b(?:ko
             "it": re.compile(r"\b(?:virgola|punto|comma)\b"), "pt": re.compile(r"\b(?:v[ií]rgula|ponto)\b")}
 HALF_SAID = re.compile(r"(?:einhalb|anderthalb|enhalf|ënhalf|anderhalf|\ben half\b|"
                        r"\b(?:y|e|et) (?:medio|media|mezzo|mezza|meio|meia|demi|demie)\b)")
+# fraction words besides the half ("y cuarto", "e tre quarti", "dreiviertel") and scale words ("tres millones quinientos
+# mil" = 3.5 million): a decimal span read with one of them is a decimal reading, not two numbers
+FRACTION_SAID = re.compile(HALF_SAID.pattern[:-1] + r"|dreiviertel|driekwart|"
+                           r"\b(?:y|e|et) (?:un |tres |trois |tre )?(?:cuartos?|quart[oi]|quarts?)\b)")
+SCALE_SAID = re.compile(r"\b(?:mill(?:ón|on|ones)|million(?:en|s|i)?|miljoen|miljard\w*|milliard\w*|milhão|milhões|"
+                        r"miliard\w*|tausend|duizend|mille|mila|mil)\b")
 SPOKEN_CLOCK = {"es": (re.compile(r"\b(?:a|desde|hasta|de|para|sobre)\s+las?\s+$"),
                        re.compile(r"^\s*(?:horas?|y media|y cuarto|menos cuarto|de la mañana|de la tarde|de la noche|"
                                   r"de la madrugada|en punto)\b"))}
@@ -201,11 +207,15 @@ def spoken_shape(text, sp, c, v, lang):
         t0 = text.lower()
         if SPOKEN_CUR[lang].match(t0[t0.find(rd0) + len(rd0):]):
             return "cur"
-    if c == "dec" and lang in DOT_CLOCK and re.fullmatch(r"\s*([01]?\d|2[0-3])\.[0-5]\d\s*", str(v)) and rd0 \
-            and DOT_CLOCK[lang] not in rd0:
-        return "clock"
-    if c == "dec" and lang in DEC_SAID and rd0 and not DEC_SAID[lang].search(rd0) and not HALF_SAID.search(rd0):
-        return "dec_pair"
+    if c == "dec" and lang in DEC_SAID and rd0:
+        mm = re.fullmatch(r"\s*([01]?\d|2[0-3])\.([0-5]\d)\s*", str(v))  # a dotted H.MM
+        frac = FRACTION_SAID.search(rd0) and not DEC_SAID[lang].search(rd0)
+        if frac and not (mm and mm.group(2) in ("15", "30", "45")):
+            return c  # "2.50" -> "due e mezzo", "3,25" -> "tres y cuarto": the decimal's fraction word
+        if mm and (frac or (lang in DOT_CLOCK and DOT_CLOCK[lang] not in rd0)):
+            return "clock"  # "8.30" -> "ocho y media", it "alle 18.30" -> "diciotto e trenta"
+        if not (DEC_SAID[lang].search(rd0) or FRACTION_SAID.search(rd0) or SCALE_SAID.search(rd0)):
+            return "dec_pair"
     if c == "ord" and lang in ("de", "it", "nl", "pt") and re.fullmatch(r"\s*\d{1,2}\s*(?:\.|º|\.º|°)?\s*", str(v)):
         c, v = "int_small", int(re.sub(r"\D", "", str(v)))  # a day number written as an ordinal; reverts below if no month
         if not (1 <= v <= 31 and SPOKEN_DATE[lang].match((lambda t, r: t[t.find(r) + len(r):] if r and r in t else "")(
