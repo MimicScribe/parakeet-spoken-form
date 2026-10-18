@@ -1576,7 +1576,7 @@ R3_ARMS.update({
 #     --save-every 250 --r3-sub-batch 1
 R3_ARMS.update({
     "R8-s3e": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, wf_en_weight=3.0),
-    "R8-sc": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, comma_weight=_R8["wf_weight"]),
+    "R8-sc": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, comma_weight=3 * _R8["wf_weight"]),
 })
 R3_ARMS.update({
     "R4-a": dict(wf_weight=3.0, l2sp_c=1.0, lr=3e-5, recipe=_R4_RECIPE),
