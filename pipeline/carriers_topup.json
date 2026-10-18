@@ -125,7 +125,11 @@
     "het nummer van het ziekenhuis is {a}, dag en nacht bereikbaar",
     "bel ons op {a} of mail naar het gewone adres",
     "als je iets nodig hebt, bel dan {a} en vraag naar Els",
-    "de dierenarts is bereikbaar op {a}, ook in het weekend"
+    "de dierenarts is bereikbaar op {a}, ook in het weekend",
+    "mijn nummer is {a}, laat gerust een bericht achter",
+    "bel ons op {a}",
+    "de dierenarts is bereikbaar op {a}",
+    "bel dan {a} en vraag naar Els"
    ],
    "phone2": [
     "bel {a} of {b} voor een afspraak met de huisarts",
@@ -151,6 +155,492 @@
     "de krant haalde {a} abonnees, terwijl de website {b} bezoekers trok",
     "het project kostte {a} werkuren, waarvan {b} in de laatste maand",
     "op de beurs kwamen {a} mensen af en werden er {b} folders uitgedeeld"
+   ]
+  }
+ },
+ "it": {
+  "leads": [
+   [
+    "day",
+    "Un amico mi ha raccontato:"
+   ],
+   [
+    "day",
+    "Giusto per ricordarlo:"
+   ],
+   [
+    "day",
+    "Ho letto sul giornale:"
+   ],
+   [
+    "biz",
+    "Si legge nella relazione annuale:"
+   ],
+   [
+    "biz",
+    "In breve:"
+   ],
+   [
+    "news",
+    "Al telegiornale hanno detto:"
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "biz",
+    ""
+   ],
+   [
+    "news",
+    ""
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "biz",
+    ""
+   ]
+  ],
+  "tails": [
+   "",
+   "",
+   "",
+   "",
+   "",
+   ", se non sbaglio",
+   ", hanno detto",
+   ", mi pare",
+   ", se ricordo bene"
+  ],
+  "clauses": {
+   "year2": [
+    "il museo ha aperto nel {a} ed è stato ristrutturato nel {b}",
+    "tra il {a} e il {b} la popolazione della città è cresciuta molto",
+    "mia nonna è nata nel {a} e mio nonno nel {b}",
+    "secondo il rapporto la disoccupazione nel {a} era più alta che nel {b}",
+    "ci siamo trasferiti a Torino nel {a} e siamo tornati nel {b}",
+    "la fabbrica ha chiuso nel {a} ma ha riaperto nel {b}",
+    "dopo le elezioni del {a} ce ne sono state altre nel {b}",
+    "il ponte dovrà essere pronto nel {a} e la galleria solo nel {b}",
+    "l'azienda vuole andare in utile nel {a} e quotarsi in borsa nel {b}",
+    "la prima edizione è del {a}, la seconda solo del {b}"
+   ],
+   "year3": [
+    "i dati del {a}, del {b} e del {c} mostrano un calo evidente",
+    "il festival si è tenuto nel {a}, nel {b} e di nuovo nel {c}",
+    "i nostri vicini hanno comprato la casa nel {a}, l'hanno ristrutturata nel {b} e venduta nel {c}",
+    "il contributo verrà versato nel {a}, nel {b} e nel {c}, sempre in autunno",
+    "il governo vuole fare un primo passo nel {a}, un secondo nel {b} e finire nel {c}",
+    "la biblioteca ha avuto sempre meno visitatori nel {a}, nel {b} e nel {c}"
+   ],
+   "count2": [
+    "in sala c'erano {a} sedie e {b} ospiti in lista",
+    "la scuola aveva {a} alunni e {b} genitori sono venuti alla serata",
+    "abbiamo contato {a} biciclette alla stazione e {b} al mercato",
+    "il corso ha {a} iscritti e {b} persone in lista d'attesa",
+    "il museo ha ricevuto {a} visitatori in aprile e {b} a maggio"
+   ],
+   "big2": [
+    "lo stadio ha accolto {a} spettatori, l'anno scorso erano ancora {b}",
+    "il comune conta {a} abitanti e circa {b} famiglie",
+    "quest'anno sono stati spediti {a} pacchi e gestiti {b} resi",
+    "il giornale ha raggiunto {a} abbonati, mentre il sito ha avuto {b} visitatori",
+    "il progetto è costato {a} ore di lavoro, di cui {b} nell'ultimo mese",
+    "alla fiera sono venute {a} persone e sono stati distribuiti {b} volantini"
+   ],
+   "dec2": [
+    "la temperatura è salita da {a} gradi a {b} gradi in una settimana",
+    "il punteggio medio era di {a} punti, l'anno scorso ancora {b} punti",
+    "il pane pesa {a} chili e il pacco accanto {b} chili",
+    "la regione ha ricevuto in media {a} millimetri di pioggia, contro {b} millimetri dell'anno scorso",
+    "il consumo è di {a} litri ogni cento chilometri, e a volte anche {b} litri",
+    "il lavoro è durato {a} giorni e il viaggio {b} giorni",
+    "l'asse è lunga {a} metri e l'armadio è largo {b} metri",
+    "il paziente pesava prima {a} chili e poi solo {b} chili"
+   ],
+   "price2": [
+    "il biglietto costava {a}, ma il parcheggio era già {b}",
+    "per il pranzo abbiamo pagato {a} e per la cena {b}",
+    "la riparazione costa {a} e i pezzi di ricambio {b}",
+    "il suo abbonamento costa {a} al mese e l'assicurazione {b}",
+    "un caffè costa {a} e un panino {b}"
+   ],
+   "phone1": [
+    "per qualsiasi domanda potete chiamare il {a}, siamo qui tutta la mattina",
+    "il mio numero è {a}, lascia pure un messaggio",
+    "il numero dell'ospedale è {a}, attivo giorno e notte",
+    "chiamaci al {a} oppure scrivi al solito indirizzo",
+    "se ti serve qualcosa, chiama il {a} e chiedi di Elena",
+    "il veterinario risponde al {a}, anche nel fine settimana"
+   ],
+   "phone2": [
+    "chiama il {a} o il {b} per fissare un appuntamento dal medico",
+    "l'ufficio risponde al {a} e il servizio guasti al {b}",
+    "il mio numero di lavoro è {a} e quello privato {b}"
+   ],
+   "decade2": [
+    "il documentario racconta {a} e {b} attraverso le voci dei testimoni",
+    "la mostra mette a confronto {a} e {b} nella nostra città",
+    "la differenza più grande è tra {a} e {b}, diceva il mio vicino",
+    "il film è ambientato tra {a} e {b}",
+    "della musica di {a} e di {b} resta ancora molto"
+   ]
+  }
+ },
+ "pt": {
+  "leads": [
+   [
+    "day",
+    "Um amigo contou-me:"
+   ],
+   [
+    "day",
+    "Só para lembrar:"
+   ],
+   [
+    "day",
+    "Li no jornal:"
+   ],
+   [
+    "biz",
+    "Consta do relatório anual:"
+   ],
+   [
+    "biz",
+    "Em resumo:"
+   ],
+   [
+    "news",
+    "No telejornal ouvi:"
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "biz",
+    ""
+   ],
+   [
+    "news",
+    ""
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "biz",
+    ""
+   ]
+  ],
+  "tails": [
+   "",
+   "",
+   "",
+   "",
+   "",
+   ", se não me engano",
+   ", disseram eles",
+   ", parece-me",
+   ", se bem me lembro"
+  ],
+  "clauses": {
+   "year2": [
+    "o museu abriu em {a} e foi totalmente remodelado em {b}",
+    "de {a} a {b} a população da cidade cresceu bastante",
+    "a minha avó nasceu em {a} e o meu avô em {b}",
+    "segundo o relatório, o desemprego em {a} era mais alto do que em {b}",
+    "mudámo-nos para o Porto em {a} e voltámos em {b}",
+    "a fábrica fechou as portas em {a}, mas reabriu em {b}",
+    "depois das eleições de {a} houve outras em {b}",
+    "a ponte deve estar pronta em {a} e o túnel só em {b}",
+    "a empresa quer ter lucro em {a} e entrar na bolsa em {b}",
+    "a primeira edição foi em {a}, a segunda só em {b}"
+   ],
+   "year3": [
+    "os números de {a}, depois de {b} e por fim de {c} mostram uma queda evidente",
+    "o festival realizou-se em {a}, em {b} e outra vez em {c}",
+    "os nossos vizinhos compraram a casa em {a}, remodelaram-na em {b} e venderam-na em {c}",
+    "o subsídio será pago primeiro em {a}, depois em {b} e por fim em {c}, sempre no outono",
+    "o governo quer dar um primeiro passo em {a}, um segundo em {b} e terminar em {c}",
+    "a biblioteca teve cada vez menos visitantes em {a}, em {b} e em {c}"
+   ],
+   "count2": [
+    "havia {a} cadeiras na sala e {b} convidados na lista",
+    "a escola tinha {a} alunos e vieram {b} pais à reunião",
+    "contámos {a} bicicletas na estação e {b} no mercado",
+    "o curso tem {a} inscritos e {b} candidatos em lista de espera"
+   ],
+   "big2": [
+    "o estádio recebeu {a} espetadores, no ano passado ainda eram {b}",
+    "o concelho tem {a} habitantes e cerca de {b} agregados",
+    "este ano foram enviados {a} pacotes e tratados {b} reembolsos",
+    "o jornal chegou a {a} assinantes, enquanto o site teve {b} visitantes",
+    "o projeto custou {a} minutos de trabalho, dos quais {b} no último mês",
+    "na feira apareceram {a} visitantes e foram distribuídos {b} folhetos"
+   ],
+   "dec2": [
+    "a temperatura subiu de {a} graus para {b} graus numa semana",
+    "a pontuação média foi de {a} pontos, no ano passado ainda {b} pontos",
+    "o pão pesa {a} quilos e o pacote ao lado {b} quilos",
+    "a região recebeu em média {a} milímetros de chuva, contra {b} milímetros no ano passado",
+    "o consumo é de {a} litros por cem quilómetros, e às vezes até {b} litros",
+    "o dia de trabalho durou {a} horas e a viagem {b} horas",
+    "a prancha tem {a} metros de comprimento e o armário {b} metros de largura",
+    "o doente pesava primeiro {a} quilos e depois só {b} quilos"
+   ],
+   "price2": [
+    "o bilhete custava {a}, mas o parque de estacionamento já custava {b}",
+    "pelo almoço pagámos {a} e pelo jantar {b}",
+    "a reparação fica em {a} e as peças custam {b}",
+    "a assinatura dele custa {a} por mês e o seguro {b}",
+    "um café custa {a} e uma sandes custa {b}"
+   ],
+   "phone1": [
+    "para qualquer dúvida pode ligar para o {a}, estamos cá toda a manhã",
+    "o meu número é {a}, deixe uma mensagem",
+    "o número do hospital é {a}, atende dia e noite",
+    "ligue-nos para o {a} ou escreva para o endereço habitual",
+    "se precisares de alguma coisa, liga para o {a} e pergunta pela Rita",
+    "o veterinário atende no {a}, também ao fim de semana"
+   ],
+   "phone2": [
+    "ligue para o {a} ou para o {b} para marcar consulta",
+    "o escritório atende no {a} e a assistência técnica no {b}",
+    "o meu número de trabalho é {a} e o pessoal é {b}"
+   ],
+   "decade2": [
+    "o documentário conta {a} e {b} através dos testemunhos",
+    "a exposição compara {a} e {b} na nossa cidade",
+    "a maior diferença é entre {a} e {b}, dizia o meu vizinho",
+    "o filme passa-se entre {a} e {b}",
+    "da música de {a} e de {b} ainda resta muita coisa"
+   ]
+  }
+ },
+ "es": {
+  "leads": [
+   [
+    "day",
+    "Un amigo me contó:"
+   ],
+   [
+    "day",
+    "Solo para recordarlo:"
+   ],
+   [
+    "day",
+    "Leí hace poco en el periódico:"
+   ],
+   [
+    "biz",
+    "Consta en el informe anual:"
+   ],
+   [
+    "biz",
+    "En resumen:"
+   ],
+   [
+    "news",
+    "En el telediario dijeron:"
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "biz",
+    ""
+   ],
+   [
+    "news",
+    ""
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "biz",
+    ""
+   ]
+  ],
+  "tails": [
+   "",
+   "",
+   "",
+   "",
+   "",
+   ", si no me equivoco",
+   ", dijeron ellos",
+   ", creo yo",
+   ", si mal no recuerdo"
+  ],
+  "clauses": {
+   "year2": [
+    "el museo se inauguró en {a} y se reformó por completo en {b}",
+    "de {a} a {b} la población de la ciudad creció mucho",
+    "mi abuela nació en {a} y mi abuelo en {b}",
+    "según el informe, el paro en {a} fue más alto que en {b}",
+    "nos mudamos a Sevilla en {a} y volvimos en {b}",
+    "la fábrica cerró sus puertas en {a}, pero reabrió en {b}",
+    "tras las elecciones de {a} hubo otras en {b}",
+    "el puente debe estar listo en {a} y el túnel solo en {b}",
+    "la empresa quiere dar beneficios en {a} y salir a bolsa en {b}",
+    "la primera edición fue en {a}, la segunda solo en {b}"
+   ],
+   "year3": [
+    "las cifras de {a}, luego las de {b} y por último las de {c} muestran un descenso claro",
+    "el festival se celebró en {a}, en {b} y otra vez en {c}",
+    "nuestros vecinos compraron la casa en {a}, la reformaron en {b} y la vendieron en {c}",
+    "la subvención se pagará primero en {a}, luego en {b} y por último en {c}, siempre en otoño",
+    "el gobierno quiere dar un primer paso en {a}, un segundo en {b} y terminar en {c}",
+    "la biblioteca tuvo cada vez menos visitantes en {a}, en {b} y en {c}"
+   ],
+   "count2": [
+    "había {a} sillas en la sala y {b} invitados en la lista",
+    "la escuela tenía {a} alumnos y vinieron {b} padres a la reunión",
+    "contamos {a} bicicletas en la estación y {b} en el mercado"
+   ],
+   "big2": [
+    "el estadio recibió a {a} espectadores, el año pasado todavía eran {b}",
+    "el municipio tiene {a} habitantes y unos {b} hogares",
+    "este año se enviaron {a} paquetes y se tramitaron {b} reembolsos",
+    "el periódico llegó a {a} suscriptores, mientras que la web tuvo {b} visitantes",
+    "el proyecto costó {a} minutos de trabajo, de los cuales {b} en el último mes",
+    "a la feria vinieron {a} visitantes y se repartieron {b} folletos"
+   ],
+   "dec2": [
+    "la temperatura subió de {a} grados a {b} grados en una semana",
+    "la puntuación media fue de {a} puntos, el año pasado todavía {b} puntos",
+    "el pan pesa {a} kilos y el paquete de al lado {b} kilos",
+    "la región recibió de media {a} milímetros de lluvia, frente a {b} milímetros el año pasado",
+    "el consumo es de {a} litros cada cien kilómetros, y a veces hasta {b} litros",
+    "la jornada duró {a} horas y el viaje {b} horas",
+    "la tabla mide {a} metros de largo y el armario {b} metros de ancho",
+    "el paciente pesaba primero {a} kilos y luego solo {b} kilos"
+   ],
+   "price2": [
+    "la entrada costaba {a}, pero el aparcamiento ya costaba {b}",
+    "por el almuerzo pagamos {a} y por la cena {b}",
+    "la reparación sale por {a} y las piezas cuestan {b}",
+    "su suscripción cuesta {a} al mes y el seguro {b}",
+    "un café cuesta {a} y un bocadillo {b}"
+   ],
+   "phone1": [
+    "para cualquier duda puede llamar al {a}, estamos aquí toda la mañana",
+    "mi número es {a}, deja un mensaje",
+    "el teléfono del hospital es {a}, atienden día y noche",
+    "llámanos al {a} o escribe a la dirección de siempre",
+    "si necesitas algo, llama al {a} y pregunta por Marta",
+    "el veterinario atiende en el {a}, también los fines de semana"
+   ],
+   "phone2": [
+    "llame al {a} o al {b} para pedir cita con el médico",
+    "la oficina atiende en el {a} y el servicio de averías en el {b}",
+    "mi número de trabajo es {a} y el personal es {b}"
+   ],
+   "decade2": [
+    "el documental cuenta {a} y {b} a través de los testimonios",
+    "la exposición compara {a} y {b} en nuestra ciudad",
+    "la mayor diferencia está entre {a} y {b}, decía mi vecino",
+    "la película transcurre entre {a} y {b}",
+    "de la música de {a} y de {b} todavía queda mucho"
+   ]
+  }
+ },
+ "de": {
+  "leads": [
+   [
+    "day",
+    "Ein Freund hat mir erzählt:"
+   ],
+   [
+    "day",
+    "Nur zur Erinnerung:"
+   ],
+   [
+    "day",
+    "Ich habe neulich in der Zeitung gelesen:"
+   ],
+   [
+    "biz",
+    "Im Jahresbericht steht:"
+   ],
+   [
+    "biz",
+    "Kurz gesagt:"
+   ],
+   [
+    "news",
+    "In den Nachrichten hieß es:"
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "biz",
+    ""
+   ],
+   [
+    "news",
+    ""
+   ],
+   [
+    "day",
+    ""
+   ],
+   [
+    "biz",
+    ""
+   ]
+  ],
+  "tails": [
+   "",
+   "",
+   "",
+   "",
+   "",
+   ", wenn ich mich nicht irre",
+   ", sagten sie",
+   ", glaube ich",
+   ", wenn ich mich recht erinnere"
+  ],
+  "clauses": {
+   "phone1": [
+    "meine Nummer ist {a}, hinterlass gern eine Nachricht",
+    "bei Fragen erreichen Sie uns unter {a}",
+    "rufen Sie uns unter {a} an",
+    "wenn du etwas brauchst, ruf {a} an",
+    "der Tierarzt ist unter {a} erreichbar",
+    "die Nummer des Krankenhauses lautet {a}"
+   ],
+   "phone2": [
+    "rufen Sie {a} oder {b} an, um einen Termin beim Hausarzt zu machen",
+    "das Büro ist unter {a} erreichbar und der Störungsdienst unter {b}",
+    "meine Arbeitsnummer ist {a} und meine private Nummer {b}"
    ]
   }
  }

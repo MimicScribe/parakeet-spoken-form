@@ -37,6 +37,8 @@ CARRIERS = {"year": ("year", {2: "year2", 3: "year3"}), "count": ("count", {2: "
             "clock24": ("clock24", {2: "time2"}), "phone": ("phone", {1: "phone1", 2: "phone2"}),
             "decade": ("decade", {2: "decade2"})}
 SLOTS = "abc"
+# the language's own decimal word: every decimal slot must be spoken with it (never the Italian legal "comma", never a bare join)
+DEC_WORD = {"it": "virgola", "pt": "vírgula", "es": "coma", "nl": "komma", "de": "komma"}
 
 
 def load_carriers(lang: str) -> dict:
@@ -135,6 +137,9 @@ def plan_rows(plan: dict, tag: str, rep: dict) -> list:
                     T.YEAR_QUOTA = {}
                 if res is None:
                     rep.setdefault(cls_key, collections.Counter())[why] += 1
+                    continue
+                if cls_key == "dec" and len(re.findall(r"\b" + DEC_WORD[lang] + r"\b", res[0].lower())) < len(sl):
+                    rep.setdefault(cls_key, collections.Counter())["decimal_word"] += 1
                     continue
                 ok = (written, rcls, reg, res)
                 break
