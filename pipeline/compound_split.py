@@ -21,8 +21,9 @@ Conventions:
     ottanta", "cento uno" (the elided vowel is written back, so the vocabulary stays the closed set of tens / units /
     hundred words); ordinals the same way ("venti unesimo", "cento ottantesimo"); join_morphemes elides again ("venti"
     + "uno" -> "ventuno", "cento" + "ottanta" -> "centottanta"; "cento" + "uno" / "otto" stays "centouno" /
-    "centootto", both spellings are Italian). Either way the accented final "tré" / "trè" stays as written ("venti
-    tré"); "mille" (1000) and "mila" (the thousands after a multiplier) are both morphemes; an elided article stays
+    "centootto", both spellings are Italian). Either way a final "tré" / "trè" loses its accent once it is its own
+    word ("venti tre", as the standalone "tre"; 2026-10-18: one spelling for one sound) and join_morphemes puts
+    it back ("venti" + "tre" -> "ventitré"); "mille" (1000) and "mila" (the thousands after a multiplier) are both morphemes; an elided article stays
     on the first morpheme ("dell'ottanta tré");
   * a final half is its own word (de "drei einhalb", nl "twee en half"); de decade / round-number nouns keep their
     ending on the last morpheme ("neunzehn hundert neunziger", "zwei tausender");
@@ -242,6 +243,8 @@ def split_token(tok: str, lang: str, it_elided=None) -> list[str]:
     parts = _split_core(core, lang, it_elided)
     if not parts:
         return [tok]
+    if lang == "it" and parts[-1].lower() in ("tré", "trè"):  # same length: offsets and insertion points stay valid
+        parts[-1] = parts[-1].translate(str.maketrans("éèÉÈ", "eeEE"))
     parts[0], parts[-1] = pre + parts[0], parts[-1] + post
     return parts
 
@@ -256,6 +259,8 @@ def join_morphemes(parts: list[str], lang: str) -> str:
         word = re.split(r"['’]", p)[-1].lower()  # "l'ottanta" -> "ottanta"
         if lang == "it" and nxt[:1] in ("u", "o") and (word in _IT_TENS or (word == "cento" and nxt.startswith("ottant"))):
             p = p[:-1]  # "venti" + "uno" -> "ventuno", "cento" + "ottanta" -> "centottanta"
+        if lang == "it" and i and i == len(parts) - 1 and word == "tre":
+            p = p[:-1] + ("É" if p[-1] == "E" else "é")  # "venti" + "tre" -> "ventitré"
         out += p
     return out
 

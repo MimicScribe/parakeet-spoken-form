@@ -17,10 +17,10 @@ SPLIT = {
            "negentienhonderdnegentig": "negentien honderd negentig", "drieduizend": "drie duizend",
            "tweeëntwintig": "twee en twintig", "eenentwintigste": "een en twintigste",
            "tweeduizendnegentien": "twee duizend negentien", "tweeënhalf": "twee en half"},
-    "it": {"duemilaventitré": "due mila venti tré", "centoventicinque": "cento venti cinque",
+    "it": {"duemilaventitré": "due mila venti tre", "centoventicinque": "cento venti cinque",
            "millenovecentonovanta": "mille nove cento novanta", "duemila": "due mila", "centouno": "cento uno",
            "milleottocentottanta": "mille otto centottanta", "novecentottantanove": "nove centottanta nove",
-           "ventunomila": "ventuno mila", "duemillesimo": "due millesimo", "dell'ottantatré": "dell'ottanta tré",
+           "ventunomila": "ventuno mila", "duemillesimo": "due millesimo", "dell'ottantatré": "dell'ottanta tre",
            "trentaquattromila": "trenta quattro mila"},
 }
 # never split: one-morpheme number words (teens, tens, ordinals, elided it forms) and non-number look-alikes
@@ -51,7 +51,7 @@ IT_ELIDED = {"ventuno": "venti uno", "trentotto": "trenta otto", "centottanta": 
              "duecentottantotto": "due cento ottanta otto", "ventun": "venti un", "ventuna": "venti una",
              "Centottanta,": "Cento ottanta,", "l'ottantuno": "l'ottanta uno", "centottantesimo": "cento ottantesimo",
              "milleottocentottanta": "mille otto cento ottanta", "novecentottantanove": "nove cento ottanta nove",
-             "ventunomila": "venti uno mila", "duemilaventitré": "due mila venti tré", "centouno": "cento uno"}
+             "ventunomila": "venti uno mila", "duemilaventitré": "due mila venti tre", "centouno": "cento uno"}
 for tok, want in IT_ELIDED.items():
     got = C.split_token(tok, "it", it_elided=True)
     assert " ".join(got) == want, (tok, got)
@@ -121,3 +121,12 @@ assert st == {"rows": 2, "rows_changed": 1, "tokens_split": 2}, st
 # the build flag reaches build4
 assert "split_langs" in inspect.signature(mix_build.build4).parameters
 print("compound split ok")
+
+
+def test_it_final_tre_loses_its_accent_when_split_and_regains_it_when_joined():
+    # 2026-10-18: one spelling for one sound ("venti tre" as the standalone "tre"); the fused word keeps "tré"
+    assert C.split_token("ventitré", "it") == ["venti", "tre"]
+    assert C.split_token("Trentatrè,", "it") == ["Trenta", "tre,"]
+    assert C.split_token("tre", "it") == ["tre"] and C.split_token("tremila", "it") == ["tre", "mila"]
+    assert C.join_morphemes(["due", "mila", "venti", "tre"], "it") == "duemilaventitré"
+    assert C.join_morphemes(["tre", "mila"], "it") == "tremila"
