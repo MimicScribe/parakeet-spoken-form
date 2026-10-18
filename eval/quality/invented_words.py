@@ -11,12 +11,19 @@ Method (reference-free on the hypothesis side; the lexicon is the only judge):
      "und", "twintig", "venti") is therefore always a valid word. Whole compounds are valid only when seen somewhere above
      (or with `--accept-compounds`, when the reader segments the token wholly into number morphemes: a real word, maybe the
      wrong value).
+     Percent, decimal-point and currency words (ALWAYS_VALID: "prozent", "komma", "euro", "por ciento", ...) are valid words of
+     their language too: digit-writing baselines never write them. Fused compounds are accepted by default (`--no-accept-compounds`
+     turns that off).
   3. A token is INVENTED when it is in no lexicon of its language. "Sentence with an invented token" = at least one.
   4. Per arm and language: sentences with an invented token; invented tokens; converted numbers = hypothesis number chains
      written as words (number_groups, form "words": counted from the hypothesis alone) and, when a reference exists,
      reference numbers whose hypothesis form is "converted" (words AND value right, number_outcomes.form_outcomes);
      invented tokens per converted number (both denominators); invented rate by token length (invented tokens / tokens in
      the length bucket: <=3, 4-5, 6-8, 9-11, 12-15, 16+ letters).
+     ENGLISH BLEED is reported on its own: an English number word (zero..nineteen, twenty..ninety, hundred, thousand, million, point,
+     percent, first..tenth) in a non-English sentence that the language does not own (reference/training/morpheme/function lexicon,
+     or NATIVE_ENGLISH_OVERLAP such as nl "ten", fr "six"/"point", it/pt "zero"). Per arm and language: sentences with English
+     bleed, sentences with garble (an invented token that is not English bleed), and the union ("total", sent_bad).
   5. A lexicon arm is judged against a lexicon that still contains its own words, so it scores ~0 by construction. `--loo`
      adds the leave-one-out column: a token only that arm (and no reference / training / morpheme source) ever wrote.
 
@@ -59,6 +66,34 @@ def bucket(n: int) -> str:
     return BUCKET_NAMES[-1]
 
 
+# Correct spoken-form words for percent, decimal point and currency. Digit-writing baselines never write them, so a lexicon
+# built from references and baseline decodes would call them invented. Multi-word phrases are split into tokens.
+ALWAYS_VALID = {
+    "de": "prozent prozente komma euro euros cent cents",
+    "nl": "procent procenten komma euro euros cent cents eurocent eurocenten",
+    "it": "percento per cento virgola euro centesimo centesimi centesimi",
+    "es": "por ciento coma euro euros centavo centavos céntimo céntimos centimo centimos",
+    "fr": "pour cent pourcent pourcents virgule euro euros centime centimes cents",
+    "pt": "por cento vírgula vírgulas euro euros cêntimo cêntimos centavo centavos",
+}
+
+# English number words. In a sentence of another language they are bleed unless the target language really owns the word.
+ENGLISH_NUMBER_WORDS = frozenset(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen "
+    "nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand million point percent "
+    "first second third fourth fifth sixth seventh eighth ninth tenth".split())
+# English-looking number words that are native words of the language (nl/es "ten", fr "six"/"point", it/pt "zero", ...).
+NATIVE_ENGLISH_OVERLAP = {
+    "de": {"million"},
+    "nl": {"ten"},
+    "it": {"zero"},
+    "es": {"ten"},
+    "fr": {"zero", "six", "million", "point", "second"},
+    "pt": {"zero"},
+}
+NATIVE_SOURCES = {"ref", "train", "morpheme", "function"}
+
+
 def morphemes(lang: str) -> set:
     """Every number morpheme / connector of the language (the split-compound pieces), folded and unfolded."""
     lex = N._LEX.get(lang) or {}
@@ -82,6 +117,21 @@ class Lexicon:
         for m in morphemes(lang):
             self.src[lang][m].add("morpheme")
             self.src[lang][N._fold(m)].add("morpheme")
+
+    def add_function_words(self, lang: str):
+        for w in tokens(ALWAYS_VALID.get(lang, "")):
+            self.src[lang][w].add("function")
+            self.src[lang][N._fold(w)].add("function")
+
+    def native(self, lang: str, tok: str) -> bool:
+        """The token is a word of the language by reference text, training text, number morpheme or function word (never by a model decode)."""
+        s = self.src[lang].get(tok) or self.src[lang].get(N._fold(tok)) or set()
+        return bool(s & NATIVE_SOURCES)
+
+    def english_bleed(self, lang: str, tok: str) -> bool:
+        """An English number word in a non-English sentence that the target language does not own."""
+        return (lang != "en" and tok in ENGLISH_NUMBER_WORDS and tok not in NATIVE_ENGLISH_OVERLAP.get(lang, ())
+                and not self.native(lang, tok))
 
     def known(self, lang: str, tok: str, exclude: str = None, accept_compounds: bool = False) -> bool:
         s = self.src[lang].get(tok) or self.src[lang].get(N._fold(tok))
@@ -109,6 +159,7 @@ def build_lexicon(rows_by_arm: dict, lexicon_arms, train_dir: str = None, extra_
         lx.add(lang, tokens(hyp), "extra")
     for lang in langs if with_morphemes else ():
         lx.add_morphemes(lang)
+        lx.add_function_words(lang)
     if train_dir:
         for f in sorted(glob.glob(os.path.join(train_dir, "*.jsonl"))):
             m = re.search(r"_([a-z]{2,3})\.jsonl$", f)
@@ -137,7 +188,7 @@ def load_arm(path: str, manifest: dict = None, field: str = "long") -> list:
     return out
 
 
-def score_arm(rows: list, lx: Lexicon, arm: str = None, loo: bool = False, accept_compounds: bool = False,
+def score_arm(rows: list, lx: Lexicon, arm: str = None, loo: bool = False, accept_compounds: bool = True,
               langs=None) -> dict:
     """Per language and pooled ("all"): see the module docstring. Returns {lang: stats}."""
     per = collections.defaultdict(lambda: collections.Counter())
@@ -152,8 +203,15 @@ def score_arm(rows: list, lx: Lexicon, arm: str = None, loo: bool = False, accep
         inv = [t for t in toks if not lx.known(lang, t, accept_compounds=accept_compounds)]
         inv_loo = [t for t in toks if not lx.known(lang, t, exclude=arm, accept_compounds=accept_compounds)] if loo else []
         c["tokens"] += len(toks)
+        bleed = [t for t in toks if lx.english_bleed(lang, t)]
+        garble = [t for t in inv if t not in set(bleed)]
         c["sent_invented"] += bool(inv)
         c["invented"] += len(inv)
+        c["sent_bleed"] += bool(bleed)
+        c["bleed"] += len(bleed)
+        c["sent_garble"] += bool(garble)
+        c["garble"] += len(garble)
+        c["sent_bad"] += bool(bleed or garble)
         c["sent_invented_loo"] += bool(inv_loo)
         c["invented_loo"] += len(inv_loo)
         for t in toks:
@@ -188,6 +246,8 @@ def _finish(c, bl, ex) -> dict:
     d["sent_invented_pct"] = round(100 * c["sent_invented"] / c["sentences"], 1) if c["sentences"] else None
     d["invented_per_words_chain"] = _rate(c["invented"], c["words_chains"])
     d["invented_per_converted"] = _rate(c["invented"], c["converted"])
+    d["bad_per_converted"] = _rate(c["garble"] + c["bleed"], c["converted"])
+    d["sent_bad_pct"] = round(100 * c["sent_bad"] / c["sentences"], 1) if c["sentences"] else None
     d["rate_by_length"] = {b: {"n": bl[b + ":n"], "invented": bl[b + ":inv"], "rate": _rate(bl[b + ":inv"], bl[b + ":n"])}
                            for b in BUCKET_NAMES}
     d["top_invented"] = ex.most_common(8)
@@ -199,7 +259,7 @@ def report(results: dict, langs) -> str:
     for lang in list(langs) + ["all"]:
         lines.append(f"== {lang} ==")
         lines.append(f"{'arm':14s} {'n':>4s} {'sent-inv':>8s} {'%':>6s} {'inv':>5s} {'words-chains':>12s} {'conv(right)':>11s} {'old conv':>8s}"
-                     f" {'inv/chain':>9s} {'inv/conv':>8s}  invented rate by length " + " ".join(BUCKET_NAMES))
+                     f" {'inv/chain':>9s} {'inv/conv':>8s} {'EN-bleed':>8s} {'garble':>6s} {'total':>5s} {'bad/conv':>8s}  invented rate by length " + " ".join(BUCKET_NAMES))
         for arm, res in results.items():
             d = res.get(lang)
             if not d:
@@ -207,7 +267,8 @@ def report(results: dict, langs) -> str:
             rl = " ".join(f"{(d['rate_by_length'][b]['rate'] or 0) * 100:5.1f}" for b in BUCKET_NAMES)
             lines.append(f"{arm:14s} {d['sentences']:4d} {d['sent_invented']:8d} {d['sent_invented_pct']!s:>6s} {d['invented']:5d} "
                          f"{d['words_chains']:12d} {d.get('converted', 0):11d} {d.get('converted_old', 0):8d} "
-                         f"{d['invented_per_words_chain']!s:>9s} {d['invented_per_converted']!s:>8s}  {rl}")
+                         f"{d['invented_per_words_chain']!s:>9s} {d['invented_per_converted']!s:>8s} {d['sent_bleed']:8d} {d['sent_garble']:6d} "
+                         f"{d['sent_bad']:5d} {d['bad_per_converted']!s:>8s}  {rl}")
     return "\n".join(lines)
 
 
@@ -219,7 +280,8 @@ def main(argv=None):
     ap.add_argument("--lexicon-file", action="append", default=[], help="PATH[:FIELD]: decodes whose words join the lexicon, not scored")
     ap.add_argument("--train-dir")
     ap.add_argument("--langs", default=",".join(WAVE1))
-    ap.add_argument("--accept-compounds", action="store_true")
+    ap.add_argument("--accept-compounds", action="store_true", default=True, help="(default) a token the number reader segments wholly into morphemes is a valid word")
+    ap.add_argument("--no-accept-compounds", dest="accept_compounds", action="store_false", help="a fused compound is valid only when seen in a lexicon source")
     ap.add_argument("--loo", action="store_true")
     ap.add_argument("--no-morphemes", action="store_true", help="do not add the number morphemes to the lexicon (the first-pass method)")
     ap.add_argument("--json")
