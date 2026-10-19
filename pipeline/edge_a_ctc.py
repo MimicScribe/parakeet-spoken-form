@@ -141,7 +141,7 @@ def check(planned: str, lang: str, out: str, part: int, parts: int, write_all: b
             sf.write(clip, x, 16000, subtype="PCM_16")
         rec = dict(r, audio_filepath=clip if wrote else None, duration=round(len(x) / 16000, 3), greedy=g,
                    cer_ctc=round(cer, 3), fit=fit, basic_ok=basic_ok, basic_why=why, strict=strict, strict_ok=strict_ok, ctc_ok=keep,
-                   word_times=[[round(t[0], 3), round(t[1], 3)] if t else None for t in wt], edge_quiet=C.edge_quiet(x), src="tts")
+                   word_times=[[round(t[0], 3), round(t[1], 3)] if t else None for t in wt], edge_quiet=C.edge_quiet(x), src=r.get("src") or "tts")
         out_rows.append(rec)
     with open(rp, "w", encoding="utf-8") as f:
         for rec in out_rows:

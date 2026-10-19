@@ -148,9 +148,7 @@ try:
     def scan(out: str = "hits_ami.jsonl"):
         import collections
 
-        from huggingface_hub import HfApi
-
-        paths = sorted(f for f in HfApi().list_repo_files(REPO, repo_type="dataset") if f.startswith("ihm/train-"))
+        paths = [f"ihm/train-{i:05d}-of-00042.parquet" for i in range(42)]
         tot, n = collections.Counter(), 0
         with open(out, "w", encoding="utf-8") as f:
             for res in scan_shard.map(paths, return_exceptions=True, order_outputs=False):
