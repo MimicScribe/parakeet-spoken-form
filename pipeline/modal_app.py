@@ -1925,6 +1925,68 @@ R3_ARMS.update({
                  cons_per_batch=1),
 })
 
+# Encoder branch of the main run (conditional follow-on, 2026-10-18; launch only through the run launcher with
+# --init-from <main run>@1000). Two 500-step arms warm-started from the main run's step-1000 weights (decoder + joint):
+#   R10-brC = decoder-only control continuation; R10-brE = the same + the top 2 encoder blocks (unfreeze_top 2) on their own
+#   absolute schedule; R10-brEr = R10-brE with the encoder gradient zeroed on synthetic rows (enc_real_only).
+# Both branches share, bit for bit: the mix, the sampler seed (a different batch order from the main run's), the restart
+# (fresh AdamW, a `warmup`-step ramp) and the decoder + joint lr (the main run's 5,000-step cosine continued from step 1,000
+# at lr 1e-4, floor 1e-5), the L2-SP anchor and the KL teachers (stock, never the init checkpoint), c 10. The encoder group:
+# warmup 50 steps (the AdamW second-moment horizon), peak 2e-5, cosine to 2e-6 over the 500 steps, not NeMo's shared floor;
+# gradient clip 1.0 on decoder + joint (as the control) and 1.0 on the encoder, per group. The encoder L2-SP pull keeps the
+# arm's c (10) with the encoder group's own lr, as in R8-s-encA.
+MAIN_RUN_STEPS = 5000  # the main run's schedule length (max_steps of R10-main)
+BRANCH_STEP = 1000  # the main run's checkpoint the branches start from
+_BR_RECIPE = {k: v for k, v in _R8S_RECIPE.items() if k != "init_from"}  # init_from = "<main run>@1000", given at launch
+_BRANCH = dict(R3_ARMS["R10-main"], recipe=_BR_RECIPE, anchor_from="ultra", sampler_seed=4242, lr_offset=BRANCH_STEP,
+               lr_total=MAIN_RUN_STEPS)
+_BRANCH_ENC = dict(_BRANCH, unfreeze_top=2, enc_lr_peak=2e-5, enc_lr_floor=2e-6, enc_lr_warmup=50, enc_lr_steps=500,
+                   enc_clip=1.0)
+R3_ARMS.update({
+    "R10-brC": dict(_BRANCH),
+    "R10-brE": dict(_BRANCH_ENC),
+    "R10-brEr": dict(_BRANCH_ENC, enc_real_only=True),
+    # R10-encF = the full continuation: R10-brE's mechanics over the rest of the main run's schedule (global steps 1,000 ->
+    # 5,000, launch with --max-steps 4000): the decoder goes on down the main cosine tail, the encoder has its own absolute
+    # schedule over the 4,000 steps (warmup 50, peak 2e-5, cosine to 2e-6).
+    "R10-encF": dict(_BRANCH_ENC, enc_lr_steps=MAIN_RUN_STEPS - BRANCH_STEP),
+})
+# arm keys of the branch options and their off values (= ft_train.train's defaults): retrain3 sets them for every arm
+_BRANCH_DEFAULTS = dict(anchor_from="", sampler_seed=0, lr_offset=0, lr_total=0, enc_lr_peak=0.0, enc_lr_floor=0.0,
+                        enc_lr_warmup=0, enc_lr_steps=0, enc_clip=0.0, enc_real_only=False)
+
+
+def resolve_l2sp_anchor(init_from: str, anchor_init: bool, anchor_from: str = "", stock=None) -> str:
+    """The L2-SP anchor file. anchor_from "ultra": always stock Ultra's decoder + joint, whatever init_from is (a branch off
+    a fine-tuned checkpoint keeps the stock pull). Otherwise: stock for init_from ultra, the init run's own checkpoint for a
+    warm start with anchor_init, v10pt@1500 without it."""
+    stock = stock or ultra_state
+    i_run, _, i_step = init_from.partition("@")
+    if init_from == "ultra":  # a stock start anchored to v10pt would pull it toward a fine-tuned prior
+        assert anchor_init, "init_from ultra needs --anchor-init (the L2-SP anchor must be stock, not v10pt)"
+    assert anchor_from in ("", "ultra"), f"anchor_from {anchor_from!r}: '' or 'ultra'"
+    if anchor_from:
+        return stock()
+    if not anchor_init:
+        return f"{VOL}/exp/v10pt/step1500.pt"
+    if init_from == "ultra":  # stock: the decoder + joint tensors of the .nemo, NeMo names as in exp checkpoints
+        return stock()
+    return f"{VOL}/exp/{i_run}/step{i_step}.pt"
+
+
+def check_branch_start(cfg: dict, run: str, init_from: str, exists=None) -> None:
+    """A branch arm (lr_total set) must start from "<other run>@<lr_offset>" whose weights file exists, with the stock
+    anchor: the schedule continues the main run's, so any other step or a stock start is a wrong launch."""
+    if not cfg.get("lr_total"):
+        return
+    exists = exists or os.path.exists
+    i_run, _, i_step = init_from.partition("@")
+    assert i_step.isdigit() and i_run not in ("", "ultra", run), f"a branch needs --init-from <main run>@<step>, got {init_from!r}"
+    assert int(i_step) == cfg["lr_offset"], f"init step {i_step} != the arm's lr_offset {cfg['lr_offset']} (the schedule's step)"
+    assert cfg.get("anchor_from") == "ultra", "a branch keeps the stock L2-SP anchor (anchor_from ultra)"
+    path = f"{VOL}/exp/{i_run}/step{i_step}.pt"
+    assert exists(path), f"{path} not on the volume"
+
 
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-40GB", cpu=8, memory=32768, timeout=24 * 3600,
               retries=modal.Retries(max_retries=2, initial_delay=30.0))
@@ -1945,7 +2007,10 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     unfreeze_top > 0: the last unfreeze_top conformer blocks of the encoder train too (ft_train.unfreeze_top_layers); step
     checkpoints then hold those blocks, and every reader must load them (_load_runs, eval_multi re-encodes).
     part_weights "<path>=<n>,..." / extra_parts "<path>:<tag>:<n>,..." (mix v4 only; default "" = the arm's listing as
-    is): per-part listing counts, apply_part_weights; merged over the arm's own part_weights / extra_parts."""
+    is): per-part listing counts, apply_part_weights; merged over the arm's own part_weights / extra_parts.
+    Branch arms (R10-brC / R10-brE / R10-brEr): init_from "<main run>@1000", the stock L2-SP anchor (arm key anchor_from),
+    the main run's lr tail (lr_offset / lr_total), their own sampler seed, and for the E arms the top 2 encoder blocks on an
+    absolute schedule with per-group clipping (arm keys; ft_train.train has the options). No arm key = every option off."""
     import json
     import os
 
@@ -1976,6 +2041,11 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     cfg.setdefault("enc_l2sp_c", None)
     cfg.setdefault("lora_rank", 0)
     cfg.setdefault("lora_alpha", 16.0)
+    for k, v in _BRANCH_DEFAULTS.items():
+        cfg.setdefault(k, v)
+    arm_top = cfg.pop("unfreeze_top", 0)  # an arm may fix the number of unfrozen encoder blocks (the launcher has no flag)
+    assert not (arm_top and unfreeze_top and arm_top != unfreeze_top), f"arm {arm} sets unfreeze_top {arm_top}, given {unfreeze_top}"
+    unfreeze_top = unfreeze_top or arm_top
     given = dict(mix=mix, init_from=init_from, anchor_init=anchor_init, dur_weight=dur_weight, warmup=warmup,
                  langs=",".join(_langs(langs)))
     bad = {k: (given[k], v) for k, v in cfg.pop("recipe", {}).items() if given[k] != v}
@@ -2000,16 +2070,10 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
            }.get(mix, retrain3_mix)()
     if any(m[0].startswith(("mix4/", mix_dir + "/")) for m in mix):
         print("BUILD", mix_dir, json.dumps(check_build_langs(langs, mix_dir, build_langs).get("langs_without_rows", [])))
-    # a warm start anchors L2-SP to its own init, not v10pt (the prior being trained away)
-    i_run, _, i_step = init_from.partition("@")
-    if init_from == "ultra":  # a stock start anchored to v10pt would pull it toward a fine-tuned prior
-        assert anchor_init, "init_from ultra needs --anchor-init (the L2-SP anchor must be stock, not v10pt)"
-    if not anchor_init:
-        anchor = f"{VOL}/exp/v10pt/step1500.pt"
-    elif init_from == "ultra":  # stock: the decoder + joint tensors of the .nemo, NeMo names as in exp checkpoints
-        anchor = ultra_state()
-    else:
-        anchor = f"{VOL}/exp/{i_run}/step{i_step}.pt"
+    # a warm start anchors L2-SP to its own init, not v10pt (the prior being trained away); a branch arm (anchor_from
+    # "ultra") keeps the stock anchor
+    check_branch_start(cfg, run, init_from)
+    anchor = resolve_l2sp_anchor(init_from, anchor_init, cfg["anchor_from"])
     print("L2SP ANCHOR", anchor, "INIT", init_from, "SUB_BATCH", r3_sub_batch)
     if unfreeze_top:
         print("UNFREEZE_TOP", unfreeze_top)
@@ -2038,7 +2102,10 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
                    kl_mask_space_en=cfg["kl_mask_space_en"], en_teacher=cfg["en_teacher"],
                    en_teacher_num=cfg["en_teacher_num"], en_kl_scale=cfg["en_kl_scale"],
                    enc_lr_scale=cfg["enc_lr_scale"], enc_l2sp_c=cfg["enc_l2sp_c"], lora_rank=cfg["lora_rank"],
-                   lora_alpha=cfg["lora_alpha"], **r4)
+                   lora_alpha=cfg["lora_alpha"], sampler_seed=cfg["sampler_seed"], lr_offset=cfg["lr_offset"],
+                   lr_total=cfg["lr_total"], enc_lr_peak=cfg["enc_lr_peak"], enc_lr_floor=cfg["enc_lr_floor"],
+                   enc_lr_warmup=cfg["enc_lr_warmup"], enc_lr_steps=cfg["enc_lr_steps"], enc_clip=cfg["enc_clip"],
+                   enc_real_only=cfg["enc_real_only"], **r4)
     vol.commit()
 
 

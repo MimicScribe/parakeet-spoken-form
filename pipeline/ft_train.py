@@ -7,6 +7,7 @@ Saves only the trainable weights (decoder + joint, ~18M params, + the unfrozen e
 
 import collections
 import json
+import math
 import re
 import os
 import random
@@ -102,6 +103,7 @@ class SaveEvery(pl.Callback):
                 trainer.save_checkpoint(self.last + ".tmp")
                 write_atomic(self.last + ".step", str(step))  # before the checkpoint swap: never behind it
                 os.replace(self.last + ".tmp", self.last)
+            log_encoder_delta(m, self.exp, step)  # nothing without trainable encoder blocks
             open(f"{self.exp}/step{step}.pt.done", "w").close()
             self.on_save()
 
@@ -991,8 +993,12 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                   en_set: str = "whole", comma_weight: float = 0.0, wf_en_weight: float = 1.0,
                   kl_mask_space: bool = False, en_teacher_state: dict | None = None, en_teacher_num: str = "anchor",
                   en_kl_scale: float = 1.0, wf_pen_digits_only: bool = False,
-                  kl_mask_space_en: bool = False):
-    """wf_pen_digits_only: wf_pen counts only the pieces made of digits (0-9), not the symbol pieces (% $ € £ / …) that the
+                  kl_mask_space_en: bool = False, enc_real_only: bool = False):
+    """enc_real_only (unfreeze_top only): the rows whose label is in `synthetic` send no gradient into the encoder (every
+    loss, main and auxiliary, reads the same encoder output, whose value is unchanged; see unfreeze_top_layers). The decoder
+    and joint train on every row as before. `synthetic` holds the nonen_span labels of TTS rows / TTS windows (write_mix);
+    False = nothing changes, bit for bit.
+    wf_pen_digits_only: wf_pen counts only the pieces made of digits (0-9), not the symbol pieces (% $ € £ / …) that the
     frozen encoder carries at spoken percent / currency / unit words; False = unchanged bit for bit.
     R3 losses (table above). R4 options, all off by default: suffix_anchor (arm b: anchor every non-number position of
     span / anchor_num rows, and of nonen_span rows via nspan_pos {label ids: anchor_positions}), gate_human (arm b: the
@@ -1065,8 +1071,20 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
     orig_step = m.training_step
     nb = 8193
     en_cache: dict = {}
+    if enc_real_only:
+        assert getattr(m, "_enc_unfrozen", ()), "enc_real_only needs unfreeze_top"
+        assert synthetic, "enc_real_only but no synthetic label (nothing to mask)"
+        syn_rows = {"seen": 0, "masked": 0}
 
     def training_step(batch, batch_idx):
+        if enc_real_only:  # before the forward: the encoder hook reads the row mask
+            tk, tl = batch[2], batch[3]
+            keep = torch.tensor([tuple(tk[i, :int(tl[i])].tolist()) not in synthetic for i in range(tk.shape[0])])
+            m._enc_row_keep = keep
+            syn_rows["seen"] += len(keep)
+            syn_rows["masked"] += int((~keep).sum())
+            if batch_idx % 10 == 0:
+                print(f"enc_real_only: rows without encoder gradient {syn_rows['masked']}/{syn_rows['seen']}", flush=True)
         out = orig_step(batch, batch_idx)
         signal, signal_len, tokens, tokens_len = batch[:4]
         tdec, tjoint = m._kl_teacher
@@ -1508,7 +1526,12 @@ def unfreeze_top_layers(m, n: int, train_base: bool = True) -> dict:
 
     def keep_main(mod, args, kwargs, out):
         if torch.is_grad_enabled():  # the training pass only (the teacher and consistency passes run under no_grad)
+            keep = getattr(m, "_enc_row_keep", None)
+            if keep is not None:  # enc_real_only: same values, but no gradient reaches the encoder from the other rows
+                out = (torch.where(keep.to(out[0].device)[:, None, None], out[0], out[0].detach()),) + tuple(out[1:])
             m._enc_main = (kwargs["audio_signal"], kwargs["length"], out[0], out[1])
+            if keep is not None:
+                return out
 
     m.encoder.register_forward_hook(keep_main, with_kwargs=True)
     n_par = sum(p.numel() for i in idx for p in layers[i].parameters())
@@ -1589,16 +1612,23 @@ def lora_merged_weights(m) -> dict:
     return out
 
 
-def encoder_param_groups(m, lr: float, enc_lr_scale: float) -> list[dict]:
+def encoder_param_groups(m, lr: float, enc_lr_scale: float, peak: float | None = None) -> list[dict]:
     """Two optimizer parameter groups: the trainable encoder tensors at lr * enc_lr_scale, everything else (decoder, joint,
     the frozen encoder tensors, which never get a gradient) at lr. NeMo's scheduler gives every group its own base lr; its
-    min_lr (lr / 10) is shared, so the encoder group decays from lr * enc_lr_scale to that same floor."""
+    min_lr (lr / 10) is shared, so the encoder group decays from lr * enc_lr_scale to that same floor.
+    peak (enc_lr_peak): the encoder group's absolute starting lr; its schedule is then LrSchedule's, not NeMo's (NeMo only
+    needs the starting lr to be >= its min_lr, lr / 10)."""
     enc = [p for n, p in m.named_parameters() if n.startswith("encoder.") and p.requires_grad]
     ids = {id(p) for p in enc}
     assert enc, "enc_lr_scale needs trainable encoder tensors (unfreeze_top)"
-    assert enc_lr_scale >= 0.1, "enc_lr_scale < 0.1: the group's peak would sit below the shared cosine floor (lr / 10)"
+    if peak is None:
+        assert enc_lr_scale >= 0.1, "enc_lr_scale < 0.1: the group's peak would sit below the shared cosine floor (lr / 10)"
+        enc_lr = lr * enc_lr_scale
+    else:
+        assert enc_lr_scale == 1.0 and peak >= lr / 10, f"enc_lr_peak {peak}: not with enc_lr_scale, and >= lr / 10 (NeMo's floor)"
+        enc_lr = peak
     return [{"params": [p for p in m.parameters() if id(p) not in ids], "lr": lr},
-            {"params": enc, "lr": lr * enc_lr_scale}]
+            {"params": enc, "lr": enc_lr}]
 
 
 class ParamGroupLog(pl.Callback):
@@ -1612,6 +1642,132 @@ class ParamGroupLog(pl.Callback):
             print(f"param group {i}: {len(ps)} trainable tensors ({sum(p.numel() for p in ps):,} params, "
                   f"{sum(1 for p in ps if id(p) in enc_ids)} encoder tensors) peak lr {g.get('initial_lr', g['lr']):.3g}",
                   flush=True)
+
+
+def cosine_lr_at(step: int, peak: float, floor: float, warmup: int, total: int) -> float:
+    """NeMo's CosineAnnealing (warmup_steps=warmup, max_steps=total, min_lr=floor) at scheduler step `step`, without NeMo:
+    linear warmup peak * (step + 1) / (warmup + 1) for step <= warmup, then the cosine from peak to floor over
+    total - warmup steps, floor after total."""
+    if warmup > 0 and step <= warmup:
+        return peak * (step + 1) / (warmup + 1)
+    if step > total:
+        return floor
+    return (peak - floor) * 0.5 * (1 + math.cos(math.pi * (step - warmup) / (total - warmup))) + floor
+
+
+def decoder_lr_at(k: int, lr: float, warmup: int, total: int, offset: int) -> float:
+    """Decoder + joint lr of optimizer step k of a run that continues a `total`-step schedule from step `offset` (a branch
+    off the main run's checkpoint): the main run's cosine at offset + k, so the tail goes on where the main run was, times a
+    restart ramp (k + 1) / (warmup + 1) over the first `warmup` steps (the optimizer's moments start empty). offset 0 =
+    the plain schedule (NeMo's own warmup), no extra ramp."""
+    if offset == 0:
+        return cosine_lr_at(k, lr, lr / 10, warmup, total)
+    ramp = (k + 1) / (warmup + 1) if k <= warmup else 1.0
+    return cosine_lr_at(offset + k, lr, lr / 10, warmup, total) * ramp
+
+
+class LrSchedule(pl.Callback):
+    """Set the learning rate of chosen optimizer parameter groups from an absolute schedule f(k) just before every
+    optimizer step (k = the step about to be taken, from 0; trainer.global_step also after a resume). It overrides what
+    NeMo's scheduler wrote, so a group follows its own peak, warmup and floor instead of NeMo's shared cosine floor. The
+    L2-SP pull (on_train_batch_end, before the scheduler steps) reads the same lr."""
+
+    def __init__(self, fns: dict):
+        self.fns = fns  # {param group index: step -> lr}
+        self.last = {}
+
+    def on_before_optimizer_step(self, trainer, m, optimizer):
+        k = trainer.global_step
+        groups = trainer.optimizers[0].param_groups
+        for i, fn in self.fns.items():
+            groups[i]["lr"] = self.last[i] = fn(k)
+        if k % 50 == 0:
+            print(f"lr step {k}: " + " ".join(f"group{i} {v:.4g}" for i, v in sorted(self.last.items())), flush=True)
+
+
+class GroupClip(pl.Callback):
+    """Gradient clipping per group instead of Lightning's one global norm (set gradient_clip_val None when this runs):
+    the decoder + joint tensors to `dec_clip` (1.0: exactly what the decoder-only control does), the encoder tensors to
+    their own fixed `enc_clip`. Runs before the optimizer step, after StepLog has read the global norm; the pre-clip norm of
+    each group is printed every 10 steps with how often it clipped."""
+
+    def __init__(self, enc_clip: float, dec_clip: float = 1.0):
+        self.enc_clip, self.dec_clip = enc_clip, dec_clip
+        self.clipped = {"dec": 0, "enc": 0}
+        self.last = {}
+
+    def on_before_optimizer_step(self, trainer, m, optimizer):
+        parts = {"dec": ([], self.dec_clip), "enc": ([], self.enc_clip)}
+        for n, p in m.named_parameters():
+            if p.grad is not None:
+                parts["enc" if n.startswith("encoder.") else "dec"][0].append(p)
+        for g, (ps, clip) in parts.items():
+            if ps:
+                norm = float(torch.nn.utils.clip_grad_norm_(ps, clip))  # the norm before clipping
+                self.last[g] = norm
+                self.clipped[g] += int(norm > clip)
+        k = trainer.global_step
+        if k % 10 == 0:
+            print("grad_norm pre-clip " + " ".join(f"{g} {v:.3f} (clip {parts[g][1]:g}, clipped {self.clipped[g]}/{k + 1})"
+                                                       for g, v in self.last.items()), flush=True)
+
+
+def branch_trainer_parts(lr: float, warmup: int, lr_offset: int = 0, lr_total: int = 0, enc_lr_peak: float = 0.0,
+                         enc_lr_floor: float = 0.0, enc_lr_warmup: int = 0, enc_lr_steps: int = 0, enc_clip: float = 0.0,
+                         max_steps: int = 0, has_encoder: bool = False):
+    """(callbacks, gradient_clip_val) for the warm-start / encoder-schedule options. Every option off (the defaults) =
+    ([], 1.0): the Trainer is what it always was. lr_total > 0: the decoder + joint group (index 0) follows decoder_lr_at
+    (offset lr_offset of a lr_total-step schedule). enc_lr_peak > 0: the encoder group (index 1, a separate group:
+    encoder_param_groups) follows its own schedule, cosine peak -> enc_lr_floor over enc_lr_steps (default max_steps) after
+    enc_lr_warmup warmup steps. enc_clip > 0: GroupClip replaces the global clip."""
+    cbs, fns = [], {}
+    if lr_total:
+        assert lr_offset == 0 or lr_offset > warmup, f"lr_offset {lr_offset} must be 0 or past the warmup {warmup}"
+        assert lr_offset + max_steps <= lr_total, f"lr_offset {lr_offset} + max_steps {max_steps} > lr_total {lr_total}"
+        fns[0] = lambda k: decoder_lr_at(k, lr, warmup, lr_total, lr_offset)
+    else:
+        assert not lr_offset, "lr_offset needs lr_total"
+    if enc_lr_peak:
+        assert has_encoder and 0 < enc_lr_floor < enc_lr_peak, "enc_lr_peak needs trainable encoder blocks and 0 < floor < peak"
+        steps = enc_lr_steps or max_steps
+        assert steps == max_steps, f"enc_lr_steps {steps} != max_steps {max_steps}: the encoder schedule must span the run"
+        fns[1] = lambda k: cosine_lr_at(k, enc_lr_peak, enc_lr_floor, enc_lr_warmup, steps)
+    else:
+        assert not (enc_lr_floor or enc_lr_warmup or enc_lr_steps), "enc_lr_floor / warmup / steps need enc_lr_peak"
+    if fns:
+        cbs.append(LrSchedule(fns))
+    if enc_clip:
+        assert has_encoder, "enc_clip needs trainable encoder blocks (unfreeze_top)"
+        cbs.append(GroupClip(enc_clip))
+    return cbs, (None if enc_clip else 1.0)
+
+
+def resolve_sampler_seed(seed: int, explicit: int = 0, resuming: bool = False, step0: int = 0) -> int:
+    """The lhotse sampler seed: `seed` (default) or the explicit one (a branch off another run's checkpoint draws its own
+    batch order; the mix, written with `seed`, stays the same); a resume offsets it by 1000 * the step it resumes from."""
+    base = explicit or seed
+    return base + 1000 * step0 if resuming else base
+
+
+def encoder_l2_delta(m) -> float | None:
+    """sqrt(sum of squared differences) between the checkpoint's top encoder tensors (trainable_state, LoRA merged) and
+    their stock values; None when no encoder block is unfrozen. Buffers (BatchNorm statistics) stay stock: zero."""
+    stock = getattr(m, "_enc_stock_top", None)
+    if not stock:
+        return None
+    sd = trainable_state(m)
+    return math.sqrt(sum(float(((sd[k].float() - v.float()) ** 2).sum()) for k, v in stock.items() if k in sd))
+
+
+def log_encoder_delta(m, exp: str, step: int):
+    """At a save: print the encoder's L2 distance from stock and append it to <exp>/enc_l2_delta.jsonl."""
+    d = encoder_l2_delta(m)
+    if d is None:
+        return None
+    print(f"encoder L2 delta from stock at step {step}: {d:.4f}", flush=True)
+    with open(f"{exp}/enc_l2_delta.jsonl", "a") as f:
+        f.write(json.dumps({"step": step, "enc_l2_delta": d}) + "\n")
+    return d
 
 
 def stock_top_encoder(m, feats, feats_len):
@@ -1638,7 +1794,9 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           comma_weight: float = 0.0, wf_en_weight: float = 1.0, unfreeze_top: int = 0, kl_mask_space: bool = False,
           l2sp_exempt_num: bool = False, en_teacher: str = "", en_teacher_num: str = "anchor", en_kl_scale: float = 1.0,
           wf_pen_digits_only: bool = False, kl_mask_space_en: bool = False, enc_lr_scale: float = 1.0, enc_l2sp_c: float | None = None,
-          lora_rank: int = 0, lora_alpha: float = 16.0):
+          lora_rank: int = 0, lora_alpha: float = 16.0, sampler_seed: int = 0, lr_offset: int = 0, lr_total: int = 0,
+          enc_lr_peak: float = 0.0, enc_lr_floor: float = 0.0, enc_lr_warmup: int = 0, enc_lr_steps: int = 0,
+          enc_clip: float = 0.0, enc_real_only: bool = False):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
     entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists.
@@ -1661,20 +1819,31 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     L2-SP pull uses each parameter's own group lr). enc_l2sp_c: the L2-SP strength c of the encoder tensors (None = l2sp_c;
     the decoder and joint keep l2sp_c). lora_rank > 0: the top blocks' own weights stay frozen and LoRA adapters of that
     rank (scale lora_alpha / lora_rank) on the attention q/k/v/out and feed-forward linears train instead (add_lora); the
-    checkpoints hold the adapters merged into the weights."""
+    checkpoints hold the adapters merged into the weights.
+    Branch options (a warm start off another run's checkpoint, optionally with the encoder; all off by default and then
+    nothing changes, bit for bit): sampler_seed != 0: the lhotse sampler's seed (batch order); the mix is still written with
+    `seed`. lr_total > 0: the decoder + joint lr follows a lr_total-step cosine (peak lr, floor lr / 10, warmup steps) from
+    step lr_offset on (decoder_lr_at: the main run's tail, with a restart ramp), through LrSchedule. enc_lr_peak > 0
+    (unfreeze_top): the encoder tensors are their own optimizer group with an ABSOLUTE schedule: warmup enc_lr_warmup
+    steps to enc_lr_peak, cosine to enc_lr_floor over enc_lr_steps (0 = max_steps); NeMo's shared floor does not apply.
+    enc_clip > 0 (unfreeze_top): gradient clipping per group (GroupClip): decoder + joint at 1.0 as in the control, the
+    encoder at enc_clip; pre-clip norms are logged. enc_real_only (unfreeze_top, r3): rows tagged synthetic send no gradient
+    into the encoder (add_r3_losses). With unfreeze_top, every save logs the encoder's L2 distance from stock
+    (enc_l2_delta.jsonl in the run's folder)."""
     import nemo.collections.asr as nemo_asr
 
     exp = f"{vol}/exp/{run}"
     os.makedirs(exp, exist_ok=True)
     last = f"{exp}/last.ckpt"
     resuming = resume and os.path.exists(last)
-    sampler_seed = seed
+    sampler_seed_arg = sampler_seed
+    sampler_seed = resolve_sampler_seed(seed, sampler_seed_arg)
     if resuming:
         # lhotse restarts its sampler on resume: a NEW sampler seed so the resumed run does not replay the batches it
         # already saw (NeMo lhotse docs). R3: the MIX (which rows) stays the same — only the order
         # changes (retrain-3 review: reseeding write_mix changed the data mid-run).
         step0 = read_resume_step(last, exp)
-        sampler_seed = seed + 1000 * step0
+        sampler_seed = resolve_sampler_seed(seed, sampler_seed_arg, True, step0)
         if not r3:
             seed = sampler_seed
         print(f"resume: sampler seed -> {sampler_seed}")
@@ -1730,6 +1899,9 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
             add_lora(m, unfreeze_top, lora_rank, lora_alpha)
     assert unfreeze_top or not (lora_rank or enc_lr_scale != 1.0 or enc_l2sp_c is not None), \
         "enc_lr_scale / enc_l2sp_c / lora_rank need unfreeze_top"
+    assert unfreeze_top or not (enc_lr_peak or enc_clip or enc_real_only), \
+        "enc_lr_peak / enc_clip / enc_real_only need unfreeze_top"
+    assert not (enc_lr_peak and enc_lr_scale != 1.0), "enc_lr_peak (absolute schedule) and enc_lr_scale are two ways to set one lr"
     assert not (lora_rank and enc_l2sp_c is not None), "enc_l2sp_c: the LoRA base weights are frozen (no encoder pull)"
     if "blankspan" in kl_terms:
         assert kl_replay_only, "blankspan only works with kl_replay_only (span rows are matched by label)"
@@ -1787,7 +1959,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
                       en_set=en_set, sub_batch=r3_sub_batch, comma_weight=comma_weight,
                       wf_en_weight=wf_en_weight, kl_mask_space=kl_mask_space, en_teacher_state=en_state,
                       en_teacher_num=en_teacher_num, en_kl_scale=en_kl_scale, wf_pen_digits_only=wf_pen_digits_only,
-                      kl_mask_space_en=kl_mask_space_en)
+                      kl_mask_space_en=kl_mask_space_en, enc_real_only=enc_real_only)
         if l2sp_c or enc_l2sp_c:
             last_layer = m.joint.joint_net[-1].weight.shape[0]
             exempt = [i for i in wf_piece_ids(m.tokenizer.tokenizer) if i < last_layer]
@@ -1834,22 +2006,31 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
             groups[k] = groups.get(k, 0) + p.numel()
     print(f"trainable params: {sum(groups.values()):,} {groups}")
 
-    if enc_lr_scale != 1.0:
+    if enc_lr_scale != 1.0 or enc_lr_peak:
         # NeMo calls setup_optimizer_param_groups on every (re)build of the optimizer, Lightning's included
         def split_groups():
-            m._optimizer_param_groups = encoder_param_groups(m, lr, enc_lr_scale)
+            m._optimizer_param_groups = encoder_param_groups(m, lr, enc_lr_scale, peak=enc_lr_peak or None)
 
         m.setup_optimizer_param_groups = split_groups
-        print(f"enc_lr_scale {enc_lr_scale}: encoder tensors at lr {lr * enc_lr_scale:g}, decoder + joint at lr {lr:g}",
-              flush=True)
+        print(f"enc_lr_scale {enc_lr_scale}: encoder tensors at lr {enc_lr_peak or lr * enc_lr_scale:g}, decoder + joint at "
+              f"lr {lr:g}", flush=True)
+    branch_cb, clip_val = branch_trainer_parts(
+        lr, warmup, lr_offset=lr_offset, lr_total=lr_total, enc_lr_peak=enc_lr_peak, enc_lr_floor=enc_lr_floor,
+        enc_lr_warmup=enc_lr_warmup, enc_lr_steps=enc_lr_steps, enc_clip=enc_clip, max_steps=max_steps,
+        has_encoder=bool(unfreeze_top))
+    if branch_cb:
+        print(f"branch options: sampler_seed {sampler_seed} lr_offset {lr_offset} lr_total {lr_total} enc_lr_peak "
+              f"{enc_lr_peak:g} floor {enc_lr_floor:g} warmup {enc_lr_warmup} steps {enc_lr_steps or max_steps} enc_clip "
+              f"{enc_clip:g} enc_real_only {enc_real_only}", flush=True)
 
     trainer = pl.Trainer(devices=1, accelerator="gpu", precision="bf16-mixed", max_steps=max_steps,
                          limit_train_batches=max_steps * accumulate, limit_val_batches=0, num_sanity_val_steps=0,
-                         use_distributed_sampler=False, gradient_clip_val=1.0, logger=False,
+                         use_distributed_sampler=False, gradient_clip_val=clip_val, logger=False,
                          accumulate_grad_batches=accumulate,
                          enable_checkpointing=False, enable_progress_bar=False,
                          callbacks=[KeepEncoderFrozen(), StepLog(mem=bool(unfreeze_top))] + extra + extra_cb
-                         + ([ParamGroupLog()] if enc_lr_scale != 1.0 else [])
+                         + ([ParamGroupLog()] if enc_lr_scale != 1.0 or enc_lr_peak else [])
+                         + branch_cb
                          + ([SaveEvery(exp, save_every, on_save, last)] if save_every else []))
     m.set_trainer(trainer)
     m.setup_optimization(OmegaConf.create({
