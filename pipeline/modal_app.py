@@ -1176,10 +1176,64 @@ def _langs(langs) -> tuple:
     return tuple(langs)
 
 
+def parse_part_weights(spec) -> dict:
+    """"mix4/tts_de.jsonl=2,mix4/win_fr.jsonl=3" -> {path: n}; a dict passes through; "" -> {}."""
+    if isinstance(spec, dict):
+        return dict(spec)
+    out = {}
+    for item in (spec or "").split(","):
+        if item.strip():
+            path, _, n = item.strip().rpartition("=")
+            assert path and n.isdigit(), f"part weight {item!r}: expected <path>=<count>"
+            out[path] = int(n)
+    return out
+
+
+def parse_extra_parts(spec) -> list:
+    """"ml/tvar1/train.jsonl:nonen:2,..." -> [(path, 0, tag, n)]; a list of such tuples passes through; "" -> []."""
+    if not isinstance(spec, str):
+        return [tuple(x) for x in spec or []]
+    out = []
+    for item in spec.split(","):
+        if item.strip():
+            path, tag, n = item.strip().rsplit(":", 2)
+            assert path and n.isdigit(), f"extra part {item!r}: expected <path>:<tag>:<count>"
+            out.append((path, 0, tag, int(n)))
+    return out
+
+
+def apply_part_weights(mix: list, part_weights=None, extra_parts=None) -> list:
+    """Listing weights per part (the listing is the mix: a part listed n times is read n times). part_weights {path: n}:
+    the path's TOTAL number of listings becomes n (n >= 1; it keeps its first entry's hours and tag and its position);
+    a path that is not listed is an error (a typo would silently weight nothing). extra_parts [(path, hours, tag, n)]:
+    parts the builders do not list, appended n times. Both empty (the default) returns the listing unchanged."""
+    weights = parse_part_weights(part_weights)
+    extra = parse_extra_parts(extra_parts)
+    if not weights and not extra:
+        return mix
+    listed = {m[0] for m in mix}
+    missing = sorted(set(weights) - listed)
+    assert not missing, f"part_weights names parts that are not in the listing: {missing[:4]}"
+    bad = {k: v for k, v in weights.items() if v < 1}
+    assert not bad, f"part_weights counts must be >= 1: {bad}"
+    out, seen = [], set()
+    for m in mix:
+        if m[0] in weights:
+            if m[0] not in seen:
+                seen.add(m[0])
+                out += [m] * weights[m[0]]
+            continue
+        out.append(m)
+    for path, hours, tag, n in extra:
+        assert path not in listed and n >= 1, f"extra part {path!r}: already listed (use part_weights) or count < 1"
+        out += [(path, hours, tag)] * n
+    return out
+
+
 def retrain3_mix_v4(langs=WAVE1, repeat: int = 1, anchor18: int = 0, win_repeat: int = 0, en_bal: bool = False,
                     en_plain_h: float = 0.0, en_win_repeat: int = 1, seam_long_repeat: int = 0,
                     mix_dir: str = "mix4", phonefmt: bool = False, phone_anchor: int = 0,
-                    en_free_repeat: int = 1, win15_repeat: int = 1) -> list:
+                    en_free_repeat: int = 1, win15_repeat: int = 1, part_weights=None, extra_parts=None) -> list:
     """Wave-1 run (2026-10-15): the v3 mix with mix3/d2 swapped for mix4/d2 (trained languages' digit rows out) and, per
     trained language (`langs`, the same tuple build_mix4 built), its P3 v2 spoken-form rows + synthetic rows (listed
     `repeat` times) + streaming-geometry windows and mirrored seam pairs (listed `win_repeat` times; 0 = `repeat`, the
@@ -1189,7 +1243,10 @@ def retrain3_mix_v4(langs=WAVE1, repeat: int = 1, anchor18: int = 0, win_repeat:
     seam pairs (d1/en4_ok, English parts of the share) listed that many times.
     15 s windows (2026-10-18, win15.py): mix4/win15_<lang>.jsonl (nonen_span) and mix4/en_win15.jsonl (English, span),
     listed win15_repeat times when the build wrote them (build_mix4 --win15-share; a build without them lists nothing
-    new). Once = the build's share (win15_share is of the language's number hours listed once)."""
+    new). Once = the build's share (win15_share is of the language's number hours listed once).
+    part_weights / extra_parts (2026-10-18; default empty = the listing above unchanged): per-part listing counts,
+    apply_part_weights (a part listed n times is read n times; e.g. a thin new part x3). Keys are the canonical names
+    ("mix4/tts_de.jsonl"), applied before a dry build's directory substitution."""
     langs = _langs(langs)
     sub = {"mix3/d2.jsonl": "mix4/d2.jsonl", "mix3/d2p.jsonl": "mix4/d2p.jsonl",
            "mix3/fleurs_train_multi.jsonl": "mix4/fleurs_train_multi.jsonl",
@@ -1230,6 +1287,7 @@ def retrain3_mix_v4(langs=WAVE1, repeat: int = 1, anchor18: int = 0, win_repeat:
         out = base + extra * repeat + (wins + seam) * win_repeat + slong + anchors + phone + plain + w15
     else:
         out = base + (extra + wins) * repeat + anchors + phone + seam + plain + slong + w15  # the R4-R6 lists (+ w15)
+    out = apply_part_weights(out, part_weights, extra_parts)
     if mix_dir != "mix4":  # a dry build's parts (build4 mix_dir); the d2anchor / dec18 sets live in mix4 only
         built = ("mix4/d2.", "mix4/d2_phonefmt_", "mix4/d2p.", "mix4/fleurs_train_multi.", "mix4/p3_", "mix4/tts_", "mix4/win_", "mix4/seam_",
                  "mix4/plain_", "mix4/win15_", "mix4/en_win15.")
@@ -1366,7 +1424,7 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
                en_win_repeat: int = 1, mix_dir: str = "mix4", seam_long_h: float = 0.0, seam_long_repeat: int = 0, en_free_repeat: int = 1, final: bool = False,
                split_compounds: str = "", win15_share: float = 0.0, win15_dir: str = "ml/win15b", win15_repeat: int = 1,
                en_win15: bool = True, edge_fix_dir: str = "", extra_passes: str = "", relabel_rows: str = "",
-               relabel_parts_dir: str = "", relabel_tts: bool = False):
+               relabel_parts_dir: str = "", relabel_tts: bool = False, part_weights: str = "", extra_parts: str = ""):
     """Greek ς restore (idempotent) + mix_build.build4 + the number share of the v4 mix (total and English-only).
     Run 2 (2026-10-17): balance = build4 template / session caps; en_bal = mix_build.en_balance on the English real
     parts (writes their _bcap copies: caps, then the YouTube top-up trim into the 35-40% band); repeat / win_repeat /
@@ -1396,7 +1454,8 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
     out["en_win15"] = en_win15_part(mix_dir, win15_dir, write=win15_share > 0 and en_win15)
     dry = mix_dir != "mix4" and not final  # final: a candidate mix in its own dir, English copies under it
     kw = dict(repeat=repeat, anchor18=anchor18, win_repeat=win_repeat, en_plain_h=en_plain_h, en_win_repeat=en_win_repeat,
-              seam_long_repeat=seam_long_repeat, mix_dir=mix_dir, en_free_repeat=en_free_repeat, win15_repeat=win15_repeat)
+              seam_long_repeat=seam_long_repeat, mix_dir=mix_dir, en_free_repeat=en_free_repeat, win15_repeat=win15_repeat,
+              part_weights=part_weights, extra_parts=extra_parts)  # the share report is the share retrain3 will assert
     mix = retrain3_mix_v4(ls, en_bal=False, **kw)
     if en_bal:  # a dry build only reports what en_balance would write (the listing keeps the source parts)
         out["en_balance"] = mix_build.en_balance(VOL, mix, non_en=_NON_EN_PARTS, write=not dry, bcap_dir=mix_dir)
@@ -1469,7 +1528,7 @@ def share_report_of(mix: list) -> dict:
 def share_report(langs: str = ",".join(WAVE1), repeat: int = 1, win_repeat: int = 0, anchor18: int = 0,
                  en_bal: bool = False, dry_en_bal: bool = True, en_plain_h: float = 0.0, en_win_repeat: int = 1,
                  target: float = 0.39, mix_dir: str = "mix4", seam_long_repeat: int = 0, out_path: str = "",
-                 en_free_repeat: int = 1):
+                 en_free_repeat: int = 1, part_weights: str = "", extra_parts: str = ""):
     """Read-only: the v4 mix shares for an arm's listing on the CURRENT volume (no build). dry_en_bal: also what
     mix_build.en_balance would do (nothing written)."""
     import json
@@ -1479,7 +1538,8 @@ def share_report(langs: str = ",".join(WAVE1), repeat: int = 1, win_repeat: int 
     vol.reload()
     mix = retrain3_mix_v4(_langs(langs), repeat=repeat, anchor18=anchor18, win_repeat=win_repeat, en_bal=en_bal,
                           en_plain_h=en_plain_h, en_win_repeat=en_win_repeat, mix_dir=mix_dir,
-                          seam_long_repeat=seam_long_repeat, en_free_repeat=en_free_repeat)
+                          seam_long_repeat=seam_long_repeat, en_free_repeat=en_free_repeat,
+                          part_weights=part_weights, extra_parts=extra_parts)
     print("LSPC full h", round(mix_build._h(mix_build._rows(f"{VOL}/replay/lspc_train.jsonl")), 1))
     orig = {mix_build.en_bcap_path(p, mix_dir): p for p in mix_build.EN_REAL_PARTS}
     if en_bal and not all(os.path.exists(f"{VOL}/{p}") for p in orig):  # not built yet: report on the source parts
@@ -1853,7 +1913,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
              en_weight: float = -1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
              dur_weight: float = 1.0, init_from: str = "v10pt@1500", lr: float = 0.0, mix: str = "mix3",
              anchor_init: bool = False, cons_weight: float = -1.0, langs: str = "", mix_dir: str = "mix4",
-             r3_sub_batch: int = 2, unfreeze_top: int = 0):
+             r3_sub_batch: int = 2, unfreeze_top: int = 0, part_weights: str = "", extra_parts: str = ""):
     """One retrain-3 run (R3.13): r3 losses, decoupled L2-SP to v10pt@1500, 200 s x 2 accumulated batches.
     Rehearsal (E2) = a small max_steps. Resumes from exp/<run>/last.ckpt after a preemption.
     cons_weight >= 0 overrides the arm's cross-window consistency weight (R4-c tuning knob).
@@ -1864,7 +1924,9 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     that pass's peak GPU memory (the place the unsplit control ran out) at the cost of a slower step; the batch
     (200 s x 2 accumulated), the losses and their values are unchanged.
     unfreeze_top > 0: the last unfreeze_top conformer blocks of the encoder train too (ft_train.unfreeze_top_layers); step
-    checkpoints then hold those blocks, and every reader must load them (_load_runs, eval_multi re-encodes)."""
+    checkpoints then hold those blocks, and every reader must load them (_load_runs, eval_multi re-encodes).
+    part_weights "<path>=<n>,..." / extra_parts "<path>:<tag>:<n>,..." (mix v4 only; default "" = the arm's listing as
+    is): per-part listing counts, apply_part_weights; merged over the arm's own part_weights / extra_parts."""
     import json
     import os
 
@@ -1909,10 +1971,13 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     if cons_weight >= 0:
         assert cons_weight == 0 or "cons_pairs" in r4, f"arm {arm} has no pair lists (cons_pairs)"
         r4["cons_weight"] = cons_weight
+    pw = {**parse_part_weights(cfg.pop("part_weights", {})), **parse_part_weights(part_weights)}
+    xp = parse_extra_parts(cfg.pop("extra_parts", [])) + parse_extra_parts(extra_parts)
+    assert mix == "v4" or not (pw or xp), "part_weights / extra_parts need --mix v4"
     mix = {"mp": retrain3_mix_mp, "v2": lambda: retrain3_mix_v2(), "v2v": lambda: retrain3_mix_v2(verbatim=True),
            "v3": retrain3_mix_v3,
            "v4": lambda: retrain3_mix_v4(_langs(langs), repeat=wave1_repeat, anchor18=anchor18_repeat, mix_dir=mix_dir,
-                                         **v4kw)
+                                         part_weights=pw, extra_parts=xp, **v4kw)
            }.get(mix, retrain3_mix)()
     if any(m[0].startswith(("mix4/", mix_dir + "/")) for m in mix):
         print("BUILD", mix_dir, json.dumps(check_build_langs(langs, mix_dir, build_langs).get("langs_without_rows", [])))
@@ -1964,7 +2029,7 @@ def retrain3_80(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000
                 en_weight: float = -1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
                 dur_weight: float = 1.0, init_from: str = "v10pt@1500", lr: float = 0.0, mix: str = "mix3",
                 anchor_init: bool = False, cons_weight: float = -1.0, langs: str = "", mix_dir: str = "mix4",
-                r3_sub_batch: int = 2, unfreeze_top: int = 0):
+                r3_sub_batch: int = 2, unfreeze_top: int = 0, part_weights: str = "", extra_parts: str = ""):
     """retrain3 on an 80 GB A100: the same code, arguments (signature kept equal by test_unfreeze_top) and batch;
     more memory headroom (e.g. for --unfreeze-top)."""
     return retrain3.local(**locals())
