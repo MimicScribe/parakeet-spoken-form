@@ -93,3 +93,29 @@ assert [g[0] for g in got] == ["b", "c", "e"], got
 assert [t_ for t_, _ in MB.TTS_SETS if t_ in ("ttsVS1", "ttsRF1")] == ["ttsVS1", "ttsRF1"] and {"ttsVS1", "ttsRF1"} <= MB.TTS_TARGETED
 assert not ({"ttsVS1", "ttsRF1"} & MB.TTS_LONG_SETS) and 'vsplit_dir: str = ""' in open(MA.__file__).read()
 print("test_m10_build: V_b control ok")
+
+# ---- English relabels (owner-approved fixes): applied by en_balance to its capped copies, other parts get en_rl copies the listing uses
+v4 = tempfile.mkdtemp()
+os.makedirs(f"{v4}/mix3b"); os.makedirs(f"{v4}/d1/en4_ok"); os.makedirs(f"{v4}/mix4x")
+mk_ = lambda i, t: {"audio_filepath": f"/vol/r{i}.wav", "duration": 10.0, "text": t, "video": f"v{i}"}  # noqa: E731
+open(f"{v4}/mix3b/d1_ycap.jsonl", "w").write("\n".join(json.dumps(mk_(i, "Mr. Smith paid seventy five per cent")) for i in range(4)) + "\n")
+open(f"{v4}/d1/en4_ok/win_en.jsonl", "w").write("\n".join(json.dumps(mk_(10 + i, "Dr. Jones")) for i in range(3)) + "\n")
+rl = f"{v4}/rl_rows.jsonl"; rd = f"{v4}/rl_drops.jsonl"
+open(rl, "w").write(json.dumps({"part": "mix3b/d1_ycap.jsonl", "audio_filepath": "/vol/r1.wav", "text": "Mister Smith paid seventy five percent"}) + "\n"
+                    + json.dumps({"part": "d1/en4_ok/win_en.jsonl", "audio_filepath": "/vol/r11.wav", "text": "Doctor Jones"}) + "\n")
+open(rd, "w").write(json.dumps({"part": "mix3b/d1_ycap.jsonl", "audio_filepath": "/vol/r2.wav"}) + "\n")
+rel = MB.load_en_relabel(rl, rd)
+assert rel[("mix3b/d1_ycap.jsonl", "/vol/r2.wav")] is None and len(rel) == 3
+st = MB.en_balance(v4, [("mix3b/d1_ycap.jsonl", 0, "span")], non_en=("mix4/p3_",), write=True, out_dir=f"{v4}/out", bcap_dir="mix4x", relabel=rel)
+got = [json.loads(l) for l in open(f"{v4}/out/{MB.en_bcap_path('mix3b/d1_ycap.jsonl', 'mix4x')}")]
+assert st["relabeled"] == 1 and st["relabel_dropped"] == 1 and len(got) == 3, st
+assert [g["text"] for g in got if g["audio_filepath"] == "/vol/r1.wav"] == ["Mister Smith paid seventy five percent"]
+wst = MB.write_en_relabel_parts(v4, "mix4x", rel, skip=MB.EN_REAL_PARTS)
+assert wst == {"d1/en4_ok/win_en.jsonl": [3, 1, 0]}, wst
+cp = [json.loads(l)["text"] for l in open(f"{v4}/{MB.en_rl_path('d1/en4_ok/win_en.jsonl', 'mix4x')}")]
+assert cp == ["Dr. Jones", "Doctor Jones", "Dr. Jones"], cp
+MA.VOL = v4
+lst = MA.retrain3_mix_v4(("de",), win_repeat=2, mix_dir="mix4x")
+assert any(p == MB.en_rl_path("d1/en4_ok/win_en.jsonl", "mix4x") for p, _, _ in lst) and not any(p == "d1/en4_ok/win_en.jsonl" for p, _, _ in lst)
+assert MB.number_share_of(MB.en_rl_path("d1/en4_ok/win_en.jsonl", "mix4x")) == MB.NUMBER_PART["d1/en4_ok/win_en.jsonl"]
+print("test_m10_build: English relabels ok")

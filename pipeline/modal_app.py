@@ -1289,6 +1289,9 @@ def retrain3_mix_v4(langs=WAVE1, repeat: int = 1, anchor18: int = 0, win_repeat:
     else:
         out = base + (extra + wins) * repeat + anchors + phone + seam + plain + slong + w15  # the R4-R6 lists (+ w15)
     out = apply_part_weights(out, part_weights, extra_parts)
+    if mix_dir != "mix4":  # English parts relabelled for this build (build_mix4 en_relabel_dir) replace their sources
+        out = [(mix_build.en_rl_path(p, mix_dir) if os.path.exists(f"{VOL}/{mix_build.en_rl_path(p, mix_dir)}") else p, h, t)
+               for p, h, t in out]
     if mix_dir != "mix4":  # a dry build's parts (build4 mix_dir); the d2anchor / dec18 sets live in mix4 only
         built = ("mix4/d2.", "mix4/d2_phonefmt_", "mix4/d2p.", "mix4/fleurs_train_multi.", "mix4/p3_", "mix4/tts_", "mix4/win_", "mix4/seam_",
                  "mix4/plain_", "mix4/win15_", "mix4/en_win15.")
@@ -1426,7 +1429,8 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
                split_compounds: str = "", win15_share: float = 0.0, win15_dir: str = "ml/win15b", win15_repeat: int = 1,
                en_win15: bool = True, edge_fix_dir: str = "", extra_passes: str = "", relabel_rows: str = "",
                relabel_parts_dir: str = "", relabel_tts: bool = False, part_weights: str = "", extra_parts: str = "",
-               en_drop_list: str = "", exclude_passes: str = "", seam_extra: str = "", seam_long_extra: str = "", vsplit_dir: str = ""):
+               en_drop_list: str = "", exclude_passes: str = "", seam_extra: str = "", seam_long_extra: str = "", vsplit_dir: str = "",
+               en_relabel_dir: str = ""):
     """Greek ς restore (idempotent) + mix_build.build4 + the number share of the v4 mix (total and English-only).
     Run 2 (2026-10-17): balance = build4 template / session caps; en_bal = mix_build.en_balance on the English real
     parts (writes their _bcap copies: caps, then the YouTube top-up trim into the 35-40% band); repeat / win_repeat /
@@ -1443,6 +1447,8 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
     the training launch takes). en_drop_list (a volume path, one audio_filepath per line): English real rows that leave
     the balance-capped copies (mix_build.en_balance drop_audio). exclude_passes ("a,b"): ml/p3v2 passes left out.
     seam_extra ("a,b"): more seam files, names relative to ml/p3v2/<lang>/ with {lang} ("../../realx1wb/{lang}/seam"); seam_long_extra: the same for the long-number seam part.
+    en_relabel_dir ("ml/tier1/drops"): en_relabel_rows.jsonl / en_relabel_drops.jsonl are applied to the English parts (the
+    capped copies by en_balance, every other part as <mix_dir>/en_rl/ copies the listing picks up).
     vsplit_dir ("ml/ttsVS1"): the build stops if a chosen ttsVS1 / ttsRF1 row carries a V_b value (mix_build.vb_violations)."""
     import json
 
@@ -1451,6 +1457,8 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
     vol.reload()
     drop = frozenset(l.strip() for l in open(f"{VOL}/{en_drop_list}", encoding="utf-8") if l.strip()) if en_drop_list else frozenset()
     ls = _langs(langs)
+    rel = mix_build.load_en_relabel(f"{VOL}/{en_relabel_dir}/en_relabel_rows.jsonl",
+                                    f"{VOL}/{en_relabel_dir}/en_relabel_drops.jsonl") if en_relabel_dir else {}
     out = {"unk": mix_build.restore_unk_nonen(VOL),
            "build4": mix_build.build4(VOL, ls, rows_h=rows_h, win_h=win_h, allow_no_judge=allow_no_judge,
                                       dedupe=dedupe, seam_h=seam_h, plain_share=plain_share, balance=balance,
@@ -1470,8 +1478,10 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
     mix = retrain3_mix_v4(ls, en_bal=False, **kw)
     if en_bal:  # a dry build only reports what en_balance would write (the listing keeps the source parts)
         out["en_balance"] = mix_build.en_balance(VOL, mix, non_en=_NON_EN_PARTS, write=not dry, bcap_dir=mix_dir,
-                                                 drop_audio=drop)
+                                                 drop_audio=drop, relabel=rel)
         if not dry:
+            if rel:
+                out["en_relabel_parts"] = mix_build.write_en_relabel_parts(VOL, mix_dir, rel, skip=mix_build.EN_REAL_PARTS)
             vol.commit()
             mix = retrain3_mix_v4(ls, en_bal=True, **kw)  # the listing training reads (the capped copies)
     out.update(share_report_of(mix))

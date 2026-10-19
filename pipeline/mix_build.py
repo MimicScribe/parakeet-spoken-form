@@ -373,6 +373,9 @@ def number_share_of(path: str, rows: list | None = None) -> float:
     src = _bcap_source(path)
     if src:  # an English capped copy carries its source part's number share
         return NUMBER_PART.get(src, 1.0)
+    m_rl = re.match(r"^mix4\w*/en_rl/(.+)$", path)
+    if m_rl:  # a relabelled English copy carries its source part's number share (an unlisted source: number-free)
+        return NUMBER_PART.get(m_rl.group(1).replace("__", "/"), 0.0)
     path = re.sub(r"^mix4\w+/", "mix4/", path)  # a dry build's dir (build4 mix_dir) counts like mix4
     m = _LANG_PART.match(path)
     if rows is not None and rows and ((m and m.group(1) in ("seam", "seam_long")) or os.path.basename(path).startswith("seam_")) \
@@ -1289,6 +1292,51 @@ _EN_NUM = re.compile(r"\b(?:zero|oh|one|two|three|four|five|six|seven|eight|nine
                      r"twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|and|point))*\b", re.I)
 
 
+def load_en_relabel(rows_path: str, drops_path: str = "") -> dict:
+    """{(part, audio_filepath): new text, or None for a drop} from en_relabel.py's output files (relabelled rows keep
+    their old keys and carry the new "text" and the "part" they came from; the drops file lists rows with no spoken form)."""
+    rel = {}
+    for path, drop in ((rows_path, False), (drops_path, True)):
+        if path and os.path.exists(path):
+            for r in _rows(path):
+                rel[(r["part"], r["audio_filepath"])] = None if drop else r["text"]
+    return rel
+
+
+def apply_en_relabel(part: str, rows: list, rel: dict) -> tuple:
+    """(rows with the part's relabels applied and its drops removed, n relabelled, n dropped). Only "text" changes."""
+    out, n_rl, n_dr = [], 0, 0
+    for x in rows:
+        k = (part, x.get("audio_filepath"))
+        if k not in rel:
+            out.append(x)
+        elif rel[k] is None:
+            n_dr += 1
+        else:
+            n_rl += rel[k] != x.get("text")
+            out.append(dict(x, text=rel[k]))
+    return out, n_rl, n_dr
+
+
+def en_rl_path(part: str, mix_dir: str) -> str:
+    """Where a relabelled copy of an English part lives: <mix_dir>/en_rl/<part with / as __> (the listing uses it when it exists)."""
+    return f"{mix_dir}/en_rl/{part.replace('/', '__')}"
+
+
+def write_en_relabel_parts(vol: str, mix_dir: str, rel: dict, skip: tuple = ()) -> dict:
+    """Relabelled copies of every part in `rel` except `skip` (the EN_REAL_PARTS: en_balance applies the relabels to its
+    capped copies). Returns {part: [rows in, relabelled, dropped]}."""
+    st = {}
+    for part in sorted({k[0] for k in rel} - set(skip)):
+        if not os.path.exists(f"{vol}/{part}"):
+            st[part] = "source missing"
+            continue
+        rows, n_rl, n_dr = apply_en_relabel(part, _rows(f"{vol}/{part}"), rel)
+        _write(f"{vol}/{en_rl_path(part, mix_dir)}", rows)
+        st[part] = [len(rows) + n_dr, n_rl, n_dr]
+    return st
+
+
 def en_bcap_path(path: str, mix_dir: str = "mix4") -> str:
     """Where en_balance writes a part's capped copy: next to the source for the mix4 build, under <mix_dir>/en_bcap/
     for a build into another dir (a candidate mix never overwrites the copies the mix4 build uses)."""
@@ -1471,7 +1519,7 @@ def _en_value_trim(rows: dict, out: set, flat: list, tparts: list, done, year_re
 def en_balance(vol: str, mix: list, seed: int = 43, band: tuple = (0.35, 0.40), target: float = 0.39,
                non_en: tuple = (), write: bool = False, trim_parts: tuple = EN_TRIM_PARTS, fixed_n: int | None = None,
                out_dir: str = "", value_aware: bool = True, year_real_floor: int = EN_YEAR_REAL_FLOOR,
-               bcap_dir: str = "mix4", drop_audio: frozenset = frozenset()) -> dict:
+               bcap_dir: str = "mix4", drop_audio: frozenset = frozenset(), relabel: dict | None = None) -> dict:
     """English balance for the v4 mix (2026-10-17), on the real span parts (EN_REAL_PARTS) as `mix` lists them:
     1. the data gate's caps across those parts jointly: <= TEMPLATE_CAP crops per number-masked label, <= GROUP_CAP_LANG
        rows per YouTube video (30) and GROUP_CAP per parliament session (13); rare-class crops kept first;
@@ -1493,6 +1541,12 @@ def en_balance(vol: str, mix: list, seed: int = 43, band: tuple = (0.35, 0.40), 
     if drop_audio:
         n_listed = sum(1 for p in real for x in rows[p] if x.get("audio_filepath") in drop_audio)
         rows = {p: [x for x in rows[p] if x.get("audio_filepath") not in drop_audio] for p in real}
+    n_rl = n_rd = 0
+    if relabel:
+        for p in real:
+            rows[p], a_, b_ = apply_en_relabel(p, rows[p], relabel)
+            n_rl += a_
+            n_rd += b_
     cache = {}
     flat = [(p, i) for p in real for i in range(len(rows[p]))]
     rng.shuffle(flat)
@@ -1578,6 +1632,7 @@ def en_balance(vol: str, mix: list, seed: int = 43, band: tuple = (0.35, 0.40), 
     st = {"share_before": before, "share_after_caps": capped, "share_after": after, "band": list(band),
           "in_band": band[0] <= after["share"] <= band[1], "caps_out": why,
           "common_per_video": n_per_video, "value_trim": vst, "dropped_listed": n_listed,
+          "relabeled": n_rl, "relabel_dropped": n_rd,
           "top_year_trim": {str(y): v for y, v in yst.items()}, "top_year_trim_rows": len(ytrim),
           "trim_rows": len(trim), "trim_h": round(_h([rows[p][i] for p, i in trim]), 2),
           "parts": {p: {"rows": [len(rows[p]), len(rows[p]) - sum(1 for q, _ in gone if q == p)],
