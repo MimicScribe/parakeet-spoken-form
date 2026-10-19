@@ -36,3 +36,10 @@ def test_main_variant_has_a_six_hour_cap_and_the_same_arguments():
     deco = lambda fn: re.search(r"@app\.function\(([^@]*?)\)\ndef " + fn + r"\(", src, re.S).group(1)  # noqa: E731
     assert "timeout=MAIN_TIMEOUT_S" in deco("retrain3_80_main") and "A100-80GB" in deco("retrain3_80_main")
     assert "timeout=24 * 3600" in deco("retrain3_80") and "timeout=24 * 3600" in deco("retrain3")  # control: unchanged
+
+
+def test_r10_main_lr05_is_r10_main_at_half_the_peak_lr():
+    arm, base = MA.R3_ARMS["R10-main-lr05"], MA.R3_ARMS["R10-main"]
+    diff = {k: (base.get(k), arm.get(k)) for k in set(arm) | set(base) if arm.get(k) != base.get(k)}
+    assert diff == {"lr": (1e-4, 5e-5)}, diff
+    assert arm["recipe"] == base["recipe"] and arm is not base
