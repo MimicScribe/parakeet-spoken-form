@@ -154,7 +154,7 @@ class Modal:
         return self._run("app", "logs", self.app, "--since", since, "--until", until, "--timestamps", timeout=300)
 
     def stop(self) -> bool:
-        return self._run("app", "stop", self.app) is not None
+        return self._run("app", "stop", "--yes", self.app) is not None  # without --yes the CLI asks and aborts (no terminal)
 
 
 def iso(t: float) -> str:

@@ -3,7 +3,7 @@
 #
 #   scripts/launch_run.sh --run <name> --arm <arm> --sha <commit> --max-steps <N> --mix-dir <dir on the volume> \
 #       --repo <git checkout> --approvals <file> --log-dir <dir> [--part-weights "<path>=<n>,..."] \
-#       [--extra-parts "<path>:<tag>:<n>,..."] [--langs <l1,l2,...>] [--volume <name>] [--init-from <run>@<step>]
+#       [--extra-parts "<path>:<tag>:<n>,..."] [--en-free-repeat <n>] [--langs <l1,l2,...>] [--volume <name>] [--init-from <run>@<step>]
 #       [--resume] [--dry-run] [--no-watch]
 #
 # Locks (a refusal exits non-zero and starts nothing):
@@ -25,7 +25,7 @@
 set -u
 SAVE_EVERY=250
 VOLUME=parakeet-spoken-form
-RUN=""; ARM=""; SHA=""; STEPS=""; MIXDIR=""; REPO=""; APPROVALS=""; LOG=""; PW=""; XP=""; LANGS=""
+RUN=""; ARM=""; SHA=""; STEPS=""; MIXDIR=""; REPO=""; APPROVALS=""; LOG=""; PW=""; XP=""; LANGS=""; EFR=""
 INIT=ultra; RESUME=0; DRY=0; WATCH=1
 die() { echo "REFUSED: $2" >&2; exit "$1"; }
 while [ $# -gt 0 ]; do
@@ -33,7 +33,7 @@ while [ $# -gt 0 ]; do
     --run) RUN=$2; shift 2;; --arm) ARM=$2; shift 2;; --sha) SHA=$2; shift 2;; --max-steps) STEPS=$2; shift 2;;
     --mix-dir) MIXDIR=$2; shift 2;; --repo) REPO=$2; shift 2;; --approvals) APPROVALS=$2; shift 2;;
     --log-dir) LOG=$2; shift 2;; --part-weights) PW=$2; shift 2;; --extra-parts) XP=$2; shift 2;;
-    --langs) LANGS=$2; shift 2;; --volume) VOLUME=$2; shift 2;; --init-from) INIT=$2; shift 2;;
+    --langs) LANGS=$2; shift 2;; --en-free-repeat) EFR=$2; shift 2;; --volume) VOLUME=$2; shift 2;; --init-from) INIT=$2; shift 2;;
     --resume) RESUME=1; shift;; --dry-run) DRY=1; shift;; --no-watch) WATCH=0; shift;;
     *) die 2 "unknown argument $1";;
   esac
@@ -90,6 +90,12 @@ python3 "$PIPE/run_manifest.py" "$PIPE" arm "$ARM" || die 2 "arm '$ARM' is not d
 CMD=(modal run --detach modal_app.py::retrain3_80_main --run "$RUN" --arm "$ARM" --mix v4 --mix-dir "$MIXDIR"
      --langs "$LANGS" --init-from "$INIT" --anchor-init --dur-weight 0 --warmup 20 --max-steps "$STEPS"
      --save-every $SAVE_EVERY --r3-sub-batch 1)
+# --en-free-repeat n: the arm lists the English number-free parts twice; the build may have used another repeat to land the
+# English number share in 0.35-0.40, so the weights set the TOTAL count for the three parts (the part-weights string logged below)
+if [ -n "$EFR" ]; then
+  [[ $EFR =~ ^[0-9]+$ ]] && [ "$EFR" -ge 1 ] || die 2 "--en-free-repeat $EFR is not a count"
+  PW="${PW:+$PW,}replay/icsi_train.jsonl=$EFR,mix3b/d1p_v.jsonl=$EFR,mix3b/d10p_v.jsonl=$EFR"
+fi
 [ -z "$PW" ] || CMD+=(--part-weights "$PW")
 [ -z "$XP" ] || CMD+=(--extra-parts "$XP")
 HASHES=$(python3 "$PIPE/run_manifest.py" "$PIPE" hashes) || die 2 "cannot hash the mounted modules"
@@ -140,5 +146,5 @@ FIRST 5 MINUTES: look in $LOG/train.log for these, in order (anything else first
   8. step 10 loss ... then every 10 steps       about 2 s per step; 'r3 rnnt ... kl_b ...' lines with finite numbers
   9. step250.pt.done in exp/$RUN                first checkpoint, about 10 min after the first step
 Red flags: AssertionError, Traceback, 'mix drift', 'Runner failed', nan, no step line 15 min after 'train mix'.
-Stop by hand: modal app stop $APP
+Stop by hand: modal app stop --yes $APP
 EOF

@@ -240,3 +240,10 @@ def test_modal_app_info_reads_tasks_and_distinguishes_failure_from_absence(monke
     assert m.app_info() is None  # the CLI failed
     monkeypatch.setattr(m, "_run", lambda *a, **k: "not json")
     assert m.app_info() is None
+
+
+def test_modal_stop_passes_yes(monkeypatch):
+    m = W.Modal("vol", "run", "ap-X")
+    seen = []
+    monkeypatch.setattr(m, "_run", lambda *a, **k: seen.append(a) or "")
+    assert m.stop() and seen == [("app", "stop", "--yes", "ap-X")]  # red-on-base: the prompt aborts a non-interactive stop
