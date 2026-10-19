@@ -2004,6 +2004,8 @@ def check_branch_start(cfg: dict, run: str, init_from: str, exists=None) -> None
     anchor: the schedule continues the main run's, so any other step or a stock start is a wrong launch."""
     if not cfg.get("lr_total"):
         return
+    if init_from == "ultra" and not cfg.get("lr_offset"):
+        return  # a schedule-matched spike from stock (lr_total only, offset 0, e.g. R10-anc1): not a branch
     exists = exists or os.path.exists
     i_run, _, i_step = init_from.partition("@")
     assert i_step.isdigit() and i_run not in ("", "ultra", run), f"a branch needs --init-from <main run>@<step>, got {init_from!r}"

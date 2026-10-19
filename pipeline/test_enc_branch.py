@@ -382,6 +382,10 @@ def test_branch_start_must_be_the_main_runs_step_of_the_arm():
     with pytest.raises(AssertionError):
         MA.check_branch_start(cfg, "br1", "mainrun@1000", exists=lambda p: False)  # not on the volume
     MA.check_branch_start(MA.R3_ARMS["R10-main"], "main", "ultra", exists=lambda p: False)  # a stock-start arm: no check
+    # a schedule-matched spike from stock (lr_total, offset 0): allowed; a branch arm (offset 1000) from stock is still refused
+    MA.check_branch_start(MA.R3_ARMS["R10-anc1"], "spike", "ultra", exists=lambda p: False)
+    with pytest.raises(AssertionError):
+        MA.check_branch_start(MA.R3_ARMS["R10-brE"], "br1", "ultra", exists=ok)
 
 
 def test_branch_arms_differ_from_the_main_arm_and_from_each_other_by_named_knobs():
