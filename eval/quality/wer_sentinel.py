@@ -4,7 +4,7 @@
 usage: wer_sentinel.py RUN [RUN ...] [--control w3soup_a0.5@0] [--no-stock] [--decode] [--work DIR] [--pipeline DIR]
                        [--out FILE] [--json FILE]
   RUN       "ultra", "<run>@<step>" or "<path>.pt" (as pipeline/modal_app.py loads them)
-  --decode  decode the arms that have no hyps/<run>/wer_sentinel_v1.jsonl yet (modal run wer_sentinel.py::decode, L4,
+  --decode  decode the arms that have no hyps/<run>/wer_sentinel_v2.jsonl yet (modal run wer_sentinel.py::decode, L4,
             ~$0.1 for a set of arms; existing outputs are kept) before fetching and scoring
   --control the arm every other arm is compared with (default w3soup_a0.5@0); stock "ultra" is added as a reference
 
@@ -28,7 +28,7 @@ sys.path.insert(0, str(PIPE))
 sys.path.insert(0, str(HERE))
 import volume_io as V  # noqa: E402
 
-TAG = "wer_sentinel_v1"
+TAG = "wer_sentinel_v2"
 WAVE1 = ("en", "de", "es", "fr", "it", "nl", "pt")
 OTHER = ("ru", "uk", "pl", "ro", "cs", "hu")
 LANGS = WAVE1 + OTHER

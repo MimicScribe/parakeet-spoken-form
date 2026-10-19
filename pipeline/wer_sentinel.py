@@ -3,12 +3,13 @@
 A spoken-form fine-tune must not damage ordinary words. This bed holds ~200 number-free read utterances per language
 from the public FLEURS DEV split (never the test split that public numbers come from). Scoring is eval/quality/wer_sentinel.py.
 
-    modal run wer_sentinel.py::build                                  # CPU, once -> eval/wer_sentinel_v1/ (refuses to overwrite)
-    modal run wer_sentinel.py::decode --runs "ultra,w3soup_a0.5@0"    # L4 -> hyps/<run>/wer_sentinel_v1.jsonl (keeps existing)
+    modal run wer_sentinel.py::build                                  # CPU, once -> eval/wer_sentinel_v2/ (refuses to overwrite)
+    modal run wer_sentinel.py::decode --runs "ultra,w3soup_a0.5@0"    # L4 -> hyps/<run>/wer_sentinel_v2.jsonl (keeps existing)
 
-Selection per language: one recording per sentence id, caption without a digit, symbol or number word (ml_balance lexicon
-+ the multilingual lexicon), sentence not present (normalised text) in any training manifest of the spoken-form runs,
-shuffled with a fixed seed, first N kept. Volume writes go to NEW paths only.
+Selection per language: caption without a digit, symbol or number word (ml_balance lexicon + the multilingual lexicon),
+sentence not present (normalised text) in any training manifest of the spoken-form runs, sentences shuffled with a fixed
+seed; one recording per sentence first, then the second and third speakers of the same sentences, up to N rows.
+Volume writes go to NEW paths only.
 """
 
 import hashlib
@@ -25,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from modal_app import VOL, _load_runs, _stock_model, nemo_image, vol  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TAG = "wer_sentinel_v1"
+TAG = "wer_sentinel_v2"  # v1 (one recording per sentence, ~100 per language) stays on the volume, unused
 LANGS = ("en", "de", "es", "fr", "it", "nl", "pt", "ru", "uk", "pl", "ro", "cs", "hu")
 FLEURS_CODE = {"en": "en_us", "de": "de_de", "es": "es_419", "fr": "fr_fr", "it": "it_it", "nl": "nl_nl", "pt": "pt_br",
                "ru": "ru_ru", "uk": "uk_ua", "pl": "pl_pl", "ro": "ro_ro", "cs": "cs_cz", "hu": "hu_hu"}
@@ -86,7 +87,7 @@ def number_free_caption(text: str, lang: str, lexicon: set, multi: set) -> bool:
 
 @app.function(image=build_image, volumes={VOL: vol}, cpu=2, memory=16384, timeout=3600)
 def train_index() -> dict:
-    """Hashes of the normalised text of every row in the training manifests -> eval/wer_sentinel_v1/train_text_keys.json."""
+    """Hashes of the normalised text of every row in the training manifests -> eval/wer_sentinel_v2/train_text_keys.json."""
     import glob
 
     vol.reload()
@@ -116,7 +117,7 @@ def train_index() -> dict:
 
 @app.function(image=build_image, volumes={VOL: vol}, cpu=2, memory=16384, timeout=2 * 3600, max_containers=13)
 def build_lang(lang: str, n: int = 200, seed: int = 1) -> dict:
-    """FLEURS dev of `lang`: number-free, untrained, one recording per sentence -> n rows + wavs under eval/wer_sentinel_v1."""
+    """FLEURS dev of `lang`: number-free, untrained -> n rows + wavs under eval/wer_sentinel_v2."""
     import io
     import tarfile
 
@@ -142,12 +143,13 @@ def build_lang(lang: str, n: int = 200, seed: int = 1) -> dict:
     st["in_training_text"] = len(free) - len(fresh)
     rng = random.Random(f"{TAG}:{seed}:{lang}")
     rng.shuffle(fresh)
-    seen, pick = set(), []
-    for c in fresh:  # one recording per sentence id, then (if short) second recordings
-        if c[0] not in seen:
-            seen.add(c[0])
-            pick.append(c)
-    st["sentences"] = len(pick)
+    by_sentence = {}
+    for c in fresh:
+        by_sentence.setdefault(c[0], []).append(c)
+    st["sentences"] = len(by_sentence)
+    pick = []  # round 1: one recording per sentence; round 2: a second speaker's recording; ... until n rows
+    for k in range(max(map(len, by_sentence.values()), default=0)):
+        pick += [v[k] for v in by_sentence.values() if len(v) > k]
     pick = pick[:n]
     want = {c[1]: c for c in pick}
     tar = hf_hub_download("google/fleurs", f"data/{code}/audio/dev.tar.gz", repo_type="dataset", local_dir="/tmp/fl")
@@ -190,7 +192,7 @@ def build(n: int = 200, langs: str = ",".join(LANGS)):
 
 @app.function(image=build_image, volumes={VOL: vol}, cpu=1, memory=4096, timeout=1800)
 def merge_manifests(langs: str = ",".join(LANGS)):
-    """eval/wer_sentinel_v1/all.jsonl = the per-language manifests in order (new path only)."""
+    """eval/wer_sentinel_v2/all.jsonl = the per-language manifests in order (new path only)."""
     vol.reload()
     out = f"{VOL}/eval/{TAG}/all.jsonl"
     assert not os.path.exists(out), "exists"
