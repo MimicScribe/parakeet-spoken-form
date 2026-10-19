@@ -317,8 +317,8 @@ if modal is not None:
         return res
 
     @app.local_entrypoint()
-    def run(lang: str, tag: str = "a", hours: float = 2.0, seed: int = 1, rows: str = "rows_realx1", ctx: str = "ctx"):
-        """rows: the promoted rows file under ml/realx1/<lang>/; ctx: context rows (the same sessions) under _in/<lang>/."""
-        r = build_lang.remote(lang, tag, f"{VOL}/ml/realx1/{lang}/{rows}.jsonl", f"{VOL}/ml/realx1/_in/{lang}/{ctx}.jsonl",
+    def run(lang: str, tag: str = "a", hours: float = 2.0, seed: int = 1, rows: str = "rows_realx1", context: str = "ctx"):
+        """rows: the promoted rows file under ml/realx1/<lang>/; context: context rows (the same sessions) under _in/<lang>/."""
+        r = build_lang.remote(lang, tag, f"{VOL}/ml/realx1/{lang}/{rows}.jsonl", f"{VOL}/ml/realx1/_in/{lang}/{context}.jsonl",
                               hours, seed)
         print(json.dumps({k: r[k] for k in ("lang", "kept_h", "counts", "geom", "position", "cut_inside")}, ensure_ascii=False))
