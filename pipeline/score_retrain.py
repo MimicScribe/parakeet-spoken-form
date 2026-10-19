@@ -1516,6 +1516,49 @@ def adv_value_ok(exp, hyp, lang):
     return bool(want) and all(any(w in g for g in got) for w in want)
 
 
+def _span_kinds(caption):
+    """[(kind, values)] for every number the caption's labeller spans contain, in caption order: the labeller's own span
+    kinds (year, money, percent, decimal, clock, ordinal, ...) with the reader's values for each number of the span."""
+    out = []
+    for sp in L.spans(caption):
+        if sp.kind == "spelled":
+            continue
+        for n in extract_numbers(sp.text, "en"):
+            out.append((sp.kind, n.vals))
+    return out
+
+
+def en_value(rows):
+    """English held-out VALUE scorer. rows: {"ref": "<caption with digits>[\t...]", "hyp": ...} of a REAL English bed
+    (Earnings-22 numbers, the YouTube dev clips). Every number of the caption is scored by VALUE with the same reader and
+    aligner as the non-English beds (number_outcomes: digits or words, any reading of the right value is right), and
+    classed by the labeller's span kind. Reports the four outcomes overall and per kind, and the error rate of each WRITTEN
+    form: wrong / written in words, wrong / written in digits. Unlike en_wf it sees a wrong number in words, and unlike
+    fast_d1_ok it does not need one literal reading."""
+    def blank():
+        return {**{o: 0 for o in OUTCOMES}, "n": 0, "words": 0, "words_wrong": 0, "digits": 0, "digits_wrong": 0}
+
+    tot, by = blank(), {}
+    for r in rows:
+        cap = r["ref"].split("\t")[0]
+        kinds, p = _span_kinds(cap), 0
+        for o in number_outcomes(cap, r["hyp"], "en"):
+            kind, v = "other", Decimal(o["value"])
+            for q in range(p, len(kinds)):
+                if v in kinds[q][1]:
+                    kind, p = kinds[q][0], q + 1
+                    break
+            for d in (tot, by.setdefault(kind, blank())):
+                d[o["outcome"]] += 1
+                d["n"] += 1
+                form = o.get("hyp_form")
+                if form in ("words", "digits"):
+                    d[form] += 1
+                    d[form + "_wrong"] += o["outcome"] == "WRONG_VALUE"
+    tot["by_kind"] = dict(sorted(by.items()))
+    return tot
+
+
 def lang_of(r):
     i = r.get("id", "")
     return i.split("_")[0] if "_" in i else "?"
@@ -1585,6 +1628,12 @@ def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"
             lost = [y for y in ref_years(ref) if y > 2000 and year_value_kept(str(y), r["hyp"])[1] == 0]  # 20xx only
             tr += min(len(lost), max(0, bare_two_thousand(r["hyp"]) - bare_two_thousand(ref)))
     s["year_value_kept"], s["year_value_n"], s["year_trunc"] = vk, vn, tr
+    # English VALUE on the real beds (en_value): report-only like en_wf, but it sees wrong numbers written in words
+    for name in ("e22_numbers", "d1_dev"):
+        s[f"en_value_{name}"] = en_value(load(root, run, name))
+    s["en_value_wrong"] = sum(s[f"en_value_{n}"][OUTCOMES[2]] for n in ("e22_numbers", "d1_dev"))
+    s["en_value_words_wrong"] = sum(s[f"en_value_{n}"]["words_wrong"] for n in ("e22_numbers", "d1_dev"))
+    s["en_value_words"] = sum(s[f"en_value_{n}"]["words"] for n in ("e22_numbers", "d1_dev"))
     # maintainer listening gold (definitive, gold/owner_year_readings.json): d1_dev clips, reading AND value
     gp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gold", "owner_year_readings.json")
     if os.path.exists(gp):
@@ -1776,7 +1825,9 @@ def sel_metrics(s):
             "fleurs_worst": sum(x["fail"] for x in boot.values()) if boot else (max(fl) if fl else 0.0),
             "wer_dev": (s["wer_lspc_dev"] or 0) + (s["wer_d1_dev"] or 0),
             "year_value": s.get("year_value_kept", 0), "year_trunc": s.get("year_trunc", 0),
-            "year_garble": s.get("year_garble", 0)}
+            "year_garble": s.get("year_garble", 0),
+            # report-only (not in SELECT_ORDER): English number VALUE on the real beds, wrong numbers / those written in words
+            "en_value_wrong": s.get("en_value_wrong", 0), "en_value_words_wrong": s.get("en_value_words_wrong", 0)}
 
 
 def select(res, runs, baseline=None, veto=None, report_only=SELECT_REPORT_ONLY):
