@@ -11,6 +11,7 @@ Stock Parakeet Ultra (NeMo checkpoint; see the README for the pinned download) -
 **Orchestration**
 - `modal_app.py`: the Modal app. Entry points for data prep, TTS, mixes (`build_mix*`, `retrain3_mix_v*`), training (`run`, `retrain3`), soups (`soup3`), evaluation (`eval_multi`, `probe_heldout`, `probe_seam`) and export (`export_weights`).
 - `common.py`, `preflight.py`: shared constants; pre-run checks.
+- `../scripts/launch_run.sh`, `run_manifest.py`, `run_watch.py`: the run launcher and its cost guard. The launcher refuses a run name that has no line in the approvals file you pass, refuses an existing `exp/<run>`, launches `retrain3_80_main` (6 h cap per attempt) from a clean `git archive` of one commit and logs the commit and the sha256 of every mounted module; `run_watch.py` stops the app when no new `step<N>.pt.done` appears and keeps the app logs. Header of the script has the usage.
 
 **English data**
 - `readings.py`, `gen.py`, `carriers*.txt`: spoken readings of numbers and carrier sentences, expanded into synthetic rows.
