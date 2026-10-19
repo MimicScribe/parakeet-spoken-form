@@ -98,8 +98,16 @@ def refs(tag: str, lang: str, per_gender: int = 6, shards: int = 2, exclude: str
                 x, sr = sf.read(io.BytesIO(r.audio["bytes"]), dtype="float32")
                 d = len(x) / sr
                 if 7 <= d <= 13:
-                    rows.append({"gender": r.gender, "spk": r.speaker_id, "id": r.audio_id, "x": x, "sr": sr, "dur": d,
-                                 "text": r.raw_text, "snr": _snr_db(x, sr), "accent": r.accent})
+                    snr = _snr_db(x, sr)
+                    k = [i for i, q in enumerate(rows) if q["spk"] == r.speaker_id]
+                    if k and rows[k[0]]["snr"] >= snr:
+                        continue  # one clip per speaker is kept: the best crude SNR so far (memory, 8 shards)
+                    q = {"gender": r.gender, "spk": r.speaker_id, "id": r.audio_id, "x": x, "sr": sr, "dur": d,
+                         "text": r.raw_text, "snr": snr, "accent": r.accent}
+                    if k:
+                        rows[k[0]] = q
+                    else:
+                        rows.append(q)
         src, lic = "VoxPopuli transcribed train split (facebook/voxpopuli)", "CC0-1.0"
         excl = {"bad_spk": len(bad_spk), "bad_days": len(bad_days), "held_ids": len(held), "shards": files,
                 "excluded_listed": sorted(excl_spk)}
@@ -278,6 +286,81 @@ def refs_en(tag: str, cv_shards: int = 6, cv_per_accent: int = 3, vctk_n: int = 
     return {"n": len(meta), "by_accent": dict(collections.Counter(m["accent"] for m in meta))}
 
 
+@app.function(image=refs_img, volumes={VOL: vol}, cpu=4, memory=32768, timeout=3 * 3600)
+def refs_cv(tag: str, lang: str = "pt", shards: int = 8, per_gender: int = 12, min_snr: float = 30.0,
+            accent_re: str = "", min_dur: float = 4.5, probe: bool = False):
+    """Clone references from Common Voice 17 TRAIN (CC0-1.0; the fixie-ai parquet mirror; train / dev / test speakers
+    are disjoint in Common Voice): one clip per client, no down votes, 4.5-13 s, crude SNR >= min_snr. The accent is the
+    speaker's own tag ("" when untagged); accent_re keeps only the tags that match (pt: Portugal). probe: only count
+    the accent tags (nothing written). -> ml/<tag>/refs/<lang>/ (new path)."""
+    import collections
+    import io
+    import json
+    import random
+    import re
+
+    import pandas as pd
+    import soundfile as sf
+    from huggingface_hub import HfApi, hf_hub_download
+
+    vol.reload()
+    out = f"{VOL}/ml/{tag}/refs/{lang}"
+    assert probe or not os.path.exists(out), out
+    rng = random.Random(1018)
+    files = sorted(f for f in HfApi().list_repo_files("fixie-ai/common_voice_17_0", repo_type="dataset")
+                   if f.startswith(f"{lang}/train-"))[:shards]
+    rx = re.compile(accent_re, re.I) if accent_re else None
+    tags = collections.Counter()
+    best = {}
+    for fn in files:
+        df = pd.read_parquet(hf_hub_download("fixie-ai/common_voice_17_0", fn, repo_type="dataset"))
+        for r in df.itertuples():
+            acc = str(getattr(r, "accent", "") or "").strip()
+            tags[acc] += 1
+            if probe or (rx and not rx.search(acc)) or int(getattr(r, "down_votes", 0) or 0) > 0:
+                continue
+            try:
+                x, sr = sf.read(io.BytesIO(r.audio["bytes"]), dtype="float32")
+            except Exception:  # noqa: BLE001
+                continue
+            if x.ndim > 1:
+                x = x.mean(1)
+            d = len(x) / sr
+            if not min_dur <= d <= 13:
+                continue
+            snr = _snr_db(x, sr)
+            if snr < min_snr or (r.client_id in best and best[r.client_id][5] >= snr):
+                continue
+            best[r.client_id] = (x, sr, str(r.gender or ""), r.sentence, r.path, snr, acc)
+    if probe:
+        return {"accent_tags": tags.most_common(30)}
+    os.makedirs(out)
+    meta, picked = [], []
+    for g in ("female", "male"):
+        pool = [k for k, v in best.items() if v[2].startswith(g)]
+        rng.shuffle(pool)
+        picked += pool[:per_gender]
+    for k in picked:
+        x, sr, g, t, clip, snr, acc = best[k]
+        p = f"{out}/cv_{k[:12]}.wav"
+        sf.write(p, x, sr, subtype="PCM_16")
+        meta.append({"lang": lang, "spk": f"cv_{k[:12]}", "gender": "female" if g.startswith("female") else "male",
+                     "accent": acc, "clip_id": clip, "dur": round(len(x) / sr, 2), "snr_db": round(snr, 1), "text": t,
+                     "wav": p, "source": "Common Voice 17.0 train (Mozilla; fixie-ai/common_voice_17_0)",
+                     "license": "CC0-1.0"})
+    with open(f"{out}/meta.json", "w") as f:
+        json.dump({"refs": meta, "n_candidate_speakers": len(best), "accent_tags": tags.most_common(30)}, f,
+                  ensure_ascii=False, indent=1)
+    vol.commit()
+    return {"lang": lang, "picked": len(meta), "cands": len(best), "accent_tags": tags.most_common(12)}
+
+
+@app.local_entrypoint()
+def run_refs_cv(tag: str, lang: str = "pt", shards: int = 8, per_gender: int = 12, accent_re: str = "",
+                probe: bool = False, min_snr: float = 30.0):
+    print(refs_cv.remote(tag, lang, shards, per_gender, min_snr, accent_re, 4.5, probe))
+
+
 @app.local_entrypoint()
 def run_refs_en(tag: str = "ttsSYM1r_en"):
     print(refs_en.remote(tag))
@@ -298,10 +381,13 @@ def _rows(path):
     return [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
 
 
-def _to16k(src, dst, speed):
-    """dst (16 kHz mono PCM16) = src at speaking rate `speed` (pitch kept)."""
+def _to16k(src, dst, speed, pitch_cents=0):
+    """dst (16 kHz mono PCM16) = src at speaking rate `speed` (pitch kept), shifted by `pitch_cents` (sox pitch, the
+    rate kept; 0 = unchanged, the default every earlier set used)."""
     import subprocess
     cmd = ["sox", src, "-r", "16000", "-c", "1", "-b", "16", dst]
+    if pitch_cents:
+        cmd += ["pitch", f"{int(pitch_cents)}"]
     if abs(speed - 1.0) > 1e-3:
         cmd += ["tempo", "-s", f"{speed:.3f}"]
     subprocess.run(cmd, check=True, capture_output=True)
@@ -367,7 +453,7 @@ def synth_qwen(planned: str, part: int, parts: int):
                 tmp = f"/tmp/{r['id']}.wav"
                 sf.write(tmp, w, sr, subtype="PCM_16")
                 os.makedirs(os.path.dirname(r["presynth"]), exist_ok=True)
-                _to16k(tmp, r["presynth"], r["speed"])
+                _to16k(tmp, r["presynth"], r["speed"], r.get("pitch_cents", 0))
                 os.remove(tmp)
                 cap_hit = dur >= 0.95 * cap / 12
                 audio_s += dur
@@ -409,7 +495,8 @@ def synth_cb(planned: str, part: int, parts: int):
             if cur != r["ref_wav"]:
                 m.prepare_conditionals(r["ref_wav"], exaggeration=0.5)
                 cur = r["ref_wav"]
-            w = m.generate(_say(r), language_id=r["lang"]).squeeze(0).numpy()
+            w = m.generate(_say(r), language_id=r["lang"], exaggeration=r.get("cb_exag", 0.5),
+                           cfg_weight=r.get("cb_cfg", 0.5)).squeeze(0).numpy()
         except Exception as e:  # noqa: BLE001
             _done(r["presynth"], {"id": r["id"], "status": "error", "err": repr(e)[:200]}, log)
             continue
@@ -418,7 +505,7 @@ def synth_cb(planned: str, part: int, parts: int):
         tmp = f"/tmp/{r['id']}.wav"
         sf.write(tmp, w, m.sr, subtype="PCM_16")
         os.makedirs(os.path.dirname(r["presynth"]), exist_ok=True)
-        _to16k(tmp, r["presynth"], r["speed"])
+        _to16k(tmp, r["presynth"], r["speed"], r.get("pitch_cents", 0))
         os.remove(tmp)
         audio_s += len(w) / m.sr
         chars += len(r["text"])
