@@ -49,6 +49,21 @@ class Labels(unittest.TestCase):
         self.assertEqual(W.card(23, "it"), "venti tre")
 
 
+class Italian(unittest.TestCase):
+    def test_no_accented_tre_and_no_apocope(self):
+        """Plan section 0: the final "tre" is unaccented; elided forms stay whole; -un / -una apocope forms are not generated."""
+        for n in range(0, 1000):
+            s = W.card(n, "it")
+            self.assertNotIn("tré", s, n)
+            for w in s.split():
+                self.assertFalse(re.fullmatch(r"(vent|trent|quarant|cinquant|sessant|settant|ottant|novant)(un|una)", w), (n, w))
+        self.assertEqual(W.card(21, "it"), "ventuno")
+        self.assertEqual(W.card(23, "it"), "venti tre")
+        for c in K.BUILD["it"]():
+            for k in c.values[:40]:
+                self.assertNotIn("é", c.make(k, random.Random(1)).label)
+
+
 class Splits(unittest.TestCase):
     def test_split_is_deterministic_and_disjoint(self):
         for lang in ("en", "es", "fr", "de"):
