@@ -9,7 +9,8 @@
 # Locks (a refusal exits non-zero and starts nothing):
 #   1. the exact run name must be a line of the approvals file (exit 3);
 #   2. exp/<run> must not exist on the volume (exit 4); with --resume it must exist, and the commit must be the one the
-#      first launch logged in --log-dir (exit 5);
+#      first launch logged in --log-dir (exit 5). The check reads the volume's exp/ listing: a failed listing (network,
+#      CLI) refuses the launch (exit 8); it is never read as "absent";
 #   3. the arm must exist in the commit, max-steps must be a multiple of the checkpoint interval (250), the run name
 #      must be a plain name (exit 2).
 #   4. --init-from (default ultra = a stock start): a branch arm (R10-br*, R10-encF) needs --init-from <other run>@<step> whose
@@ -17,7 +18,10 @@
 # The run is launched from `git archive <sha>` of --repo (never the working tree). The commit and the sha256 of
 # modal_app.py and of every module the training image mounts go to <log-dir>/launch_manifest.txt before anything starts.
 # The training function is retrain3_80_main (A100 80 GB, 6 h cap per attempt) with the standard recipe flags. Unless
-# --no-watch, run_watch.py starts beside it and stops the app if checkpoints stall. Paths come from the arguments only.
+# --no-watch, run_watch.py starts beside it, under `caffeinate -i` (a refusal, exit 9, if caffeinate is missing), and stops
+# the app on a stall (no first marker in 75 min, none for 40 min; time with no running task does not count) or when the
+# task time passes the spend tripwire (steps x s/step x 1.5 + 45 min; 4.6 h for 5,000 steps), and logs a speed alarm above
+# 1.5 x the expected s/step. Paths come from the arguments only.
 set -u
 SAVE_EVERY=250
 VOLUME=parakeet-spoken-form
@@ -45,6 +49,7 @@ else
   [ "$INIT" = ultra ] || die 2 "--init-from $INIT is for the branch arms (R10-br*, R10-encF); arm $ARM starts from stock"
 fi
 
+[ $WATCH -eq 0 ] || command -v caffeinate >/dev/null 2>&1 || die 9 "caffeinate not found: the watchdog must run under caffeinate -i (or pass --no-watch)"
 EXPORT=""
 die() { echo "REFUSED: $2" >&2; [ -z "$EXPORT" ] || rm -rf "$EXPORT"; exit "$1"; }
 
@@ -53,7 +58,9 @@ die() { echo "REFUSED: $2" >&2; [ -z "$EXPORT" ] || rm -rf "$EXPORT"; exit "$1";
 
 # lock 2: a new run name (or, with --resume, the same run and the same commit)
 FULL=$(git -C "$REPO" rev-parse --verify --quiet "$SHA^{commit}") || die 2 "commit $SHA not found in $REPO"
-if modal volume ls "$VOLUME" "exp/$RUN" >/dev/null 2>&1; then
+# the listing must SUCCEED to say anything: "absent" is only "the listing worked and does not name it"
+LISTING=$(modal volume ls "$VOLUME" exp 2>/dev/null) || die 8 "cannot list exp/ on $VOLUME (network or CLI failure); not launching on an unknown state"
+if printf '%s\n' "$LISTING" | grep -qxF -- "exp/$RUN"; then
   [ $RESUME -eq 1 ] || die 4 "exp/$RUN already exists on $VOLUME (a launch would silently resume it); use a new run name, or --resume on purpose"
 else
   [ $RESUME -eq 0 ] || die 4 "--resume: exp/$RUN does not exist on $VOLUME"
@@ -65,7 +72,11 @@ fi
 
 # a branch's start checkpoint must exist on the volume
 if [ "$INIT" != ultra ]; then
-  modal volume ls "$VOLUME" "exp/${INIT%@*}/step${INIT#*@}.pt" >/dev/null 2>&1 || die 7 "exp/${INIT%@*}/step${INIT#*@}.pt does not exist on $VOLUME"
+  INITDIR=$(modal volume ls "$VOLUME" "exp/${INIT%@*}" 2>&1) || {
+    printf '%s' "$INITDIR" | grep -q "does not exist" && die 7 "exp/${INIT%@*} does not exist on $VOLUME"
+    die 8 "cannot list exp/${INIT%@*} on $VOLUME (network or CLI failure)"
+  }
+  printf '%s\n' "$INITDIR" | grep -qxF -- "exp/${INIT%@*}/step${INIT#*@}.pt" || die 7 "exp/${INIT%@*}/step${INIT#*@}.pt does not exist on $VOLUME"
 fi
 
 # lock 3: the arm exists in the commit
@@ -109,9 +120,10 @@ done
 [ -n "$APP" ] || die 6 "launched, but no app id in $LOG/train.log after 2 min; find and watch it by hand"
 echo "app $APP" | tee -a "$LOG/launch_manifest.txt"
 if [ $WATCH -eq 1 ]; then
-  nohup python3 "$PIPE/run_watch.py" --app "$APP" --run "$RUN" --volume "$VOLUME" --log-dir "$LOG/watch" \
-    > "$LOG/watch.log" 2>&1 &
-  echo "watchdog pid $! (stops the app when no new step marker appears; $LOG/watch.log)"
+  EXPECT=1.83; [[ $ARM == R10-brE* || $ARM == R10-encF ]] && EXPECT=1.9  # s/step: decoder-only arms, arms with the top encoder blocks
+  nohup caffeinate -i python3 "$PIPE/run_watch.py" --app "$APP" --run "$RUN" --volume "$VOLUME" --log-dir "$LOG/watch" \
+    --steps "$STEPS" --expected-s-per-step "$EXPECT" > "$LOG/watch.log" 2>&1 &
+  echo "watchdog pid $! under caffeinate -i (stops the app on a stall or the max task time, logs a speed alarm; $LOG/watch.log, $LOG/watch/status.json)"
 fi
 cat <<EOF
 

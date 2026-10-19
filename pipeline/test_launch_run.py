@@ -24,7 +24,12 @@ R3_ARMS.update({"R10-main": dict(lr=1e-4), "R10-brC": dict(lr=1e-4), "R10-brE": 
 FAKE_MODAL = '''#!/bin/bash
 d=$(dirname "$0")
 echo "$PWD :: $*" >> "$d/calls.txt"
-if [ "$1 $2" = "volume ls" ]; then grep -qxF "$4" "$d/exists.txt"; exit $?; fi
+if [ "$1 $2" = "volume ls" ]; then
+  if [ -f "$d/netfail.txt" ]; then echo "connection error: could not reach the server" >&2; exit 1; fi
+  if [ "$4" = "exp" ]; then cut -d/ -f1,2 "$d/exists.txt" | sort -u; echo "exp/some_other_run"; exit 0; fi
+  out=$(grep "^$4/" "$d/exists.txt") || { echo "path \"/$4\" does not exist" >&2; exit 1; }
+  echo "$out"; exit 0
+fi
 if [ "$1 $2" = "run --detach" ]; then echo "View run at https://modal.com/apps/ws/main/ap-FAKE123abc"; exit 0; fi
 exit 0
 '''
@@ -83,6 +88,63 @@ def test_existing_run_directory_is_refused(world):
     (world["fake"] / "exists.txt").write_text("exp/R10_run1\n")
     r, _ = world["launch"]()
     assert r.returncode == 4 and "already exists" in r.stderr
+    assert "run --detach" not in calls(world)
+
+
+def test_a_failed_volume_listing_is_not_read_as_absent(world):
+    (world["fake"] / "netfail.txt").write_text("")  # every volume call fails with a network error
+    r, log = world["launch"]()
+    assert r.returncode == 8 and "cannot list exp/" in r.stderr
+    assert "run --detach" not in calls(world) and not (log / "launch_manifest.txt").exists()
+    r, _ = world["launch"]("--resume")
+    assert r.returncode == 8
+    r, _ = world["launch"]("--init-from", "R10_main@1000", arm="R10-brC")
+    assert r.returncode == 8
+    assert "run --detach" not in calls(world)
+    (world["fake"] / "netfail.txt").unlink()  # control: the same launch goes through once the listing works
+    r, _ = world["launch"]()
+    assert r.returncode == 0 and "run --detach" in calls(world)
+
+
+def test_a_similar_run_name_does_not_count_as_existing(world):
+    (world["fake"] / "exists.txt").write_text("exp/R10_run10/step250.pt\nexp/R10_run\n")
+    r, _ = world["launch"]()
+    assert r.returncode == 0, r.stderr
+
+
+def test_the_watchdog_runs_under_caffeinate_with_the_run_limits(world):
+    fake = world["fake"]
+    (fake / "caffeinate").write_text('#!/bin/bash\necho "caffeinate $*" >> "$(dirname "$0")/caff.txt"\n')
+    (fake / "caffeinate").chmod(0o755)
+    env = dict(os.environ, PATH=f"{fake}:{os.environ['PATH']}")
+    cmd = ["bash", SCRIPT, "--run", "R10_run1", "--arm", "R10-brE", "--sha", world["sha"], "--max-steps", "500",
+           "--mix-dir", "m", "--repo", str(world["repo"]), "--approvals", str(world["appr"]), "--log-dir",
+           str(world["tmp"] / "log2"), "--init-from", "R10_main@1000"]
+    (fake / "exists.txt").write_text("exp/R10_main/step1000.pt\n")
+    r = sh(*cmd, env=env)
+    assert r.returncode == 0, r.stderr
+    import time
+    for _ in range(50):
+        if (fake / "caff.txt").exists():
+            break
+        time.sleep(0.1)
+    line = (fake / "caff.txt").read_text()
+    assert line.startswith("caffeinate -i python3 ") and "run_watch.py" in line
+    assert "--steps 500" in line and "--expected-s-per-step 1.9" in line and "--app ap-FAKE123abc" in line
+
+
+def test_a_missing_caffeinate_refuses_before_anything_is_launched(world, tmp_path):
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    for tool in ("bash", "git", "python3", "grep", "sed", "tar", "mktemp", "head", "date", "sleep", "seq", "tr", "rm", "cut", "sort"):
+        src = shutil.which(tool)
+        if src:
+            (bare / tool).symlink_to(src)
+    (bare / "modal").symlink_to(world["fake"] / "modal")
+    r = sh("bash", SCRIPT, "--run", "R10_run1", "--arm", "R10-main", "--sha", world["sha"], "--max-steps", "5000",
+           "--mix-dir", "m", "--repo", str(world["repo"]), "--approvals", str(world["appr"]), "--log-dir",
+           str(tmp_path / "log3"), env={"PATH": str(bare)})
+    assert r.returncode == 9 and "caffeinate" in r.stderr
     assert "run --detach" not in calls(world)
 
 
