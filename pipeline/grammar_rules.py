@@ -19,6 +19,9 @@ Each check finds one known generator slip (code: what it catches):
   cents_word          es "dólares / pesos ... céntimos", pt "reais / dólares ... cêntimos" (those cents are centavos)
   price_two_numbers   de / nl price with cents and no unit word joined by "und" / "en" ("achtundvierzig und zehn":
                       heard as two numbers)
+  cents_zero_dropped  es / pt / fr / it price with 1-9 cents read with no currency word and no zero ("siete con cinco",
+                      "trinta e nove e cinco", "tre virgola cinque" for 7,05 / 39,05 / 3,05: the zero is gone, the
+                      reading says 7,5 / 44 / 3,5)
   frac_half_unit      "½" before a unit read as a noun ("medio de litro", "un mezzo di chilo", "één half liter")
   nl_een_half         nl "en één half" (the stressed numeral; "en een half" / "-enhalf" are the spoken forms)
   it_spelling         it "ventiseesimo", unaccented final "-tre" in compounds ("duemilatre"; standard "duemilatré")
@@ -74,6 +77,12 @@ CENTS_BAD = {"es": (re.compile(r"\b(?:dólar|dólares|peso|pesos)\b"), re.compil
 UNIT_WORDS = {"de": re.compile(r"\b(?:Euro|Dollar|Pfund|Cent|Franken)\b", re.I),
               "nl": re.compile(r"\b(?:euro|dollar|pond|cent|frank)\b", re.I)}
 PRICE_JOIN = {"de": "und", "nl": "en"}
+# a reading with one of these (a currency or its cents) names the unit: "siete euros con cinco" is a 5-cent price
+CUR_NAME = {"es": r"euros?|d[oó]lar(?:es)?|pesos?|libras?|c[eé]ntimos?|centavos?",
+            "pt": r"euros?|d[oó]lar(?:es)?|reais|real|libras?|c[eê]ntimos?|centavos?",
+            "fr": r"euros?|dollars?|livres?|centimes?|francs?", "it": r"euro|dollari?|sterline|sterlina|centesimi|centesimo"}
+CUR_NAME = {l: re.compile(r"\b(?:" + x + r")\b") for l, x in CUR_NAME.items()}
+ZERO_WORD = re.compile(r"\b(?:cero|zero|zéro)\b")
 HALF_NOUN = {"medio", "media", "meio", "meia", "mezzo", "mezza", "demi", "demie", "half", "halb", "halbe"}
 OF_WORDS = {"de", "di", "d'", "do", "da", "del"}
 IT_TRE = re.compile(r"^\w+(?:ta|ti|la|le|to)tre$")
@@ -187,6 +196,10 @@ def span_errors(lang: str, sp: dict, row: dict) -> list:
     if lang in PRICE_JOIN and (kind == "cur" or cls.startswith("price")) and re.search(r"\d[.,]\d{2}(?!\d)", st):
         if not UNIT_WORDS[lang].search(rd) and PRICE_JOIN[lang] in toks:
             out.append("price_two_numbers")
+
+    if lang in CUR_NAME and (kind == "cur" or cls.startswith("price")) and re.search(r"\d[.,]0[1-9](?!\d)", st):
+        if not CUR_NAME[lang].search(rl) and not ZERO_WORD.search(rl):
+            out.append("cents_zero_dropped")
 
     if kind == "frac" and st.strip() == "½":
         nxt = [_tok(t) for t in w_after.split()[:1]]

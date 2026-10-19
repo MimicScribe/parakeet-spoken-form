@@ -52,6 +52,12 @@ class Rules(unittest.TestCase):
              "noventa e um reais e noventa e nove centavos", "cents_word"),
             ("de", "48,10 €", "cur", "price", "", "", "achtundvierzig und zehn", "achtundvierzig Euro und zehn",
              "price_two_numbers"),
+            ("es", "7,05 €", "cur", "price", "", "", "siete con cinco", "siete euros con cinco", "cents_zero_dropped"),
+            ("pt", "39,05 €", "cur", "price", "", "", "trinta e nove e cinco", "trinta e nove euros e cinco",
+             "cents_zero_dropped"),
+            ("it", "3,05 €", "cur", "price", "", "", "tre virgola cinque", "tre euro virgola cinque centesimi",
+             "cents_zero_dropped"),
+            ("fr", "4,01 $", "cur", "price", "", "", "quatre et un", "quatre dollars et un centime", "cents_zero_dropped"),
             ("nl", "€ 83,10", "cur", "price", "", "", "drieëntachtig en tien", "drieëntachtig euro en tien",
              "price_two_numbers"),
             ("es", "½", "frac", "frac", "La receta lleva ½ de litro.", "", "medio", None, "frac_half_unit"),
@@ -84,6 +90,8 @@ class Rules(unittest.TestCase):
             if good is not None:  # "½ de litro": no reading is right, the written form is never drawn now
                 self.assertNotIn(code, errs(lang, st, kind, good, cls, cap, sg), (lang, good))
         # right forms the rules must leave alone
+        self.assertEqual(errs("es", "7,50 €", "cur", "siete con cincuenta", "price"), [])  # 10+ cents: no zero to drop
+        self.assertEqual(errs("es", "7,05 €", "cur", "siete coma cero cinco euros", "price"), [])
         self.assertEqual(errs("fr", "21h05", "clock", "vingt et une heures cinq", "clock24"), [])
         self.assertEqual(errs("fr", "1:15", "clock", "une heure et quart", "clock12"), [])
         self.assertEqual(errs("es", "¼", "frac", "un cuarto", "frac", "La receta lleva ¼ de litro."), [])

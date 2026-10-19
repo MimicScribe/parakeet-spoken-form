@@ -92,8 +92,11 @@ def convention_report(rows: list, lang: str) -> dict:
     return out
 
 
-def select(rows: list, lang: str, n: int, per_carrier: int, seed: int = 18) -> tuple:
+def select(rows: list, lang: str, n: int, per_carrier: int, seed: int = 18, templates: dict | None = None) -> tuple:
+    """templates: {row id: carrier sentence} (the CTC step does not pass the planner's "template" through)."""
     rng = random.Random(f"pack|{seed}|{lang}")
+    if templates:
+        rows = [dict(r, template=templates.get(r["id"], r.get("template"))) for r in rows]
     fin, st = S.finalize(rows, lang)
     if lang != "en":
         fin, tst = S.convention_trim(fin, lang, rng)
@@ -122,6 +125,7 @@ def main():
     s.add_argument("--n", type=int, required=True)
     s.add_argument("--per-carrier", type=int, default=12)
     s.add_argument("--seed", type=int, default=18)
+    s.add_argument("--planned", default="", help="the planned / voiced rows (their carrier sentence per id)")
     s.add_argument("--out", required=True)
     s.add_argument("--report", default="")
     m = sub.add_parser("marker")
@@ -141,7 +145,8 @@ def main():
         print(len(ko), "kokoro,", len(cl), "cloned", by)
     elif a.cmd == "select":
         rows = [x for p in a.rows.split(",") for x in _rows(p)]
-        keep, rep = select(rows, a.lang, a.n, a.per_carrier, a.seed)
+        tpl = {r["id"]: r.get("template") for r in _rows(a.planned)} if a.planned else None
+        keep, rep = select(rows, a.lang, a.n, a.per_carrier, a.seed, tpl)
         _write(a.out, keep)
         if a.report:
             json.dump(rep, open(a.report, "w"), ensure_ascii=False, indent=1)
