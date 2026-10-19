@@ -47,6 +47,16 @@
    "El presupuesto es de {b} euros y el año pasado fue de {b2} euros.",
    "El estadio tiene capacidad para {b} espectadores.",
    "Se imprimieron {b} ejemplares en la primera edición y {b2} en la segunda."
+  ],
+  "fut2": [
+   "En {y} la empresa abrirá su nueva fábrica.",
+   "{y} será el año de la gran reforma.",
+   "El objetivo es llegar a la neutralidad climática antes de {y}.",
+   "Los pagos se prolongarán hasta {y}, según el contrato.",
+   "Para {y} se espera que la población supere los diez millones.",
+   "El tratado expira en {y}, pero podría renovarse en {y2}.",
+   "Si todo va bien, el túnel estará terminado en {y}.",
+   "Los precios seguirán subiendo hasta {y} y después se estabilizarán."
   ]
  },
  "de": {
@@ -96,6 +106,16 @@
    "Das Budget beträgt {b} Euro, im letzten Jahr waren es {b2} Euro.",
    "Das Stadion fasst {b} Zuschauer.",
    "Die erste Auflage hatte {b} Exemplare, die zweite {b2}."
+  ],
+  "fut2": [
+   "Im Jahr {y} eröffnet die Firma ihr neues Werk.",
+   "{y} soll das Jahr der großen Reform werden.",
+   "Das Ziel ist die Klimaneutralität vor {y}.",
+   "Die Zahlungen laufen laut Vertrag bis {y}.",
+   "Bis {y} soll die Bevölkerung die Zehn-Millionen-Grenze überschreiten.",
+   "Der Vertrag endet {y}, könnte aber {y2} verlängert werden.",
+   "Wenn alles gut läuft, ist der Tunnel {y} fertig.",
+   "Die Preise steigen bis {y} weiter und stabilisieren sich danach."
   ]
  },
  "fr": {
@@ -145,6 +165,16 @@
    "Le budget est de {b} euros, contre {b2} euros l'an dernier.",
    "Le stade peut accueillir {b} spectateurs.",
    "Le premier tirage comptait {b} exemplaires, le second {b2}."
+  ],
+  "fut2": [
+   "En {y}, l'entreprise ouvrira sa nouvelle usine.",
+   "{y} sera l'année de la grande réforme.",
+   "L'objectif est la neutralité climatique avant {y}.",
+   "Les paiements se poursuivront jusqu'en {y}, selon le contrat.",
+   "D'ici {y}, la population devrait dépasser dix millions d'habitants.",
+   "Le traité expire en {y}, mais il pourrait être renouvelé en {y2}.",
+   "Si tout va bien, le tunnel sera terminé en {y}.",
+   "Les prix continueront de monter jusqu'en {y}, puis se stabiliseront."
   ]
  },
  "it": {
@@ -194,6 +224,16 @@
    "Il bilancio è di {b} euro, mentre lo scorso anno erano {b2} euro.",
    "Lo stadio può ospitare {b} spettatori.",
    "La prima tiratura contava {b} copie, la seconda {b2}."
+  ],
+  "fut2": [
+   "Nel {y} l'azienda aprirà il suo nuovo stabilimento.",
+   "Il {y} sarà l'anno della grande riforma.",
+   "L'obiettivo è la neutralità climatica prima del {y}.",
+   "I pagamenti proseguiranno fino al {y}, secondo il contratto.",
+   "Entro il {y} la popolazione dovrebbe superare i dieci milioni.",
+   "Il trattato scade nel {y}, ma potrebbe essere rinnovato nel {y2}.",
+   "Se tutto va bene, il tunnel sarà finito nel {y}.",
+   "I prezzi continueranno a salire fino al {y} e poi si stabilizzeranno."
   ]
  },
  "nl": {
@@ -243,6 +283,16 @@
    "Het budget is {b} euro, vorig jaar was het {b2} euro.",
    "Het stadion biedt plaats aan {b} toeschouwers.",
    "De eerste oplage telde {b} exemplaren, de tweede {b2}."
+  ],
+  "fut2": [
+   "In {y} opent het bedrijf zijn nieuwe fabriek.",
+   "{y} wordt het jaar van de grote hervorming.",
+   "Het doel is klimaatneutraliteit voor {y}.",
+   "De betalingen lopen volgens het contract door tot {y}.",
+   "Tegen {y} zal de bevolking naar verwachting boven de tien miljoen uitkomen.",
+   "Het verdrag loopt af in {y}, maar kan in {y2} worden verlengd.",
+   "Als alles goed gaat, is de tunnel in {y} klaar.",
+   "De prijzen blijven stijgen tot {y} en stabiliseren daarna."
   ]
  },
  "pt": {
@@ -292,6 +342,76 @@
    "O orçamento é de {b} euros, no ano passado foram {b2} euros.",
    "O estádio tem capacidade para {b} espectadores.",
    "A primeira edição teve {b} exemplares, a segunda {b2}."
+  ],
+  "fut2": [
+   "Em {y} a empresa abrirá a sua nova fábrica.",
+   "{y} será o ano da grande reforma.",
+   "O objetivo é atingir a neutralidade climática antes de {y}.",
+   "Os pagamentos prolongam-se até {y}, segundo o contrato.",
+   "Em {y} a população deverá ultrapassar os dez milhões.",
+   "O tratado expira em {y}, mas poderá ser renovado em {y2}.",
+   "Se tudo correr bem, o túnel estará concluído em {y}.",
+   "Os preços vão continuar a subir até {y} e depois estabilizam."
+  ]
+ },
+ "en": {
+  "count": [
+   "Out of the members, {n} voted in favor and {n2} voted against.",
+   "The stadium welcomed {n} spectators and {n2} journalists.",
+   "This week the clinic saw {n} patients, {n2} of them children.",
+   "We drove {n} miles in the morning and {n2} in the afternoon.",
+   "The factory makes {n} cars a month and employs {n2} workers.",
+   "They sold {n} books at the fair and {n2} records.",
+   "The conference had {n} speakers, {n2} volunteers and {n3} guests.",
+   "The museum counted {n} visitors on Saturday, {n2} on Sunday and {n3} on Monday.",
+   "The plane carried {n} passengers and {n2} crew.",
+   "Each box holds {n} screws and {n2} nails.",
+   "The company has {n} employees in England and {n2} in Ireland.",
+   "The club has {n} members and {n2} volunteers."
+  ],
+  "label": [
+   "Go to room {l} and wait in room {l2}.",
+   "The details are on page {l} and on page {l2}.",
+   "Flight {l} leaves from gate {l2}.",
+   "Take highway {l} to exit {l2}.",
+   "Section {l} amends section {l2} of the law.",
+   "Your order number {l} and order number {l2} ship today.",
+   "Lines {l}, {l2} and {l3} are suspended.",
+   "Read chapter {l} through paragraph {l2}.",
+   "Rooms {l} and {l2} are missing towels.",
+   "Error code {l} appears next to message {l2} in the log."
+  ],
+  "past": [
+   "The cathedral was built in {y} and restored in {y2}.",
+   "Between {y} and {y2} the town changed hands several times.",
+   "He was born in {y} and died in {y2}.",
+   "The oldest documents date from {y} and the newest from {y2}.",
+   "The bridge opened in {y}, but the war of {y2} destroyed it.",
+   "There were great floods in {y}, in {y2} and in {y3}."
+  ],
+  "fut": [
+   "The plan aims to cut emissions by {y} and reach net zero in {y2}.",
+   "The new line will be ready in {y} and the extension in {y2}.",
+   "The company's contracts expire in {y} and in {y2}.",
+   "The forecasts run to {y} and a second study to {y2}.",
+   "Retirements are planned for {y}, {y2} and {y3}.",
+   "The network should be finished in {y} and the extension completed in {y2}."
+  ],
+  "fut2": [
+   "In {y} the company will open its new factory.",
+   "{y} will be the year of the big reform.",
+   "The goal is to be climate neutral before {y}.",
+   "Payments will continue until {y}, according to the contract.",
+   "By {y} the population should pass ten million.",
+   "The treaty expires in {y}, but it could be renewed in {y2}.",
+   "If all goes well, the tunnel will be finished in {y}.",
+   "Prices will keep rising until {y} and then settle."
+  ],
+  "big": [
+   "The city has {b} residents and {b2} tourists a year.",
+   "The budget is {b} dollars, compared with {b2} dollars last year.",
+   "The stadium holds {b} spectators.",
+   "The first print run was {b} copies and the second {b2}."
   ]
  }
 }

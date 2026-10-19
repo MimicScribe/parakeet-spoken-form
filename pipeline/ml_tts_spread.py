@@ -110,6 +110,10 @@ def coverage(mix: str, lang: str, extra: tuple = ()) -> dict:
         al = CC.syn_allowed(lang, c, rn[c], rv.get(c), sv.get(c))
         out["room"][c] = max(0, al - sn[c])
         out["totals"][c] = [rn[c], sn[c]]
+    for c in ("cur", "phone", "dec", "pct", "date", "ord"):  # room only (CYP packs): their values are strings
+        al = CC.syn_allowed(lang, c, rn[c], rv.get(c), sv.get(c))
+        out["room"][c] = max(0, al - sn[c])
+        out["totals"][c] = [rn[c], sn[c]]
     return out
 
 
@@ -126,7 +130,8 @@ def counts(cov: dict, cls: str) -> collections.Counter:
 SHARES = {"int_small": 0.60, "year": 0.22, "year_early": 0.06, "int_big": 0.12}  # of a pack's spans, where the room allows
 
 
-def allocate(lang: str, cov: dict, budget: int, values: dict | None = None, held_boost: float = 20.0) -> dict:
+def allocate(lang: str, cov: dict, budget: int, values: dict | None = None, held_boost: float = 20.0,
+             shares: dict | None = None) -> dict:
     """{(class, value): new spans}: per class a greedy on the marginal drop of the word-form error per span, weight(value) x
     (err(c) - err(c + 1)), under the class room (SAFETY), VALUE_CAP and SHARE_CAP; the classes share `budget` as
     SHARES says, what a class cannot take (room, values) goes to int_small, then year. values: {class: [values]}
@@ -165,8 +170,8 @@ def allocate(lang: str, cov: dict, budget: int, values: dict | None = None, held
 
     left = budget
     for cls in CLASSES:
-        left -= run(cls, int(budget * SHARES[cls]))
-    for cls in ("int_small", "year", "int_big"):
+        left -= run(cls, int(budget * (shares or SHARES)[cls]))
+    for cls in ("int_small", "year", "year_early", "int_big"):
         if left > 0:
             left -= run(cls, left)
     return dict(new)
@@ -185,17 +190,15 @@ def cov_bin(c: int) -> int:
     return 0 if c == 0 else 1 if c < 5 else 2 if c < 20 else 3
 
 
-def split_values(lang: str, cov: dict, budget: int, seed: int = 18) -> dict:
-    """The priority list the budget would fill (values with held-out spans first), split into V_a / V_b: strata of
-    (class, reading-length bin, current-coverage bin, held-out or not); inside a stratum values are ordered by held-out
-    spans then value and dealt a b b a a b ... so both halves get the same held-out spans, the same lengths and the
-    same coverage. V_a is filled with the whole budget (about twice the rows per value), V_b is left alone."""
-    rng = random.Random(f"{seed}|split|{lang}")
-    pri = allocate(lang, cov, budget)
+def deal(lang: str, pri: dict, cov: dict, seed: int, tag: str = "split") -> dict:
+    """Split the priority values (keys (class, value)) into V_a / V_b: strata of (class, reading-length bin,
+    current-coverage bin, held-out or not); inside a stratum values are ordered by held-out spans and dealt to the half
+    with fewer values (and fewer held-out spans), so both halves get the same held-out spans, lengths and coverage."""
+    rng = random.Random(f"{seed}|{tag}|{lang}")
     cnt = {c: counts(cov, c) for c in CLASSES}
     held = {c: collections.Counter({int(v): n for v, n in cov["held"].get(c, {}).items()}) for c in CLASSES}
     strata = collections.defaultdict(list)
-    for (c, v), n in pri.items():
+    for (c, v) in pri:
         strata[(c, length_bin(lang, v), cov_bin(cnt[c][v]), held[c][v] > 0)].append(v)
     va, vb = [], []
     hs = {"a": collections.Counter(), "b": collections.Counter()}
@@ -216,11 +219,30 @@ def split_values(lang: str, cov: dict, budget: int, seed: int = 18) -> dict:
                 va.append((k[0], v)); na += 1; hs["a"][k[0]] += h
             else:
                 vb.append((k[0], v)); nb += 1; hs["b"][k[0]] += h
-    return {"lang": lang, "seed": seed, "budget": budget, "priority": {f"{c}:{v}": n for (c, v), n in sorted(pri.items())},
+    return {"lang": lang, "seed": seed, "priority": {f"{c}:{v}": n for (c, v), n in sorted(pri.items())},
             "V_a": sorted(f"{c}:{v}" for c, v in va), "V_b": sorted(f"{c}:{v}" for c, v in vb),
             "held_spans": {h: {c: sum(held[c][v] for cc, v in vs if cc == c) for c in CLASSES}
                            for h, vs in (("V_a", va), ("V_b", vb))},
             "n_values": {h: dict(collections.Counter(c for c, _ in vs)) for h, vs in (("V_a", va), ("V_b", vb))}}
+
+
+def split_values(lang: str, cov: dict, budget: int, seed: int = 18) -> dict:
+    """The priority list the budget would fill (values with held-out spans first), split by deal()."""
+    out = deal(lang, allocate(lang, cov, budget), cov, seed)
+    out["budget"] = budget
+    return out
+
+
+def split_remaining(lang: str, cov: dict, taken: set, seed: int = 18, thin: int = 20) -> dict:
+    """A second split over the thin held-out values (training spans < thin) no earlier split holds."""
+    pri = {}
+    for c in CLASSES:
+        cnt = counts(cov, c)
+        for v, n in cov["held"].get(c, {}).items():
+            iv = _ival(v)
+            if iv is not None and n > 0 and cnt[iv] < thin and f"{c}:{iv}" not in taken:
+                pri[(c, iv)] = 1
+    return deal(lang, pri, cov, seed, "split2")
 
 
 # ------------------------------------------------------------------------------------------------ sentences
@@ -299,7 +321,7 @@ def realize_values(lang, written, ranges, rng, used, N):
 
 
 def plan_lang(lang: str, targets: dict, tag: str, seed: int, rep: dict, per_carrier: int = 45,
-              carriers: str = "carriers_vs1.json") -> list:
+              carriers: str = "carriers_vs1.json", year_fams: tuple = ("past", "fut")) -> list:
     """targets: {(class, value): spans}. Sentences fill the targets exactly (forced values); a span whose sentence
     fails is not retried with the same value more than a few times."""
     N = S._reader()
@@ -313,7 +335,7 @@ def plan_lang(lang: str, targets: dict, tag: str, seed: int, rep: dict, per_carr
     bag = {c: [v for (cc, v), n in sorted(targets.items()) if cc == c for _ in range(n)] for c in CLASSES}
     for c in bag:
         rng.shuffle(bag[c])
-    kinds = {"int_small": ("count", "label"), "year": ("past", "fut"), "year_early": ("past",), "int_big": ("big",)}
+    kinds = {"int_small": ("count", "label"), "year": year_fams, "year_early": ("past",), "int_big": ("big",)}
     # a value ending in 1 or 2 (un / uno / una, one / two with a gender) only in a label context (a page, a room, ...)
     lab_only = lambda v: _bad_end(lang, v)  # noqa: E731
     stall = 0
@@ -558,6 +580,104 @@ def plan_forms(lang: str, cov: dict, excluded: set, share: dict, n_spans: int, t
     return rows
 
 
+# ------------------------------------------------------------------------------------------------ English
+
+def en_coverage(files: dict) -> dict:
+    """Coverage dict (like coverage()) from English gate-format row files {"real": [...], "syn": [...], "held": [...]}:
+    a span counts when its reading says one whole number (number_outcomes); the class is by_value."""
+    N = S._reader()
+    out = {"real": {}, "syn": {}, "held": {}, "room": {}, "totals": {}}
+    tot = {}
+    for kind, paths in files.items():
+        for c in CLASSES:
+            out[kind][c] = {}
+        for pth in paths:
+            for r in _rows(pth):
+                for sp in r.get("spans") or []:
+                    rd = (sp.get("reading") or sp.get("text") or "")
+                    if not rd or any(ch.isdigit() for ch in rd) or len(rd.split()) > 8:
+                        continue
+                    g = N.extract_numbers(rd, "en")
+                    if len(g) != 1 or len(g[0].vals) != 1:
+                        continue
+                    v = int(next(iter(g[0].vals)))
+                    if v != next(iter(g[0].vals)) or v < 0:
+                        continue
+                    c, v = CC.by_value(v)
+                    if c in CLASSES:
+                        out[kind][c][str(v)] = out[kind][c].get(str(v), 0) + 1
+    for c in CLASSES:
+        rn, sn = sum(out["real"][c].values()), sum(out["syn"][c].values())
+        out["totals"][c] = [rn, sn]
+        out["room"][c] = max(0, int(0.5 * rn / 0.5) - sn)  # en: synthetic share cap 0.5
+    return out
+
+
+def _en_words(R, slot, v, rng):
+    if slot == "y":
+        return R.year(v) if rng.random() < 0.8 or not 2000 <= v <= 2099 else R.cardinal(v)
+    return R.cardinal(v, use_and=rng.random() < 0.2)
+
+
+def plan_en_values(targets: dict, tag: str, seed: int, rep: dict, per_carrier: int = 80) -> list:
+    """English forced-value sentences: targets {(class, value): spans}; the slot is the number said in words
+    (readings.cardinal / year); the label is the sentence (no digits). Rows follow ml_tts_symbol.plan_en's format."""
+    import readings as R
+    N = S._reader()
+    rng = random.Random(f"{tag}|{seed}|en")
+    car = load_carriers("en")
+    kinds = {"int_small": ("count", "label"), "year": ("past", "fut", "fut2"), "year_early": ("past",), "int_big": ("big",)}
+    bag = {c: [v for (cc, v), n in sorted(targets.items()) if cc == c for _ in range(n)] for c in CLASSES}
+    for c in bag:
+        rng.shuffle(bag[c])
+    rows, seen, drops, tpl_n, stall = [], set(), collections.Counter(), collections.Counter(), 0
+    while any(bag.values()) and stall < 4000:
+        cls = max((c for c in bag if bag[c]), key=lambda c: len(bag[c]) * (1.0 + rng.random() * 0.3))
+        fam = rng.choice(kinds[cls])
+        tpl = rng.choice(car[fam])
+        if tpl_n[tpl] >= per_carrier:
+            stall += 1
+            continue
+        slots = list(SLOT_RE.finditer(tpl))
+        pool, picked = bag[cls], []
+        for m in slots:
+            j = next((j for j in range(len(pool) - 1, max(-1, len(pool) - 40), -1) if pool[j] not in picked), None)
+            if j is None:
+                break
+            picked.append(pool.pop(j))
+        if len(picked) != len(slots):
+            pool.extend(picked)
+            stall += 1
+            continue
+        text, offs, spans, pos = "", [], [], 0
+        for m, v in zip(slots, picked):
+            text += tpl[pos:m.start()]
+            w = _en_words(R, m.group(1), v, rng)
+            if not text:
+                w = w[:1].upper() + w[1:]
+            offs.append([len(text), len(text) + len(w)])
+            spans.append({"kind": "int", "reading": w, "slot": m.group(1), "text": w})
+            text += w
+            pos = m.end()
+        text += tpl[pos:]
+        okv = all(len(g := N.extract_numbers(sp["reading"], "en")) == 1 and v in {int(x) for x in g[0].vals}
+                  for sp, v in zip(spans, picked))
+        if not okv or text in seen or not S.label_ok(text):
+            drops["value_or_dup"] += 1
+            stall += 1
+            continue
+        seen.add(text)
+        tpl_n[tpl] += 1
+        stall = 0
+        rid = f"{tag}_en_{hashlib.md5(f'{seed}|{text}'.encode()).hexdigest()[:10]}"
+        rows.append({"id": rid, "lang": "en", "cls": "sym", "ckey": "int", "template": tpl, "kinds": ["int"] * len(spans),
+                     "text": text, "synth_text": text, "num_chars": offs, "spans": spans, "values": picked, "split": "train",
+                     "gclasses": [CC.by_value(v)[0] for v in picked]})
+    rep.update(rows=len(rows), spans=sum(len(r["spans"]) for r in rows), drops=dict(drops), left={c: len(b) for c, b in bag.items()})
+    rng.shuffle(rows)
+    return rows
+
+
 # ------------------------------------------------------------------------------------------------ grammar overlay
 
 def ensure_table(lang: str, texts: list, dumper: str, workdir: str, scratch_table: str) -> int:
@@ -600,8 +720,33 @@ def main():
     p.add_argument("--per-carrier", type=int, default=45)
     p.add_argument("--budget", type=int, default=0, help="spans for V_a (0: the split's budget)")
     p.add_argument("--cov", required=True)
+    p.add_argument("--split-prefix", default="vsplit")
     p.add_argument("--table", default="", help="scratch copy of the grammar table with the extra keys")
     p.add_argument("--dumper", default="")
+    e = sub.add_parser("plan-en")
+    e.add_argument("--out", required=True)
+    e.add_argument("--tag", default="ttsVS2en")
+    e.add_argument("--budget", type=int, default=2600)
+    e.add_argument("--seed", type=int, default=18)
+    e.add_argument("--real", required=True, help="comma list of English gate-format real row files")
+    e.add_argument("--syn", default="", help="comma list of English synthetic row files")
+    e.add_argument("--held", default="", help="English held-out rows")
+    q = sub.add_parser("split2")
+    q.add_argument("--cov", required=True)
+    q.add_argument("--prev", required=True, help="dir with the earlier vsplit_<lang>.json files (their values are left out)")
+    q.add_argument("--out", required=True)
+    q.add_argument("--langs", default=",".join(LANGS))
+    q.add_argument("--seed", type=int, default=19)
+    y = sub.add_parser("plan-years")
+    y.add_argument("--cov", required=True)
+    y.add_argument("--keep-out", required=True, help="comma list of dirs with vsplit*_<lang>.json: their V_b values stay unfilled")
+    y.add_argument("--out", required=True)
+    y.add_argument("--tag", default="ttsCYP1")
+    y.add_argument("--spans", default="de:500,es:700,fr:700,it:450,nl:150,pt:330")
+    y.add_argument("--seed", type=int, default=18)
+    y.add_argument("--langs", default=",".join(LANGS))
+    y.add_argument("--table", default="")
+    y.add_argument("--dumper", default="")
     r = sub.add_parser("plan-forms")
     r.add_argument("--cov", required=True)
     r.add_argument("--splitdir", required=True)
@@ -613,6 +758,60 @@ def main():
     r.add_argument("--table", default="")
     r.add_argument("--dumper", default="")
     a = ap.parse_args()
+    if a.cmd == "plan-en":
+        os.makedirs(a.out, exist_ok=True)
+        cov = en_coverage({"real": a.real.split(","), "syn": [x for x in a.syn.split(",") if x],
+                           "held": [x for x in a.held.split(",") if x]})
+        print("totals", cov["totals"])
+        tg = allocate("en", cov, a.budget, {"int_small": list(range(100, 1000)), "year": list(range(1800, 1900)) + list(range(2026, 2061)),
+                                              "year_early": [], "int_big": [k * 1000 for k in range(2, 100) if not 1100 <= k * 1000 <= 2099]})
+        rep: dict = {"targets": {c: sum(n for (cc, _), n in tg.items() if cc == c) for c in CLASSES}}
+        rows = plan_en_values(tg, a.tag, a.seed, rep)
+        rep["chars"] = sum(len(r["text"]) for r in rows)
+        _write(os.path.join(a.out, "planned_en.jsonl"), rows)
+        json.dump(cov, open(os.path.join(a.out, "cov_en.json"), "w"))
+        print(json.dumps(rep))
+        return
+    if a.cmd == "split2":
+        cov = json.load(open(a.cov))
+        os.makedirs(a.out, exist_ok=True)
+        for lang in a.langs.split(","):
+            taken = set()
+            for f in os.listdir(a.prev):
+                if f.endswith(f"_{lang}.json") and f.startswith("vsplit"):
+                    d = json.load(open(os.path.join(a.prev, f)))
+                    taken |= set(d["V_a"]) | set(d["V_b"])
+            sp = split_remaining(lang, cov[lang], taken, a.seed)
+            json.dump(sp, open(os.path.join(a.out, f"vsplit2_{lang}.json"), "w"), indent=1)
+            print(lang, "V_a", sp["n_values"]["V_a"], "V_b", sp["n_values"]["V_b"], "held", sp["held_spans"])
+        return
+    if a.cmd == "plan-years":
+        cov = json.load(open(a.cov))
+        os.makedirs(a.out, exist_ok=True)
+        spans = {x.split(":")[0]: int(x.split(":")[1]) for x in a.spans.split(",")}
+        for lang in a.langs.split(",") if hasattr(a, "langs") else LANGS:
+            if lang not in spans:
+                continue
+            keep_out = set()
+            for d in a.keep_out.split(","):
+                for f in os.listdir(d):
+                    if f.endswith(f"_{lang}.json") and f.startswith("vsplit"):
+                        keep_out |= {int(k.split(":")[1]) for k in json.load(open(os.path.join(d, f)))["V_b"] if k.startswith("year:")}
+            vals = {"year": [y for y in range(2026, 2061) if y not in keep_out]}
+            tg = allocate(lang, cov[lang], spans[lang], vals)
+            rep: dict = {"targets": {"year": sum(tg.values())}, "left_out_years": sorted(keep_out & set(range(2026, 2061)))}
+            rows = plan_lang(lang, tg, a.tag, a.seed, rep, 60, year_fams=("fut", "fut2"))
+            if a.table and rep["missing_texts"]:
+                ensure_table(lang, rep["missing_texts"], a.dumper, a.out, a.table)
+                rep2 = {"targets": rep["targets"], "left_out_years": rep["left_out_years"]}
+                rows = plan_lang(lang, tg, a.tag, a.seed, rep2, 60, year_fams=("fut", "fut2"))
+                rep = rep2
+            rep.pop("missing_texts", None)
+            rep["chars"] = sum(len(r["text"]) for r in rows)
+            _write(os.path.join(a.out, f"planned_{lang}.jsonl"), rows)
+            json.dump(rep, open(os.path.join(a.out, f"plan_report_{lang}.json"), "w"), indent=1)
+            print(lang, json.dumps(rep, ensure_ascii=False))
+        return
     if a.cmd == "plan-forms":
         cov = json.load(open(a.cov))
         os.makedirs(a.out, exist_ok=True)
@@ -651,12 +850,16 @@ def main():
         cov = json.load(open(a.cov))
         os.makedirs(a.out, exist_ok=True)
         for lang in a.langs.split(","):
-            sp = json.load(open(os.path.join(a.splitdir, f"vsplit_{lang}.json")))
+            sp = json.load(open(os.path.join(a.splitdir, f"{a.split_prefix}_{lang}.json")))
             vals = collections.defaultdict(list)
             for k in sp["V_a"]:
                 cl, v = k.split(":")
                 vals[cl].append(int(v))
-            tg = allocate(lang, cov[lang], a.budget or sp["budget"], dict(vals))
+            shares = None
+            if a.split_prefix != "vsplit":  # a top-up split: spans in proportion to the values per class
+                n = sum(len(v) for v in vals.values()) or 1
+                shares = {c: len(vals.get(c, [])) / n for c in CLASSES}
+            tg = allocate(lang, cov[lang], a.budget or sp["budget"], dict(vals), shares=shares)
             rep: dict = {"targets": {c: sum(n for (cc, _), n in tg.items() if cc == c) for c in CLASSES}}
             rows = plan_lang(lang, tg, a.tag, a.seed, rep, a.per_carrier)
             if a.table and rep["missing_texts"]:
