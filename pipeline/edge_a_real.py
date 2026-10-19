@@ -91,6 +91,11 @@ def convert(lang: str, text: str) -> str | None:
     return sub
 
 
+SPORT = {"en": re.compile(r"\b(?:score|scored|won|lost|beat|leading|led|trailing|halftime|half time|match|game|final|set|goal|goals|points|lead)\b", re.I),
+         "es": re.compile(r"\b(?:partido|marcador|ganaba|ganaban|gol|goles|descanso|resultado|ganó|perdió|empate|victoria|derrota)\b", re.I),
+         "fr": re.compile(r"\b(?:match|score|menait|menaient|mène|mi temps|mi-temps|but|buts|jeu|partie|gagné|perdu|victoire)\b", re.I)}
+
+
 def candidate(lang: str, caption: str, split: dict | None = None) -> dict | None:
     """The first index phrase found in the (converted) caption as a planned-row skeleton, else None. `side`: A (may train),
     B (V_b value), Cb (held-out construction)."""
@@ -115,6 +120,8 @@ def candidate(lang: str, caption: str, split: dict | None = None) -> dict | None
         last = m.end()
         if split is not None:
             sides.append(E.side_of(split, cid, key))
+    if any(c.endswith((".score", ".marcador")) for c in cons) and not SPORT[lang].search(text):
+        return None            # "three, two, one, go" is a countdown, not a score
     side = "A" if all(s == "A" for s in sides) else next((s for s in sides if s != "A"), "?")
     if split is not None and side == "?":
         side = E.hash_side(lang, cons[0], vals[0])

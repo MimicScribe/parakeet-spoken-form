@@ -42,13 +42,25 @@ T3 = "It cost twenty uh thirty euros."
 a3, b3 = T3.index("twenty"), T3.index(" euros")
 kinds = {k for k, _, _ in P.probes(T3, a3, b3, vocab)}
 assert "fdel" in kinds and {w[2] for k, _, w in P.probes(T3, a3, b3, vocab) if k == "fdel"} == {"uh"}
-s = P.strict_span(scorer("it cost twenty uh thirty euros"), T3, a3, b3, vocab)
+s = P.strict_span(scorer("it cost twenty uh thirty euros"), T3, a3, b3, vocab, gate_fillers=True)
 assert s["ok"] and s["m"]["fdel"] >= 2, s
-s = P.strict_span(scorer("it cost twenty thirty euros"), T3, a3, b3, vocab)
+s = P.strict_span(scorer("it cost twenty thirty euros"), T3, a3, b3, vocab, gate_fillers=True)
 assert not s["ok"] and s["why"] in ("fdel", "wdel", "wsub", "del"), s
+# default: the filler is recorded, not gated (read-speech readers do not write fillers)
+s = P.strict_span(scorer("it cost twenty thirty euros"), T3, a3, b3, vocab)
+assert s["m"]["fdel"] is not None and s["m"]["fdel"] < 2 and s["ok"] in (True, False)
 # a reader that writes the filler as "er": the filler is still heard (best spelling beats deletion)
-s = P.strict_span(scorer("it cost twenty er thirty euros"), T3, a3, b3, vocab)
+s = P.strict_span(scorer("it cost twenty er thirty euros"), T3, a3, b3, vocab, gate_fillers=True)
 assert s["ok"] and s["m"]["fdel"] >= 2, s
+# a proper name inside a sentence is not tested; a non-number word is deleted but never swapped for a number word
+T4 = "Futures on the Nikkei two twenty five pointed higher."
+a4, b4 = T4.index("the Nikkei"), T4.index(" pointed")
+assert [w for k, _, w in P.probes(T4, a4, b4, {"nikkei": "nikkei", "nike": "nike"}) if "Nikkei" in str(w)] == []
+T5 = "It cost fifteen sorry fifty euros."
+a5, b5 = T5.index("fifteen"), T5.index(" euros")
+pr = P.probes(T5, a5, b5, {"sorry": "sorry", "sorrow": "sorrow", "fifty": "fifty", "fifteen": "fifteen"}, P.number_keys("en"))
+assert any(k == "wdel" and w == "sorry" for k, _, w in pr) and not any(k == "wsub" and str(w).startswith("sorry") for k, _, w in pr)
+assert any(k == "wsub" and str(w).startswith("fifty") for k, _, w in pr)
 # the vocabulary of a language: pack words and number words, 3+ letters
 v = P.edge_vocab("en", ["twenty five bips", "a billion two", "uh"])
 assert "bips" in v.values() and "uh" not in v.values() and "a" not in v.values()

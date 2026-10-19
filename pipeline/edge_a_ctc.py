@@ -27,7 +27,7 @@ app = modal.App("parakeet-edge-a-ctc")
 # how the readers write a spoken letter name ("Q" heard as "cu" / "queue"): both sides are mapped to the letter before the
 # reading-heard check, so a letter code ("Q three", "T trois") is judged on its number word and its letter
 LETTER_SPELL = {"en": {"cu": "q", "que": "q", "queue": "q", "cue": "q", "kew": "q", "kay": "k", "ess": "s", "pee": "p", "eff": "f",
-                       "tea": "t", "tee": "t", "ex": "x", "why": "y", "wy": "y"},
+                       "tea": "t", "tee": "t", "ex": "x", "why": "y", "wy": "y", "c": "q", "ce": "q"},
                 "es": {"cu": "q", "ku": "k", "ka": "k", "te": "t", "efe": "f"},
                 "fr": {"te": "t", "cu": "q", "ka": "k", "ef": "f"}}
 
@@ -37,7 +37,7 @@ def letters_norm(s: str, lang: str) -> str:
 
     m = LETTER_SPELL.get(lang, {})
     fold = lambda w: "".join(c for c in unicodedata.normalize("NFD", w) if not unicodedata.combining(c))  # noqa: E731
-    return " ".join(m.get(fold(w), w) for w in s.split())
+    return " ".join(m.get(fold(w), w) for w in s.replace("-", " ").split())   # a reader writes "trente-quatre": same words
 
 
 def _rows(p):
@@ -79,6 +79,11 @@ def check(planned: str, lang: str, out: str, part: int, parts: int, write_all: b
         ctc = D.LangCTC(lang, model=D.STRONG.get(lang))
         norm = lambda s: letters_norm(s, lang)  # noqa: E731
     vocab = P.edge_vocab(lang, [c.make(k, random.Random(k)).label for c in E.inventory(lang) for k in c.values])
+    numkeys = P.number_keys(lang)
+    if lang != "en":
+        import realx1_core as R
+
+        numkeys |= set(R.lexicon(lang))
     rng = random.Random(f"edgeAc|{part}|{lang}")
     st: dict = {}
     bump = lambda k: st.__setitem__(k, st.get(k, 0) + 1)  # noqa: E731
@@ -120,7 +125,7 @@ def check(planned: str, lang: str, out: str, part: int, parts: int, write_all: b
         strict = []
         if base != float("inf"):
             for a, b in r["edge_spans"]:
-                s = P.strict_span(lambda t: ctc.nll(lp, t), T_, a, b, vocab, base)
+                s = P.strict_span(lambda t: ctc.nll(lp, t), T_, a, b, vocab, base, numkeys)
                 s.update(a=a, b=b, exact_fit=D.fits(norm(T_[a:b]), gn))
                 strict.append(s)
         basic_ok = not why
@@ -128,9 +133,10 @@ def check(planned: str, lang: str, out: str, part: int, parts: int, write_all: b
         keep = basic_ok and strict_ok
         bump("kept" if keep else ("basic_" + why if why else "strict_fail"))
         clip = f"{odir}/wav/{r['id']}.wav"
-        if keep or write_all:
+        wrote = keep or write_all or basic_ok     # a clip that passed the round trip is kept even if a probe failed (second look)
+        if wrote:
             sf.write(clip, x, 16000, subtype="PCM_16")
-        rec = dict(r, audio_filepath=clip if (keep or write_all) else None, duration=round(len(x) / 16000, 3), greedy=g,
+        rec = dict(r, audio_filepath=clip if wrote else None, duration=round(len(x) / 16000, 3), greedy=g,
                    cer_ctc=round(cer, 3), fit=fit, basic_ok=basic_ok, basic_why=why, strict=strict, strict_ok=strict_ok, ctc_ok=keep,
                    word_times=[[round(t[0], 3), round(t[1], 3)] if t else None for t in wt], edge_quiet=C.edge_quiet(x), src="tts")
         out_rows.append(rec)

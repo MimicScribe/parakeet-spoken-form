@@ -5,7 +5,10 @@ The rules are the number-by-number confirmation of realx1_core (whole-phrase del
 synthetic sets found necessary: words the reader rarely hears (connectors, function words) are never tested, a swap TO
 such a word is no evidence, and a filler ("uh", "euh", "eh") is held to a weaker bar of its own because it is short and
 hesitant by nature. An edge phrase has no digit caption, so there are no rival-reading probes: the near-word swaps
-cover a misheard numeral ("seventy" for "seventeen").
+cover a misheard numeral ("seventy" for "seventeen"). Two reader limits are respected: proper names (Nikkei, Dax, Footsie) cannot
+be spelled by a character model, so a capitalised word inside a sentence is not tested; a filler is recorded but does not gate
+(a read-speech model rarely writes "uh" at all, the blind transcripts judge it); and a word is swapped only for another NUMBER
+word (a self-correction marker like "sorry" has no near number words, it is only deleted).
 """
 import re
 
@@ -33,11 +36,31 @@ def skip(w: str) -> bool:
     return len(k) < R.WORD_MIN_LETTERS or w.lower() in FUNC or w.lower() in CONN
 
 
+def proper(T: str, s: int, w: str) -> bool:
+    """A capitalised word inside a sentence (not its first word): a name or a letter code the reader cannot spell."""
+    return w[:1].isupper() and s > 0 and T[:s].rstrip()[-1:] not in ".?!" and not w.isupper() or (w.isupper() and len(w) > 1 and s > 0)
+
+
+def number_keys(lang: str) -> set:
+    """Keys (D.key) of the language's number words: the cardinals' words (+ scale words, decimal / percent words)."""
+    import edge_a_words as W
+
+    out = set()
+    for n in list(range(0, 101)) + [200, 300, 400, 500, 600, 700, 800, 900, 1000, 2000, 5000, 10000, 100000, 1000000]:
+        try:
+            out |= {D.key(w) for w in W.card(n, lang).split()}
+        except Exception:  # noqa: BLE001
+            pass
+    extra = {"en": "point oh percent hundred thousand million billion", "es": "coma por ciento mil millones cien", "fr": "virgule pour cent mille million milliard milliards millions cents"}
+    out |= {D.key(w) for w in extra.get(lang, "").split()}
+    return {k for k in out if k}
+
+
 # how a reader spells a spoken filler: the filler is "heard" when ANY of these beats its deletion
 FILLER_SPELL = ("uh", "um", "er", "a", "ah", "eh", "euh", "hm", "mm", "eu", "e", "o", "hum", "heu", "este")
 
 
-def probes(T: str, a: int, b: int, vocab: dict) -> list:
+def probes(T: str, a: int, b: int, vocab: dict, numkeys: set | None = None) -> list:
     """[(kind, text, word)] kind in del / wdel / wsub / fdel (filler deleted; the filler probes are scored apart, see strict_span)."""
     out = [("del", tidy(T[:a] + " " + T[b:]), None)]
     for s, e, w in words(T, a, b):
@@ -45,9 +68,11 @@ def probes(T: str, a: int, b: int, vocab: dict) -> list:
         if lw in FILLER:
             out.append(("fdel", tidy(T[:s] + T[e:]), (s, e, w)))
             continue
-        if skip(w):
+        if skip(w) or proper(T, s, w):
             continue
         out.append(("wdel", tidy(T[:s] + T[e:]), w))
+        if numkeys is not None and D.key(w) not in numkeys:
+            continue
         for alt in R.near_words(w, "xx", vocab):
             if alt.lower() in FUNC or alt.lower() in CONN or alt.lower() in FILLER:
                 continue
@@ -55,14 +80,15 @@ def probes(T: str, a: int, b: int, vocab: dict) -> list:
     return out
 
 
-def strict_span(nll, T: str, a: int, b: int, vocab: dict, base: float | None = None) -> dict:
+def strict_span(nll, T: str, a: int, b: int, vocab: dict, base: float | None = None, numkeys: set | None = None,
+                gate_fillers: bool = False) -> dict:
     """Minimum margin per probe kind over the edge phrase T[a:b] and the verdict."""
     base = nll(T) if base is None else base
     bars = {"del": DEL_MIN, "wdel": WDEL_MIN, "wsub": WSUB_MIN, "fdel": FILLER_MIN}
     m = {k: None for k in bars}
     worst = {}
     low = []
-    for kind, text, w in probes(T, a, b, vocab):
+    for kind, text, w in probes(T, a, b, vocab, numkeys):
         if kind == "fdel":  # deletion vs the filler under its best spelling (a reader writes "uh" as a / er / um ...)
             fs, fe, w = w
             d = nll(text) - min([base] + [nll(T[:fs] + v + T[fe:]) for v in FILLER_SPELL])
@@ -73,7 +99,7 @@ def strict_span(nll, T: str, a: int, b: int, vocab: dict, base: float | None = N
             worst[kind] = [w, round(d, 1)]
         if d < bars[kind] and len(low) < 8:
             low.append([kind, w, round(d, 1)])
-    why = next((k for k in ("del", "wdel", "wsub", "fdel") if m[k] is not None and m[k] < bars[k]), "")
+    why = next((k for k in ("del", "wdel", "wsub") + (("fdel",) if gate_fillers else ()) if m[k] is not None and m[k] < bars[k]), "")
     return {"ok": not why, "why": why, "m": {k: (None if v is None else round(v, 1)) for k, v in m.items()},
             "worst": worst, "low": low}
 

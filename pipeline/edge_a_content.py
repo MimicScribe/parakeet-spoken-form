@@ -570,7 +570,7 @@ def build_es() -> list:
 
     def uh(k, rng):
         a, b = map(int, k.split("-"))
-        f = rng.choice(["eh", "este", "eh", "mmm"])
+        f = "este"   # "eh" and "mmm" are not voiced by the engines (pilot: judges write "y" / "de" / nothing)
         lab = f"{c(a)} {f} {c(b)}"
         return Piece(lab, f"{a}-{b}", [("int", str(a), c(a)), ("int", str(b), c(b))], A)
     pr = [(20, 30), (15, 25), (40, 50), (100, 150), (200, 300), (5, 10), (60, 70), (12, 15), (80, 90), (30, 40), (25, 35), (18, 20)]
@@ -586,7 +586,7 @@ def build_es() -> list:
 
     def um(k, rng):
         n = int(k)
-        f = rng.choice(["eh", "mmm"])
+        f = "este"
         lab = f"alrededor de {f} {c(n)} por ciento"
         return Piece(lab, f"alrededor de {n}%", [("pct", f"{n}%", f"{c(n)} por ciento")], A)
     add(id="es.dis.relleno", family="dis", cat="disp", ambig=A, values=[str(n) for n in (5, 8, 10, 12, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 75, 80)], make=um)
