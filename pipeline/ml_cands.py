@@ -549,7 +549,7 @@ def _cur_cands(d: dict, lang: str) -> list[str]:
                     out.append(a + [unit] + jw + cw)
             if n and lang not in NO_BARE_JOIN:
                 for j in JOIN[lang]:
-                    if j:  # "doze e cinquenta" (no unit)
+                    if j and cents_n >= 10:  # "doze e cinquenta" (no unit); under 10 the zero is gone: "trinta e cinco" is 35
                         out.append(a + [j] + cw)
                 # decimal reading with the unit after ("doze vírgula cinquenta reais")
                 try:

@@ -602,9 +602,11 @@ def fill_template(tpl: str, gen: Gen, forced: dict | None = None):
 
 def plan_lang(lang: str, room: dict, tag: str, seed: int, margin: float, rep: dict, max_rows: int = MAX_ROWS,
               carriers: str = "carriers_sym.json", used: dict | None = None, focus: tuple = SYMBOL, thin: bool = True,
-              caps: dict | None = None) -> list:
+              caps: dict | None = None, per_carrier: int = 0, row_ok=None) -> list:
     """used: {class: spans} an earlier plan already takes from the room; caps: {class: spans} upper limits on top of the
-    room (math sentences' plain counts); focus: the classes whose targets end the plan when met."""
+    room (math sentences' plain counts); focus: the classes whose targets end the plan when met; per_carrier > 0: no
+    carrier sentence is used for more rows than that (every row records its "template"); row_ok(label, spans) -> bool:
+    a row it refuses is dropped (counted as "row_filter")."""
     N = _reader()
     rng = random.Random(f"{tag}|{seed}|{lang}|{carriers}")
     gen = Gen(lang, rng)
@@ -619,17 +621,19 @@ def plan_lang(lang: str, room: dict, tag: str, seed: int, margin: float, rep: di
     seen, rows = set(), []
     drops = collections.Counter()
     bad_values = []
+    tpl_n = collections.Counter()
 
     def need(c):
         return (target.get(c, 0) - got[c]) / max(target.get(c, 1), 1)
 
-    def add_row(written, spans, label, offs, keys, ckey):
+    def add_row(written, spans, label, offs, keys, ckey, tpl=None):
         rid = f"{tag}_{lang}_{hashlib.md5(f'{seed}|{label}'.encode()).hexdigest()[:10]}"
         gcl = [g["gclass"] for g in spans]
+        tpl_n[tpl] += 1
         rows.append({"id": rid, "lang": lang, "cls": "sym", "ckey": ckey, "register": "sym", "caption": written,
                      "text": label, "spans": [{k: v for k, v in s.items() if k != "gclass"} for s in spans],
                      "num_chars": offs, "kind": sorted({s["kind"] for s in spans}), "split": "train",
-                     "slots": [s["slot"] for s in spans], "gclasses": gcl})
+                     "slots": [s["slot"] for s in spans], "gclasses": gcl} | ({"template": tpl} if per_carrier else {}))
         for g in gcl:
             got[g] += 1
         for typ, k in keys:
@@ -655,6 +659,9 @@ def plan_lang(lang: str, room: dict, tag: str, seed: int, margin: float, rep: di
         if lang in ELISION_BAD and ELISION_BAD[lang].search(label):
             drops["elision"] += 1
             return False
+        if row_ok is not None and not row_ok(label, spans):
+            drops["row_filter"] += 1
+            return False
         if label in seen:
             drops["duplicate"] += 1
             return False
@@ -674,7 +681,7 @@ def plan_lang(lang: str, room: dict, tag: str, seed: int, margin: float, rep: di
             drops["class_full"] += 1
             return False
         seen.add(label)
-        add_row(written, spans, label, offs, keys, ckey or "+".join(sorted(cls_n)))
+        add_row(written, spans, label, offs, keys, ckey or "+".join(sorted(cls_n)), tpl)
         return True
 
     # thin-cell exact values first (two per sentence)
@@ -696,6 +703,8 @@ def plan_lang(lang: str, room: dict, tag: str, seed: int, margin: float, rep: di
                 drops["thin_failed"] += 1
 
     def weight(tpl):
+        if per_carrier and tpl_n[tpl] >= per_carrier:
+            return 0.0
         ws = []
         for m in SLOT_RE.finditer(tpl):
             g = SLOT_GUESS[m.group(1)]
@@ -814,23 +823,43 @@ def _en_decimal_uk(r, R):
     return "nought point " + R.digits(str(r.randint(1, 99)))
 
 
-EN_CUSTOM = {"year_fwd": _en_year_fwd, "money_x": _en_money_x, "decimal_uk": _en_decimal_uk}
+def _en_dec(r, R):
+    """A bare decimal as people say it (ttsDW1): 0-99 before the point (small values likelier), one or two digits after
+    it read digit by digit ("three point one four"), some fractions with a leading zero ("point oh five"), and below one
+    "zero point" / "point"."""
+    i = r.randint(0, 99) if r.random() < 0.85 else r.randint(100, 999)
+    frac = str(r.randint(1, 9)) if r.random() < 0.55 else str(r.randint(11, 99))
+    if r.random() < 0.12:
+        frac = "0" + str(r.randint(1, 9))
+    frac = frac.rstrip("0") or "5"
+    tail = "point " + R.digits(frac, oh=r.random() < 0.4)
+    if i == 0:
+        return R._pick(r, [(0.5, f"zero {tail}"), (0.4, tail), (0.1, f"oh {tail}")])
+    return f"{R.cardinal(i)} {tail}"
 
 
-def plan_en(n: int, tag: str, seed: int, rep: dict, carriers=("en",), avoid=frozenset()) -> list:
+EN_CUSTOM = {"year_fwd": _en_year_fwd, "money_x": _en_money_x, "decimal_uk": _en_decimal_uk, "dec_en": _en_dec}
+
+
+def plan_en(n: int, tag: str, seed: int, rep: dict, carriers=("en",), avoid=frozenset(), carriers_file: str = "carriers_sym2.json",
+            per_carrier: int = 0, plain_repeat: int = 1) -> list:
     """English rows: carriers_sym2.json "en" sentences, each slot a readings.KINDS reading (the English label rules:
     spoken form, years as words); math slots ma / mb / mc are readings.cardinal of the computed values. The label is the
     readings; the synthesiser gets readings.tts_form (letter names, "ex")."""
     import readings as R
 
     rng = random.Random(f"{tag}|{seed}|en")
-    tpls = [t for c in carriers for t in load_carriers(c, "carriers_sym2.json")]
+    tpls = [t for c in carriers for t in load_carriers(c, carriers_file)]
     used = collections.defaultdict(collections.Counter)
     rows, seen, drops = [], set(), collections.Counter()
+    tpl_n = collections.Counter()  # rows per carrier (per_carrier cap); a sentence with no slot may repeat plain_repeat times
+    dup = collections.Counter()
     tries = 0
     while len(rows) < n and tries < 40 * n:
         tries += 1
         tpl = rng.choice(tpls)
+        if per_carrier and tpl_n[tpl] >= per_carrier:
+            continue
         m0 = MATH_OP.match(tpl)
         mv = _math(m0.group(1), rng) if m0 else {}
         body = tpl[m0.end():] if m0 else tpl
@@ -882,17 +911,20 @@ def plan_en(n: int, tag: str, seed: int, rep: dict, carriers=("en",), avoid=froz
         text += body[pos:]
         tts += body[pos:]
         tts = tts[:1].upper() + tts[1:]
-        if text in seen or text in avoid:
+        plain = not kinds  # a sentence with no number slot repeats (other voices say it) up to plain_repeat times
+        if text in avoid or (text in seen and not (plain and dup[text] < plain_repeat)):
             drops["duplicate"] += 1
             continue
         if not label_ok(text):
             drops["label_symbol"] += 1
             continue
         seen.add(text)
+        tpl_n[tpl] += 1
+        dup[text] += 1
         for k, (a, b) in zip(kinds, offs):
             if k not in ("ma", "mb", "mc"):
                 used[k][text[a:b].lower()] += 1
-        rid = f"{tag}_en_{hashlib.md5(f'{seed}|{text}'.encode()).hexdigest()[:10]}"
+        rid = f"{tag}_en_{hashlib.md5((f'{seed}|{text}' + (f'|{dup[text]}' if dup[text] > 1 else '')).encode()).hexdigest()[:10]}"
         rows.append({"id": rid, "lang": "en", "cls": "sym", "ckey": "+".join(sorted(set(kinds))), "template": tpl,
                      "kinds": kinds, "text": text, "synth_text": tts, "num_chars": offs,
                      "spans": [{"kind": k, "reading": text[a:b], "slot": k} for k, (a, b) in zip(kinds, offs)],
@@ -913,11 +945,13 @@ LICENCE = {"qwen3": "Qwen3-TTS-12Hz-1.7B-Base (Apache-2.0); reference speaker {s
            "chatterbox": "Chatterbox Multilingual V3 (MIT); reference speaker {src} ({lic})"}
 
 
-def assign_voices(rows: list, lang: str, vtag: str, refs: list | None = None, cloud: list | None = None) -> None:
-    """Voice x rate per row, round robin over the voices in a seeded order (equal rows per voice)."""
+def assign_voices(rows: list, lang: str, vtag: str, refs: list | None = None, cloud: list | None = None,
+                  engine: str | None = None, min_voices: int = 10) -> None:
+    """Voice x rate per row, round robin over the voices in a seeded order (equal rows per voice). engine: override of
+    ENGINE[lang] (nl: "chatterbox" with the VoxPopuli references, the ttsSYM1 pilot's Chatterbox-for-Chirp swap)."""
     from mix_build import heldout_persona, is_heldout_voice
 
-    eng = ENGINE[lang]
+    eng = engine or ENGINE[lang]
     rng = random.Random(f"{vtag}|voices|{lang}")
     if eng == "kokoro":
         pool = list(EN_KOKORO if lang == "en" else KOKORO_IT)
@@ -925,7 +959,7 @@ def assign_voices(rows: list, lang: str, vtag: str, refs: list | None = None, cl
         pool = [v for v in cloud if not is_heldout_voice(lang, v[0]) and heldout_persona(v[0]) != "Charon"]
     else:
         pool = list(refs)
-    assert len(pool) >= 10 or eng in ("kokoro",), f"{lang}: only {len(pool)} voices"
+    assert len(pool) >= min_voices or eng in ("kokoro",), f"{lang}: only {len(pool)} voices"
     order = list(range(len(rows)))
     rng.shuffle(order)
     for k, i in enumerate(order):
@@ -1103,11 +1137,17 @@ def main():
     p.add_argument("--focus", default=",".join(SYMBOL))
     p.add_argument("--no-thin", action="store_true")
     p.add_argument("--caps", default="", help='json {lang: {class: spans}} limits on top of the room')
+    p.add_argument("--per-carrier", type=int, default=0, help="at most this many rows per carrier sentence (rows record it)")
+    p.add_argument("--require-word", default="", help="a regex every span of --require-kind must hold in its reading "
+                                                      "(the decimal word: only readings that say it)")
+    p.add_argument("--require-kind", default="dec")
     v = sub.add_parser("voices")
     v.add_argument("--planned", required=True)
     v.add_argument("--refs", default="")
     v.add_argument("--vtag", default="ttsSYM1v")
     v.add_argument("--out", required=True)
+    v.add_argument("--engine", default="", help="override of the language's engine (nl: chatterbox)")
+    v.add_argument("--min-voices", type=int, default=10)
     c = sub.add_parser("chirp")
     c.add_argument("--planned", required=True)
     c.add_argument("--vtag", default="ttsSYM1v")
@@ -1127,6 +1167,9 @@ def main():
     e.add_argument("--out", required=True)
     e.add_argument("--carriers", default="en", help="carrier keys in carriers_sym2.json (en,en2)")
     e.add_argument("--avoid", default="", help="planned rows of an earlier English set (no repeated sentence)")
+    e.add_argument("--carriers-file", default="carriers_sym2.json")
+    e.add_argument("--per-carrier", type=int, default=0)
+    e.add_argument("--plain-repeat", type=int, default=1, help="a sentence with no number slot may be planned this often")
     f = sub.add_parser("finalize")
     f.add_argument("--rows", required=True, help="CTC-verified rows.jsonl (several: comma-separated)")
     f.add_argument("--out", required=True)
@@ -1140,8 +1183,12 @@ def main():
             used = collections.Counter(g for r in _rows(os.path.join(a.used_dir, f"planned_{lang}.jsonl"))
                                        for g in r["gclasses"]) if a.used_dir else None
             caps = json.loads(a.caps).get(lang) if a.caps else None
+            row_ok = None
+            if a.require_word:
+                rx = re.compile(a.require_word, re.I)
+                row_ok = lambda label, spans, rx=rx: all(rx.search(s["reading"]) for s in spans if s["kind"] == a.require_kind)  # noqa: E731
             rows = plan_lang(lang, room[lang], a.tag, a.seed, a.margin, rep, a.max_rows, a.carriers, used,
-                             tuple(a.focus.split(",")), not a.no_thin, caps)
+                             tuple(a.focus.split(",")), not a.no_thin, caps, a.per_carrier, row_ok)
             rep["chars"] = sum(len(r["text"]) for r in rows)
             summary[lang] = rep
             _write(os.path.join(a.out, f"planned_{lang}.jsonl"), rows)
@@ -1152,10 +1199,10 @@ def main():
         lang = rows[0]["lang"]
         refs = json.load(open(a.refs))["refs"] if a.refs else None
         cloud = None
-        if ENGINE[lang] == "chirp":
+        if (a.engine or ENGINE[lang]) == "chirp":
             import ml_tts_cloud as CL
             cloud = list(CL.voices(CL.Auth(), lang))
-        assign_voices(rows, lang, a.vtag, refs, cloud)
+        assign_voices(rows, lang, a.vtag, refs, cloud, a.engine or None, a.min_voices)
         _write(a.out, rows)
         print(lang, len(rows), collections.Counter(r["voice"] for r in rows).most_common(3), len({r["voice"] for r in rows}))
     elif a.cmd == "chirp":
@@ -1180,7 +1227,8 @@ def main():
     elif a.cmd == "plan-en":
         rep: dict = {}
         rows = plan_en(a.n, a.tag, a.seed, rep, tuple(a.carriers.split(",")),
-                       frozenset(r["text"] for r in _rows(a.avoid)) if a.avoid else frozenset())
+                       frozenset(r["text"] for r in _rows(a.avoid)) if a.avoid else frozenset(), a.carriers_file,
+                       a.per_carrier, a.plain_repeat)
         os.makedirs(a.out, exist_ok=True)
         _write(os.path.join(a.out, "planned_en.jsonl"), rows)
         rep["chars"] = sum(len(r["synth_text"]) for r in rows)
