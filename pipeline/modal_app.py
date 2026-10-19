@@ -1972,23 +1972,27 @@ R3_ARMS.update({
     # schedule over the 4,000 steps (warmup 50, peak 2e-5, cosine to 2e-6).
     "R10-encF": dict(_BRANCH_ENC, enc_lr_steps=MAIN_RUN_STEPS - BRANCH_STEP),
 })
-# Matched encoder/decoder branch set (2026-10-19; launch only through the run launcher, --init-from <main run>@1000). Five 500-step
+# Matched encoder/decoder branch set (2026-10-19; launch only through the run launcher, --init-from <main run>@1000). Seven 500-step
 # branches off the same checkpoint, the same sampler seed (4242), mix, restart and decoder lr; each differs from its parent by the
 # keys named here and no others (test_branch_set.py asserts it). Parents: X0 = R10-brC, X1 = R10-brE (both on the fixed L2-SP engine
-# of d337d0a, which is the point of re-running them), X2 / X2b / X3 = X1, X5 = X0.
+# of d337d0a, which is the point of re-running them), X2 / X2b / X3 / X4 = X1, X5 = X0.
 #   X0  decoder only (the control)
 #   X1  top-2 encoder blocks, encoder lr peak 2e-5 -> floor 2e-6 (warmup 50, cosine over the 500 steps)
 #   X2  X1 at 3x the encoder lr (peak 6e-5, floor 6e-6): the same warmup / decay shape, 3x the summed lr
 #   X2b X1's encoder lr total on a flatter schedule (peak 1.5e-5, floor 7.5e-6): 58% (X1: 73%) of it falls in the first 250 steps
 #   X3  top-4 encoder blocks (layers 20-23) at X1's encoder lr
-#   X5  decoder only with the number-word output rows of the joint exempt from the L2-SP pull (l2sp_exempt_num)
+#   X4  X1 with enc_real_only: rows tagged synthetic send no gradient into the encoder (decoder and joint train on every row)
+#   X5  decoder only with a 4x weaker L2-SP pull (l2sp_c 2.5 instead of 10): the 15 trainable decoder + joint tensors (prediction
+#       net: embedding + 2 LSTM layers; joint: encoder / prediction projections and the output layer) are pulled to stock with a quarter
+#       of the strength; the written-form rows of the output layer stay exempt as in every arm; the KL terms are unchanged
 R3_ARMS.update({
     "R10-brX0": dict(R3_ARMS["R10-brC"]),
     "R10-brX1": dict(R3_ARMS["R10-brE"]),
     "R10-brX2": dict(R3_ARMS["R10-brE"], enc_lr_peak=6e-5, enc_lr_floor=6e-6),
     "R10-brX2b": dict(R3_ARMS["R10-brE"], enc_lr_peak=1.5e-5, enc_lr_floor=7.5e-6),
     "R10-brX3": dict(R3_ARMS["R10-brE"], unfreeze_top=4),
-    "R10-brX5": dict(R3_ARMS["R10-brC"], l2sp_exempt_num=True),
+    "R10-brX4": dict(R3_ARMS["R10-brE"], enc_real_only=True),
+    "R10-brX5": dict(R3_ARMS["R10-brC"], l2sp_c=2.5),
 })
 # R10-anc1 = the anchor-weight test (2026-10-18): R10-main on the same mix, run for 500 steps on the lr schedule of the 5,000-step
 # main (lr_total, offset 0 = the plain schedule), so main@500 is its matched control. Only the --extra-parts weights differ

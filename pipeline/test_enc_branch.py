@@ -409,7 +409,8 @@ def test_branch_arms_differ_from_the_main_arm_and_from_each_other_by_named_knobs
 def test_no_other_arm_sets_a_branch_option_and_defaults_are_off():
     MA = pytest.importorskip("modal_app")
     keys = set(MA._BRANCH_DEFAULTS) | {"unfreeze_top"}
-    new = {"R10-brC", "R10-brE", "R10-brEr", "R10-encF", "R10-anc1"}
+    new = {"R10-brC", "R10-brE", "R10-brEr", "R10-encF", "R10-anc1", "R10-brX0", "R10-brX1", "R10-brX2", "R10-brX2b", "R10-brX3",
+           "R10-brX4", "R10-brX5"}
     assert not [a for a, cfg in MA.R3_ARMS.items() if a not in new and keys & set(cfg)]
     assert all(not v for v in MA._BRANCH_DEFAULTS.values())  # every option off
 

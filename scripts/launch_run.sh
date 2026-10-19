@@ -146,7 +146,7 @@ done
 [ -n "$APP" ] || die 6 "launched, but no app id in $LOG/train.log after 2 min; find and watch it by hand"
 echo "app $APP" | tee -a "$LOG/launch_manifest.txt"
 if [ $WATCH -eq 1 ]; then
-  EXPECT=1.83; [[ $ARM == R10-brE* || $ARM == R10-encF ]] && EXPECT=1.9  # s/step: decoder-only arms, arms with the top encoder blocks
+  EXPECT=1.83; [[ $ARM == R10-brE* || $ARM == R10-brX[1234]* || $ARM == R10-encF ]] && EXPECT=1.9  # s/step: decoder-only arms, arms with the top encoder blocks
   nohup caffeinate -i python3 "$PIPE/run_watch.py" --app "$APP" --run "$RUN" --volume "$VOLUME" --log-dir "$LOG/watch" \
     --steps "$STEPS" --expected-s-per-step "$EXPECT" --min-stage-rate "${MIN_STAGE_RATE:-300}" > "$LOG/watch.log" 2>&1 &
   echo "watchdog pid $! under caffeinate -i (stops the app on a stall or the max task time, logs a speed alarm; $LOG/watch.log, $LOG/watch/status.json)"
