@@ -19,7 +19,7 @@ RUN2_LANGS = WAVE1 + ("ru",) + MODERATE_LANGS[1:]
 nemo_image = (modal.Image.x().add_local_python_source("common", "ft_train"))
 tts_image = (modal.Image.x().add_local_python_source("readings"))
 R3_ARMS = {"S-A": dict(lr=1e-4)}
-R3_ARMS.update({"R10-main": dict(lr=1e-4)})
+R3_ARMS.update({"R10-main": dict(lr=1e-4), "R10-brC": dict(lr=1e-4), "R10-brE": dict(lr=1e-4), "R10-encF": dict(lr=1e-4)})
 '''
 FAKE_MODAL = '''#!/bin/bash
 d=$(dirname "$0")
@@ -118,6 +118,46 @@ def test_launch_uses_the_clean_export_and_the_standard_flags(world):
     assert "FIRST 5 MINUTES" in r.stdout and "step250.pt.done" in r.stdout
 
 
+def test_branch_arm_takes_the_main_runs_checkpoint(world):
+    (world["fake"] / "exists.txt").write_text("exp/R10_main/step1000.pt\n")
+    r, log = world["launch"]("--init-from", "R10_main@1000", arm="R10-brE")
+    assert r.returncode == 0, r.stderr
+    cmd = [l for l in calls(world).splitlines() if "run --detach" in l][0].split(" :: ")[1]
+    assert "--init-from R10_main@1000" in cmd and "--anchor-init" in cmd and "--arm R10-brE" in cmd
+    assert "--max-steps 5000" in cmd  # the caller's number; a branch passes --max-steps 500
+    assert "INIT R10_main@1000" in r.stdout and "branch options" in r.stdout
+
+
+def test_the_full_continuation_arm_is_a_branch_arm_too(world):
+    (world["fake"] / "exists.txt").write_text("exp/R10_main/step1000.pt\n")
+    r, _ = world["launch"]("--init-from", "R10_main@1000", arm="R10-encF", steps="4000")
+    assert r.returncode == 0, r.stderr
+    cmd = [l for l in calls(world).splitlines() if "run --detach" in l][0].split(" :: ")[1]
+    assert "--arm R10-encF" in cmd and "--init-from R10_main@1000" in cmd and "--max-steps 4000" in cmd
+    r, _ = world["launch"](arm="R10-encF", steps="4000")
+    assert r.returncode == 2 and "needs --init-from" in r.stderr
+
+
+def test_branch_start_is_checked_before_anything_launches(world):
+    r, _ = world["launch"]("--init-from", "R10_main@1000", arm="R10-brC")  # the checkpoint is not on the volume
+    assert r.returncode == 7 and "does not exist" in r.stderr
+    r, _ = world["launch"](arm="R10-brC")  # a branch arm without a start checkpoint
+    assert r.returncode == 2 and "needs --init-from" in r.stderr
+    r, _ = world["launch"]("--init-from", "R10_run1@1000", arm="R10-brC")  # its own run
+    assert r.returncode == 2
+    r, _ = world["launch"]("--init-from", "R10_main@1000")  # a stock-start arm with a branch checkpoint
+    assert r.returncode == 2 and "starts from stock" in r.stderr
+    r, _ = world["launch"]("--init-from", "R10_main", arm="R10-brC")  # no step
+    assert r.returncode == 2 and "<run>@<step>" in r.stderr
+    assert "run --detach" not in calls(world)
+
+
+def test_default_launch_keeps_the_stock_start_flags(world):
+    r, _ = world["launch"]()
+    cmd = [l for l in calls(world).splitlines() if "run --detach" in l][0].split(" :: ")[1]
+    assert "--init-from ultra --anchor-init" in cmd and "INIT ultra" in r.stdout
+
+
 def test_resume_needs_the_run_and_the_first_commit(world):
     r, log = world["launch"]("--resume")
     assert r.returncode == 4 and "does not exist" in r.stderr
@@ -165,3 +205,4 @@ def test_the_real_modal_app_is_readable_by_the_launcher():
     assert "ft_train" in RM.mounted_modules(HERE) and "mix_build" in RM.mounted_modules(HERE)
     assert RM.run2_langs(HERE).startswith("de,es,fr,it,nl,pt,ru")
     assert RM.has_arm(HERE, "R10-main")
+    assert all(RM.has_arm(HERE, a) for a in ("R10-brC", "R10-brE", "R10-brEr", "R10-encF"))

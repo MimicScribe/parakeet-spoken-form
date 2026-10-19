@@ -3,7 +3,8 @@
 #
 #   scripts/launch_run.sh --run <name> --arm <arm> --sha <commit> --max-steps <N> --mix-dir <dir on the volume> \
 #       --repo <git checkout> --approvals <file> --log-dir <dir> [--part-weights "<path>=<n>,..."] \
-#       [--extra-parts "<path>:<tag>:<n>,..."] [--langs <l1,l2,...>] [--volume <name>] [--resume] [--dry-run] [--no-watch]
+#       [--extra-parts "<path>:<tag>:<n>,..."] [--langs <l1,l2,...>] [--volume <name>] [--init-from <run>@<step>]
+#       [--resume] [--dry-run] [--no-watch]
 #
 # Locks (a refusal exits non-zero and starts nothing):
 #   1. the exact run name must be a line of the approvals file (exit 3);
@@ -11,6 +12,8 @@
 #      first launch logged in --log-dir (exit 5);
 #   3. the arm must exist in the commit, max-steps must be a multiple of the checkpoint interval (250), the run name
 #      must be a plain name (exit 2).
+#   4. --init-from (default ultra = a stock start): a branch arm (R10-br*, R10-encF) needs --init-from <other run>@<step> whose
+#      step<N>.pt exists on the volume; every other arm needs the stock start (exit 2; exit 7 when the file is missing).
 # The run is launched from `git archive <sha>` of --repo (never the working tree). The commit and the sha256 of
 # modal_app.py and of every module the training image mounts go to <log-dir>/launch_manifest.txt before anything starts.
 # The training function is retrain3_80_main (A100 80 GB, 6 h cap per attempt) with the standard recipe flags. Unless
@@ -19,14 +22,14 @@ set -u
 SAVE_EVERY=250
 VOLUME=parakeet-spoken-form
 RUN=""; ARM=""; SHA=""; STEPS=""; MIXDIR=""; REPO=""; APPROVALS=""; LOG=""; PW=""; XP=""; LANGS=""
-RESUME=0; DRY=0; WATCH=1
+INIT=ultra; RESUME=0; DRY=0; WATCH=1
 die() { echo "REFUSED: $2" >&2; exit "$1"; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --run) RUN=$2; shift 2;; --arm) ARM=$2; shift 2;; --sha) SHA=$2; shift 2;; --max-steps) STEPS=$2; shift 2;;
     --mix-dir) MIXDIR=$2; shift 2;; --repo) REPO=$2; shift 2;; --approvals) APPROVALS=$2; shift 2;;
     --log-dir) LOG=$2; shift 2;; --part-weights) PW=$2; shift 2;; --extra-parts) XP=$2; shift 2;;
-    --langs) LANGS=$2; shift 2;; --volume) VOLUME=$2; shift 2;;
+    --langs) LANGS=$2; shift 2;; --volume) VOLUME=$2; shift 2;; --init-from) INIT=$2; shift 2;;
     --resume) RESUME=1; shift;; --dry-run) DRY=1; shift;; --no-watch) WATCH=0; shift;;
     *) die 2 "unknown argument $1";;
   esac
@@ -34,6 +37,13 @@ done
 for v in RUN ARM SHA STEPS MIXDIR REPO APPROVALS LOG; do [ -n "${!v}" ] || die 2 "missing --$(echo $v | tr 'A-Z_' 'a-z-') (see the header of this script)"; done
 [[ $RUN =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die 2 "run name '$RUN' is not a plain name"
 [[ $STEPS =~ ^[0-9]+$ ]] && [ "$STEPS" -gt 0 ] && [ $((STEPS % SAVE_EVERY)) -eq 0 ] || die 2 "--max-steps $STEPS is not a multiple of $SAVE_EVERY"
+
+[[ $INIT == ultra || $INIT =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*@[0-9]+$ ]] || die 2 "--init-from '$INIT' is not ultra or <run>@<step>"
+if [[ $ARM == R10-br* || $ARM == R10-encF ]]; then
+  [ "$INIT" != ultra ] && [ "${INIT%@*}" != "$RUN" ] || die 2 "branch arm $ARM needs --init-from <other run>@<step> (the main run's checkpoint)"
+else
+  [ "$INIT" = ultra ] || die 2 "--init-from $INIT is for the branch arms (R10-br*, R10-encF); arm $ARM starts from stock"
+fi
 
 EXPORT=""
 die() { echo "REFUSED: $2" >&2; [ -z "$EXPORT" ] || rm -rf "$EXPORT"; exit "$1"; }
@@ -53,6 +63,11 @@ if [ $RESUME -eq 1 ]; then
   [ "$FIRST" = "$FULL" ] || die 5 "--resume must use the commit of the first launch (${FIRST:-none logged in $LOG}), not $FULL"
 fi
 
+# a branch's start checkpoint must exist on the volume
+if [ "$INIT" != ultra ]; then
+  modal volume ls "$VOLUME" "exp/${INIT%@*}/step${INIT#*@}.pt" >/dev/null 2>&1 || die 7 "exp/${INIT%@*}/step${INIT#*@}.pt does not exist on $VOLUME"
+fi
+
 # lock 3: the arm exists in the commit
 mkdir -p "$LOG" || die 2 "cannot create $LOG"
 EXPORT=$(mktemp -d "$LOG/export.XXXXXX") || die 2 "cannot create an export directory in $LOG"
@@ -62,7 +77,7 @@ python3 "$PIPE/run_manifest.py" "$PIPE" arm "$ARM" || die 2 "arm '$ARM' is not d
 [ -n "$LANGS" ] || LANGS=$(python3 "$PIPE/run_manifest.py" "$PIPE" langs) || die 2 "cannot read the language list"
 
 CMD=(modal run --detach modal_app.py::retrain3_80_main --run "$RUN" --arm "$ARM" --mix v4 --mix-dir "$MIXDIR"
-     --langs "$LANGS" --init-from ultra --anchor-init --dur-weight 0 --warmup 20 --max-steps "$STEPS"
+     --langs "$LANGS" --init-from "$INIT" --anchor-init --dur-weight 0 --warmup 20 --max-steps "$STEPS"
      --save-every $SAVE_EVERY --r3-sub-batch 1)
 [ -z "$PW" ] || CMD+=(--part-weights "$PW")
 [ -z "$XP" ] || CMD+=(--extra-parts "$XP")
@@ -102,8 +117,10 @@ cat <<EOF
 
 FIRST 5 MINUTES: look in $LOG/train.log for these, in order (anything else first = stop and read it):
   1. BUILD $MIXDIR []                           the list is empty (no language without rows)
-  2. L2SP ANCHOR .../ultra/state.pt INIT ultra SUB_BATCH 1
+  2. L2SP ANCHOR .../ultra/state.pt INIT $INIT SUB_BATCH 1   (the anchor is stock also for a branch)
   3. MIX {...} ARM $ARM {...}                   the arm's settings (R10-main: en_teacher, en_kl_scale 3.0, wf_en_weight 3.0)
+     branch arms: 'branch options: sampler_seed 4242 lr_offset 1000 lr_total 5000 ...' (E arms: also UNFREEZE_TOP 2,
+     'param group 1 ... peak lr 2e-05', then 'lr step 0: group0 ... group1 ...' and 'grad_norm pre-clip dec ... enc ...')
   4. SHARE total ... english part 0.35-0.40     the English-share assert passed
   5. mix <part>: N rows, H h                    one line per listed part; a weighted part appears that many times
   6. staged N files in Ns                         then 'train mix: H h' and 'manifest sha256 ... recorded'
