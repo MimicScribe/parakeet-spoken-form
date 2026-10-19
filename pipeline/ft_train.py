@@ -1536,20 +1536,10 @@ def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_text
     if stage_dir:
         # Copy the selected audio to the container's local disk: ~60k small files read from the network volume made
         # each step ~3x slower than v12y's (dress rehearsal 2026-10-13).
-        from concurrent.futures import ThreadPoolExecutor
-        import shutil
+        from common import stage_files
 
         t0 = time.time()
-
-        def stage(x):
-            dst = stage_dir + x["audio_filepath"]
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            if not os.path.exists(dst):
-                shutil.copyfile(x["audio_filepath"], dst)
-            return {**x, "audio_filepath": dst}
-
-        with ThreadPoolExecutor(64) as ex:
-            rows = list(ex.map(stage, rows))
+        rows = stage_files(rows, stage_dir)
         print(f"staged {len(rows)} files to {stage_dir} in {time.time() - t0:.0f}s", flush=True)
     with open(out, "w") as f:
         for x in rows:

@@ -58,6 +58,7 @@ class FakeExec:
         self.tmp = tmp
         self.launches, self.gates, self.scores, self.stops = [], [], [], []
         self.launch_rc = []  # exit codes to return in order (default 0)
+        self.apps = []  # what `modal app list --json` returns (None = the call fails)
         self.gate_out = {}  # steps text -> output
         self.gate_rc = {}  # steps text -> exit code (0 GO, 1 NO-GO, 2 no verdict)
         self.score_rc = 0
@@ -74,6 +75,8 @@ class FakeExec:
         if argv[:4] == ["modal", "app", "stop", "--yes"]:
             self.stops.append(argv[4])
             return 0, "stopped"
+        if argv[:3] == ["modal", "app", "list"]:
+            return (0, json.dumps(self.apps)) if self.apps is not None else (1, "network error")
         if argv[0] == "SUMMARY":
             d = os.path.basename(argv[1])
             return (0, json.dumps(self.summaries[d])) if d in self.summaries else (1, "no scores")
@@ -430,6 +433,65 @@ def test_a_launch_command_that_cannot_be_read_in_full_never_feeds_a_branch(world
     assert a[a.index("--part-weights") + 1] == "p1=2,p2=1" and a[a.index("--mix-dir") + 1] == "mixdir"
 
 
+def app(app_id, tasks="1", state="ephemeral", desc="parakeet-x"):
+    return dict(app_id=app_id, description=desc, state=state, tasks=tasks, created_at="2026-10-18 22:00:00-07:00")
+
+
+def test_running_apps_keeps_only_apps_with_a_task_and_drops_the_nights_own():
+    raw = json.dumps([app("ap-1"), app("ap-2", tasks="0"), app("ap-3", state="stopped"), app("ap-MAINAPP"),
+                      app("ap-4", state="ephemeral (detached)", tasks="12")])
+    got = T.running_apps(raw, {"ap-MAINAPP"})
+    assert [a["app_id"] for a in got] == ["ap-1", "ap-4"]
+    assert T.running_apps("not json") is None and T.running_apps("{}") is None
+    assert "ap-4" in T.format_apps(got) and "tasks=12" in T.format_apps(got)
+
+
+def test_a_busy_volume_delays_a_branch_launch_then_goes_on_after_the_wait(world):
+    w = world
+    w["vol"].put("M", 1000)
+    cfg = dict(w["cfg"], quiet_max_other=0, quiet_wait_s=1800)
+    w["ex"].apps = [app("ap-MAINAPP"), app("ap-DENSE", tasks="12", desc="parakeet-dense-scan")]  # main is the night's own
+    t = w["make"](cfg)
+    t.cycle()
+    assert w["ex"].launches == [] and "waiting for a quiet volume" in log_text(w) and "ap-DENSE" in log_text(w)
+    w["clock"].t += 600
+    t.cycle()
+    assert w["ex"].launches == [] and log_text(w).count("waiting for a quiet volume") == 1  # logged once
+    w["ex"].apps = [app("ap-MAINAPP")]  # the readers stopped
+    t.cycle()
+    assert launched_runs(w) == ["C"]
+    # control: a volume that never quiets is waited out, then the launch goes ahead with an alarm
+    w2 = dict(w)
+    w["vol"].files.clear()
+    w["vol"].put("M", 1000)
+    os.remove(cfg["state_file"])
+    w["ex"].launches.clear()
+    w["ex"].apps = [app("ap-MAINAPP"), app("ap-DENSE")]
+    t = w["make"](cfg)
+    t.cycle()
+    assert w["ex"].launches == []
+    w["clock"].t += 1900
+    t.cycle()
+    assert launched_runs(w) == ["C"] and "launching anyway" in log_text(w)
+
+
+def test_a_failing_app_list_is_not_a_quiet_volume(world):
+    w = world
+    w["vol"].put("M", 1000)
+    w["ex"].apps = None
+    t = w["make"](dict(w["cfg"], quiet_max_other=0))
+    t.cycle()
+    assert w["ex"].launches == [] and "the app list failed" in log_text(w)
+
+
+def test_without_quiet_max_other_the_launch_does_not_look_at_other_apps(world):
+    w = world
+    w["vol"].put("M", 1000)
+    w["ex"].apps = [app("ap-DENSE")] * 5
+    w["make"]().cycle()
+    assert launched_runs(w) == ["C"]
+
+
 def test_helpers():
     assert T.parse_gate("x", 0) == "go" and T.parse_gate("x", 1) == "nogo" and T.parse_gate("CANNOT DECIDE", 2) is None
     assert T.parse_gate("a\n==> NO-GO for encF", None) == "nogo" and T.parse_gate("==> GO for encF", None) == "go"
@@ -446,3 +508,23 @@ def test_the_new_scripts_carry_no_local_paths_or_env_var_reads():
     text = open(os.path.join(HERE, "run_watch.py")).read()
     for bad in ("/Users/", "~/", "os.environ", "getenv"):
         assert bad not in text, bad
+
+
+def test_trigger_sh_quiet_lists_the_running_apps_and_exits_nonzero_when_busy(tmp_path):
+    import subprocess
+
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    doc = json.dumps([app("ap-DENSE", tasks="12", desc="parakeet-dense-scan"), app("ap-OLD", state="stopped", tasks="0")])
+    (fake / "modal").write_text(f"#!/bin/bash\necho '{doc}'\n")
+    (fake / "modal").chmod(0o755)
+    env = dict(os.environ, PATH=f"{fake}:{os.environ['PATH']}")
+    script = os.path.join(HERE, "..", "scripts", "trigger.sh")
+    r = subprocess.run(["bash", script, "quiet"], capture_output=True, text=True, env=env)
+    assert r.returncode == 1 and "ap-DENSE" in r.stdout and "ap-OLD" not in r.stdout and "NOT QUIET" in r.stdout
+    (fake / "modal").write_text("#!/bin/bash\necho '[]'\n")
+    r = subprocess.run(["bash", script, "quiet"], capture_output=True, text=True, env=env)
+    assert r.returncode == 0 and "QUIET" in r.stdout and "none" in r.stdout
+    (fake / "modal").write_text("#!/bin/bash\necho boom >&2; exit 1\n")
+    r = subprocess.run(["bash", script, "quiet"], capture_output=True, text=True, env=env)
+    assert r.returncode == 2 and "UNKNOWN" in r.stdout

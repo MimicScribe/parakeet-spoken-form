@@ -12,11 +12,15 @@ the app has none (the GPU queue, the gap between a preemption and its retry) the
     plus 45 min of staging / retry slack (5,000 steps at 1.83 s/step -> 4.6 h); without --steps, 4.5 h;
   * speed alarm: the s/step measured between step markers of one attempt is above 1.5 x --expected-s-per-step -> a SPEED
     ALARM line (and <log-dir>/ALARM.txt); an alarm never stops the run, the max-run tripwire does;
+  * staging rate: the training function copies its audio to local disk first and prints `staging N/M files R files/s`; a
+    volume busy with other readers stages at a tenth of its normal speed while the GPU sits idle. More than
+    --stage-check-min (default 10) of task time with staging unfinished and R below --min-stage-rate (default 300) -> stop
+    (exit 6); the rate is in status.json and the log. 0 disables the check;
   * queue limit: more than --max-queue-min (default 240) with no running task in total -> stop (nothing is billed meanwhile,
     but nothing is happening either).
 It appends the app's logs to <log-dir>/app.log every --logs-every-s (non-overlapping time ranges) so the evidence survives
 a stop, and rewrites <log-dir>/status.json each poll. Exit codes: 0 the run finished (decoder_joint.pt exists, or the app
-stopped by itself), 2 stalled or no first marker, 3 interrupted, 4 max run time, 5 queue limit. A failing `modal` call
+stopped by itself), 2 stalled or no first marker, 3 interrupted, 4 max run time, 5 queue limit, 6 slow staging. A failing `modal` call
 (network, CLI) is never read as a stall: it is logged and the clocks are paused for that poll.
 The decision logic (StallWatch) is separate from the `modal` calls so it is tested without a network.
 """
@@ -115,6 +119,44 @@ class StallWatch:
         return out
 
 
+STAGING = re.compile(r"staging (\d+)/(\d+) files (\d+(?:\.\d+)?) files/s")
+STAGED = re.compile(r"staged (\d+) files to \S+ in (\d+)s")
+
+
+class StageWatch:
+    """The staging rate read from the app's log lines. check(task_s) is "ok", "slow" (stop), "unknown" (no rate line yet)."""
+
+    def __init__(self, min_rate: float = 300.0, after_s: float = 600.0, unknown_after_s: float = 900.0):
+        self.min_rate, self.after_s, self.unknown_after_s = min_rate, after_s, unknown_after_s
+        self.done = self.total = 0
+        self.rate = None
+        self.finished = False
+        self.unknown_alarmed = False
+
+    def reset(self) -> None:
+        """A retry stages again."""
+        self.done = self.total = 0
+        self.rate, self.finished, self.unknown_alarmed = None, False, False
+
+    def feed(self, text: str) -> None:
+        for m in STAGING.finditer(text or ""):
+            self.done, self.total, self.rate = int(m.group(1)), int(m.group(2)), float(m.group(3))
+        m = None
+        for m in STAGED.finditer(text or ""):
+            pass
+        if m:
+            self.finished = True
+            self.done = self.total = int(m.group(1))
+            self.rate = int(m.group(1)) / max(int(m.group(2)), 1)
+
+    def check(self, task_s: float) -> str:
+        if not self.min_rate or self.finished:
+            return "ok"
+        if self.rate is None:
+            return "unknown" if task_s >= self.unknown_after_s else "ok"
+        return "slow" if task_s >= self.after_s and self.rate < self.min_rate else "ok"
+
+
 class Modal:
     """The `modal` calls the watchdog needs; each returns None on failure instead of raising."""
 
@@ -166,16 +208,19 @@ REASON_TEXT = {
     "no_first_marker": "NO FIRST MARKER after {idle:.0f} min of task time",
     "max_run": "MAX RUN TIME: {run:.0f} min of task time (limit {limit:.0f} min; last step {step})",
     "queue": "QUEUE LIMIT: {queue:.0f} min without a running task",
+    "slow_staging": "SLOW STAGING: {rate:.0f} files/s after {run:.0f} min of task time ({done}/{total} files staged), "
+                    "below the {minrate:.0f} files/s limit; the GPU is idle while the volume is read",
 }
-EXIT_CODE = {"stall": 2, "no_first_marker": 2, "max_run": 4, "queue": 5}
+EXIT_CODE = {"stall": 2, "no_first_marker": 2, "max_run": 4, "queue": 5, "slow_staging": 6}
 
 
 def watch(ops, log_dir: str, stall_s: float, grace_s: float, poll_s: float, logs_every_s: float,
           max_run_s: float = float("inf"), expected_s_per_step: float = 0.0, max_queue_s: float = float("inf"),
-          clock=time.time, sleep=time.sleep, say=print) -> int:
+          stage: "StageWatch | None" = None, clock=time.time, sleep=time.sleep, say=print) -> int:
     os.makedirs(log_dir, exist_ok=True)
     w = StallWatch(clock(), stall_s, grace_s, max_run_s, expected_s_per_step, max_queue_s=max_queue_s)
     last_logs, bad, last_beat = clock(), 0, 0.0
+    attempt, attempt_t0 = 0, 0.0
     steps, final = set(), False
     log_path = os.path.join(log_dir, "app.log")
 
@@ -186,12 +231,16 @@ def watch(ops, log_dir: str, stall_s: float, grace_s: float, poll_s: float, logs
             with open(log_path, "a") as f:
                 f.write(text)
             last_logs = now
+            if stage is not None:
+                stage.feed(text)
 
     def status(now, verdict, tasks):
         doc = dict(time=iso(now), verdict=verdict, last_step=w.max_step, tasks=tasks, attempt=w.attempt,
                    run_min=round(w.run_s / 60, 1), queue_min=round(w.queue_s / 60, 1),
                    idle_min=round(w.idle_s_ / 60, 1), s_per_step=w.s_per_step and round(w.s_per_step, 3),
-                   max_run_min=None if max_run_s == float("inf") else round(max_run_s / 60, 1))
+                   max_run_min=None if max_run_s == float("inf") else round(max_run_s / 60, 1),
+                   staging_rate=stage and stage.rate, staging=stage and f"{stage.done}/{stage.total}",
+                   staging_finished=stage and stage.finished)
         tmp = os.path.join(log_dir, "status.json.tmp")
         with open(tmp, "w") as f:
             json.dump(doc, f)
@@ -212,6 +261,18 @@ def watch(ops, log_dir: str, stall_s: float, grace_s: float, poll_s: float, logs
                 bad = 0
             state, tasks = info if info is not None else ("", -1)
             verdict = w.observe(now, steps, final, state, tasks, counted=ok)
+            if stage is not None and w.attempt != attempt:  # a retry stages its audio again
+                attempt, attempt_t0 = w.attempt, w.run_s
+                stage.reset()
+            if stage is not None and not stage.finished and w.run_s > 0 and verdict == "ok" and ok:
+                persist(now)  # while the audio is being staged the log is read every poll: that is where the rate shows
+                check = stage.check(w.run_s - attempt_t0)
+                if check == "slow":
+                    w.reason, verdict = "slow_staging", "stop"
+                elif check == "unknown" and not stage.unknown_alarmed:
+                    stage.unknown_alarmed = True
+                    w.alarms.append("STAGING RATE UNKNOWN: no `staging N/M files R files/s` line in the log after "
+                                    f"{(w.run_s - attempt_t0) / 60:.0f} min of task time (an older training image prints none)")
             for alarm in w.take_alarms():
                 say(f"{iso(now)} {alarm}")
                 with open(os.path.join(log_dir, "ALARM.txt"), "a") as f:
@@ -229,7 +290,9 @@ def watch(ops, log_dir: str, stall_s: float, grace_s: float, poll_s: float, logs
                 return 0
             if verdict == "stop":
                 say(f"{iso(now)} " + REASON_TEXT[w.reason].format(
-                    idle=w.idle_s_ / 60, step=w.max_step, run=w.run_s / 60, limit=max_run_s / 60, queue=w.queue_s / 60)
+                    idle=w.idle_s_ / 60, step=w.max_step, run=w.run_s / 60, limit=max_run_s / 60, queue=w.queue_s / 60,
+                    rate=(stage.rate or 0) if stage else 0, done=stage.done if stage else 0,
+                    total=stage.total if stage else 0, minrate=stage.min_rate if stage else 0)
                     + " -> stopping the app")
                 stopped = ops.stop()
                 say(f"{iso(clock())} modal app stop {'ok' if stopped else 'FAILED, stop it by hand'}")
@@ -255,12 +318,16 @@ def main(argv=None) -> int:
     ap.add_argument("--expected-s-per-step", type=float, default=1.83)
     ap.add_argument("--max-run-h", type=float, default=0.0, help="task-time limit; 0 = derived from --steps")
     ap.add_argument("--max-queue-min", type=float, default=240.0, help="total time without a running task -> stop")
+    ap.add_argument("--min-stage-rate", type=float, default=300.0,
+                    help="files/s; staging below this after --stage-check-min of task time -> stop (0 = off)")
+    ap.add_argument("--stage-check-min", type=float, default=10.0)
     ap.add_argument("--poll-s", type=float, default=120.0)
     ap.add_argument("--logs-every-s", type=float, default=600.0)
     a = ap.parse_args(argv)
     max_run = a.max_run_h * 3600 if a.max_run_h else default_max_run_s(a.steps, a.expected_s_per_step)
     return watch(Modal(a.volume, a.run, a.app), a.log_dir, a.stall_min * 60, a.grace_min * 60, a.poll_s,
-                 a.logs_every_s, max_run, a.expected_s_per_step, a.max_queue_min * 60)
+                 a.logs_every_s, max_run, a.expected_s_per_step, a.max_queue_min * 60,
+                 StageWatch(a.min_stage_rate, a.stage_check_min * 60, a.stage_check_min * 90))
 
 
 if __name__ == "__main__":

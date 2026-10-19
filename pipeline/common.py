@@ -1,6 +1,11 @@
 """Shared constants."""
 
+import os
 import re
+import shutil
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 # The written-form characters the fine-tuned model must never emit. They are the
 # only non-letter, non-punctuation pieces in Parakeet's 8,192-piece vocabulary.
@@ -95,3 +100,25 @@ def number_span(words: list[str]) -> list[bool]:
                     if left_ok and right_ok:
                         m[j] = changed = True
     return m
+
+
+def stage_files(rows: list, stage_dir: str, workers: int = 64, every: int = 5000, say=print, copy=shutil.copyfile,
+                clock=time.time) -> list:
+    """Copy each row's audio file to stage_dir + its path (skipping files already there) and return the rows pointing at the
+    copies, in order. Prints `staging <done>/<total> files <rate> files/s` every `every` files (the run watchdog reads the
+    rate: a volume busy with other readers stages at a tenth of its normal speed)."""
+    t0, done, lock = clock(), [0], threading.Lock()
+
+    def stage(x):
+        dst = stage_dir + x["audio_filepath"]
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if not os.path.exists(dst):
+            copy(x["audio_filepath"], dst)
+        with lock:
+            done[0] += 1
+            if done[0] % every == 0 or done[0] == len(rows):
+                say(f"staging {done[0]}/{len(rows)} files {done[0] / max(clock() - t0, 1e-6):.0f} files/s", flush=True)
+        return {**x, "audio_filepath": dst}
+
+    with ThreadPoolExecutor(workers) as ex:
+        return list(ex.map(stage, rows))

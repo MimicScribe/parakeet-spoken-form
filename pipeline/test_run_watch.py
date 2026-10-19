@@ -247,3 +247,70 @@ def test_modal_stop_passes_yes(monkeypatch):
     seen = []
     monkeypatch.setattr(m, "_run", lambda *a, **k: seen.append(a) or "")
     assert m.stop() and seen == [("app", "stop", "--yes", "ap-X")]  # red-on-base: the prompt aborts a non-interactive stop
+
+
+def test_stage_watch_reads_the_rate_and_judges_only_unfinished_staging():
+    sw = W.StageWatch(300.0, 600.0, 900.0)
+    assert sw.check(700) == "ok" or sw.check(700) == "unknown"
+    assert sw.check(100) == "ok" and sw.check(1000) == "unknown"  # no rate line at all: unknown, never "slow"
+    sw.feed("noise\nstaging 5000/521000 files 65 files/s\n")
+    assert sw.rate == 65.0 and (sw.done, sw.total) == (5000, 521000)
+    assert sw.check(300) == "ok"  # too early to judge
+    assert sw.check(601) == "slow"
+    sw.feed("staging 10000/521000 files 800 files/s")
+    assert sw.rate == 800.0 and sw.check(601) == "ok"
+    sw.feed("staged 521000 files to /tmp/stage in 40s")
+    assert sw.finished and sw.check(10 ** 6) == "ok" and abs(sw.rate - 13025) < 1
+    slow_done = W.StageWatch()
+    slow_done.feed("staged 1000 files to /tmp/stage in 100s")  # finished slowly: reported, not stopped
+    assert slow_done.check(10 ** 6) == "ok" and slow_done.rate == 10.0
+    off = W.StageWatch(0.0)
+    off.feed("staging 5000/9000 files 1 files/s")
+    assert off.check(10 ** 6) == "ok"
+    sw.reset()
+    assert sw.rate is None and not sw.finished
+
+
+class StagingOps(FakeOps):
+    def __init__(self, script, clock, info=None, lines=None):
+        super().__init__(script, clock, info)
+        self.lines, self.t0 = lines, clock.t
+
+    def logs(self, since, until):
+        super().logs(since, until)
+        return self.lines(self.clock.t - self.t0)
+
+
+def run_staging(tmp_path, lines, script=lambda t: (set(), False), min_rate=300.0, info=None):
+    c = Clock()
+    t0 = c.t
+    ops = StagingOps(lambda t: script(t - t0), c, info and (lambda t: info(t - t0)), lines)
+    msgs = []
+    rc = W.watch(ops, str(tmp_path), 40 * MIN, 75 * MIN, 120.0, 600.0, stage=W.StageWatch(min_rate, 600.0, 900.0),
+                 clock=c, sleep=c.sleep, say=msgs.append)
+    return rc, ops, msgs
+
+
+def test_slow_staging_stops_the_app_after_ten_minutes_and_says_why(tmp_path):
+    rc, ops, msgs = run_staging(tmp_path, lambda t: f"staging {int(t * 65)}/521000 files 65 files/s\n")
+    assert rc == 6 and ops.stopped
+    assert any("SLOW STAGING" in m and "65 files/s" in m for m in msgs)
+    st = json.load(open(os.path.join(tmp_path, "status.json")))
+    assert st["staging_rate"] == 65.0 and st["run_min"] < 13  # stopped soon after the 10 min mark
+    assert "slow_staging" in open(os.path.join(tmp_path, "ALARM.txt")).read()
+
+
+def test_fast_staging_does_not_stop_and_the_run_goes_on(tmp_path):
+    def lines(t):
+        if t < 5 * MIN:
+            return ""
+        return "staging 100000/521000 files 800 files/s\n" + ("staged 521000 files to /tmp/stage in 650s\n" if t > 12 * MIN else "")
+
+    rc, ops, msgs = run_staging(tmp_path, lines, script=lambda t: ({250}, t > 60 * MIN))
+    assert rc == 0 and not ops.stopped
+
+
+def test_staging_that_is_only_slow_in_the_queue_does_not_count_queue_time(tmp_path):
+    rc, ops, msgs = run_staging(tmp_path, lambda t: "staging 5000/521000 files 65 files/s\n" if t > 200 * MIN else "",
+                                info=lambda t: ("e", 0 if t < 180 * MIN else 1), script=lambda t: (set(), t > 188 * MIN))
+    assert rc == 0 and not ops.stopped  # slow, but the run is over before 10 min of task time have passed

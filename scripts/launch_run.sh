@@ -21,7 +21,9 @@
 # --no-watch, run_watch.py starts beside it, under `caffeinate -i` (a refusal, exit 9, if caffeinate is missing), and stops
 # the app on a stall (no first marker in 75 min, none for 40 min; time with no running task does not count) or when the
 # task time passes the spend tripwire (steps x s/step x 1.5 + 45 min; 4.6 h for 5,000 steps), and logs a speed alarm above
-# 1.5 x the expected s/step. Paths come from the arguments only.
+# 1.5 x the expected s/step, and stops the app when the audio staging runs below 300 files/s after 10 min of task time (a
+# volume busy with other readers; the GPU would sit idle). Run `scripts/trigger.sh quiet` before a launch to see who else reads
+# the volume. Paths come from the arguments only.
 set -u
 SAVE_EVERY=250
 VOLUME=parakeet-spoken-form
@@ -141,7 +143,8 @@ FIRST 5 MINUTES: look in $LOG/train.log for these, in order (anything else first
      'param group 1 ... peak lr 2e-05', then 'lr step 0: group0 ... group1 ...' and 'grad_norm pre-clip dec ... enc ...')
   4. SHARE total ... english part 0.35-0.40     the English-share assert passed
   5. mix <part>: N rows, H h                    one line per listed part; a weighted part appears that many times
-  6. staged N files in Ns                         then 'train mix: H h' and 'manifest sha256 ... recorded'
+  6. staging N/M files R files/s ... staged N files in Ns   R should be several hundred (the watchdog stops the app below
+                                                300 files/s after 10 min); then 'train mix: H h' and 'manifest sha256 ... recorded'
   7. en_teacher ...@...: N tensors              the English KL teacher loaded
   8. step 10 loss ... then every 10 steps       about 2 s per step; 'r3 rnnt ... kl_b ...' lines with finite numbers
   9. step250.pt.done in exp/$RUN                first checkpoint, about 10 min after the first step

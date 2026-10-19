@@ -168,6 +168,45 @@ def early_stop_decision(v_now, v_ref, wer_ok, limit_pp: float):
     return "keep", f"pooled V {v_now:+.1f} pp (limit {limit_pp:+.1f}, reference {v_ref}), WER ok"
 
 
+def running_apps(raw: str, exclude=()) -> list:
+    """The apps of a `modal app list --json` listing that hold a running task and are not in `exclude`; None if raw is no list."""
+    try:
+        apps = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(apps, list):
+        return None
+    out = []
+    for a in apps:
+        try:
+            tasks = int(str(a.get("tasks", "0")) or 0)
+        except ValueError:
+            tasks = 0
+        if tasks > 0 and not str(a.get("state", "")).startswith("stopped") and a.get("app_id") not in exclude:
+            out.append(dict(app_id=a.get("app_id"), description=a.get("description", ""), state=a.get("state", ""),
+                            tasks=tasks, created_at=a.get("created_at", "")))
+    return out
+
+
+def format_apps(apps: list) -> str:
+    return "\n".join(f"  {a['app_id']}  {a['description']:<28s} tasks={a['tasks']}  {a['state']}  started {a['created_at']}"
+                     for a in apps)
+
+
+def own_app_ids(cfg: dict) -> set:
+    """App ids of the runs launched through the launcher (their launch manifests), which are not 'other' readers."""
+    ids, dirs = set(), []
+    root = cfg.get("runs_log_root")
+    if root and os.path.isdir(root):
+        dirs += [os.path.join(root, d) for d in os.listdir(root)]
+    if cfg.get("main_log_dir"):
+        dirs.append(cfg["main_log_dir"])
+    for d in dirs:
+        ids.add(parse_manifest(os.path.join(d, "launch_manifest.txt")).get("app"))
+    ids.discard(None)
+    return ids
+
+
 class Trigger:
     def __init__(self, cfg: dict, vol, ex, clock=time.time, dry_run=False, say=None):
         self.cfg, self.vol, self.ex, self.clock, self.dry = cfg, vol, ex, clock, dry_run
@@ -258,6 +297,30 @@ class Trigger:
 
     # --- launching -------------------------------------------------------------------------------------------
 
+    def quiet_ok(self, role: str) -> bool:
+        """With `quiet_max_other` in the config, wait (up to `quiet_wait_s`, then go on with an alarm) while more than that
+        many apps besides this night's own runs hold a running task: the launched run stages its audio from the same volume
+        and a busy volume leaves its GPU idle."""
+        limit = self.cfg.get("quiet_max_other")
+        if limit is None:
+            return True
+        rc, out = self.ex.run(["modal", "app", "list", "--json", "--limit", "200"], timeout=120)
+        apps = running_apps(out, own_app_ids(self.cfg)) if rc == 0 else None
+        waited = self.state.setdefault("quiet_since", {})
+        if apps is not None and len(apps) <= limit:
+            self.clear_warn(f"quiet-{role}")
+            return True
+        since = waited.setdefault(role, self.clock())
+        late = self.clock() - since > self.cfg.get("quiet_wait_s", 2700)
+        what = "the app list failed" if apps is None else f"{len(apps)} other apps are running (limit {limit}):\n{format_apps(apps)}"
+        if late:
+            self.log(f"ALARM {role}: the volume was not quiet for {self.cfg.get('quiet_wait_s', 2700) // 60} min; launching "
+                     f"anyway. {what}")
+            return True
+        self.once(f"quiet-{role}", f"{role}: waiting for a quiet volume before the launch: {what}")
+        self.save()
+        return False
+
     def launch_params(self) -> dict:
         c = self.cfg
         man = parse_manifest(os.path.join(c["main_log_dir"], "launch_manifest.txt")) if c.get("main_log_dir") else {}
@@ -288,6 +351,8 @@ class Trigger:
             self.save()
             return
         if rec and self.clock() - rec.get("last_try", 0) < RETRY_S:
+            return
+        if not self.dry and not self.quiet_ok(role):
             return
         p = self.launch_params()
         missing = [k for k in ("sha", "mix_dir") if not p[k]]
@@ -631,14 +696,41 @@ class Trigger:
             sleep(poll)
 
 
+def quiet_check(cfg: dict) -> int:
+    """Print who else is running on the volume; exit 0 when that is no more than quiet_max_other, 1 otherwise, 2 if unknown."""
+    try:
+        r = subprocess.run(["modal", "app", "list", "--json", "--limit", "200"], capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        r = None
+    apps = running_apps(r.stdout, own_app_ids(cfg)) if r is not None and r.returncode == 0 else None
+    if apps is None:
+        print("cannot list the running apps (network or CLI failure): the volume state is UNKNOWN")
+        return 2
+    limit = cfg.get("quiet_max_other", 0)
+    print(f"{len(apps)} other app(s) holding a running task (this night's own runs excluded; limit {limit}):")
+    print(format_apps(apps) or "  none")
+    print("QUIET" if len(apps) <= limit else "NOT QUIET: pause the readers above (or wait) before launching; "
+          "a busy volume stages at a tenth of its speed and leaves the GPU idle")
+    return 0 if len(apps) <= limit else 1
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--config", required=True)
     ap.add_argument("--once", action="store_true", help="one cycle, then exit")
+    ap.add_argument("--config")
+    ap.add_argument("--quiet-check", action="store_true", help="print the apps holding a running task and exit 1 if "
+                    "more than quiet_max_other (config, default 0) are not this night's own runs")
     ap.add_argument("--dry-run", action="store_true", help="log what would be launched / scored / stopped; do nothing")
     a = ap.parse_args(argv)
-    with open(a.config) as f:
-        cfg = json.load(f)
+    cfg = {}
+    if a.config:
+        with open(a.config) as f:
+            cfg = json.load(f)
+    if a.quiet_check:
+        return quiet_check(cfg)
+    if not a.config:
+        print("--config is required", file=sys.stderr)
+        return 2
     for k in ("runs", "launcher", "repo", "approvals", "runs_log_root", "score_script", "score_root", "state_file",
               "log_file", "volume"):
         if k not in cfg:

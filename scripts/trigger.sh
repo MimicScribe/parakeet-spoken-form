@@ -6,10 +6,16 @@
 # trigger.py exits 0 when everything planned is settled and 1 when its time limit passes with work pending; exit 2
 # (bad config) and 3 (another copy holds the state lock) end this script too. Any other exit (a crash, a kill signal)
 # restarts it after 30 s.
+#   scripts/trigger.sh quiet [config.json]     list the apps holding a running task besides this night's own runs; exit 1 if
+#                                              there are more than the config's quiet_max_other (default 0): run it before a launch
 set -u
+HERE=$(cd "$(dirname "$0")" && pwd)
+if [ "${1:-}" = quiet ]; then
+  shift
+  exec python3 "$HERE/trigger.py" --quiet-check ${1:+--config "$1"}
+fi
 [ $# -ge 1 ] || { echo "usage: trigger.sh <config.json> [--dry-run] [--once]" >&2; exit 2; }
 command -v caffeinate >/dev/null 2>&1 || { echo "caffeinate not found: the orchestrator must run under caffeinate -i" >&2; exit 9; }
-HERE=$(cd "$(dirname "$0")" && pwd)
 if [ "$1" != "--inner" ]; then
   exec caffeinate -i bash "$0" --inner "$@"
 fi
