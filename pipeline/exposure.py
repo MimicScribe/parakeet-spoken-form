@@ -155,7 +155,8 @@ def exposure(exp: str, group_by=("part",)) -> dict:
     resolvers = {}
     out = {"steps": 0, "rows_drawn": 0, "seconds_drawn": 0.0, "unmatched": 0, "ambiguous": 0, "manifests": [],
            "parts": {}, "cells": {}, "tags": {}, "langs": {}}
-    fresh = lambda: {"listed_rows": 0, "listed_sec": 0.0, "draws": 0.0, "draw_sec": 0.0, "distinct": 0.0}  # noqa: E731
+    fresh = lambda: {"listed_rows": 0, "listed_unique": 0, "listed_sec": 0.0, "draws": 0.0, "draw_sec": 0.0,  # noqa: E731
+                     "distinct": 0.0}
 
     def bucket(kind, key):
         return out[kind].setdefault(key, fresh())
@@ -180,10 +181,19 @@ def exposure(exp: str, group_by=("part",)) -> dict:
                 drawn[(sha, r["i"])] += 1 / len(cand)
     # listed: the LAST manifest of the run (the one a finished run trained on); draws from earlier manifests of a
     # non-r3 resume are folded in by part/cell key, so only the draws side spans manifests.
+    # A part listed n times has n index lines with the same (part, token hash, duration): a draw cannot tell the copies
+    # apart, so draws are split between them. "distinct" counts such a group ONCE (a unique row drawn at least once is
+    # one distinct row, however many copies the listing holds); listed_unique is the matching denominator.
     last = out["manifests"][-1] if out["manifests"] else None
+    group_draws: dict[tuple, float] = collections.defaultdict(float)
+    for sha, idx in indexes.items():
+        for r in idx:
+            group_draws[(sha, r["part"], r["h"], r["d"])] += drawn.get((sha, r["i"]), 0.0)
+    seen_groups: dict[tuple, set] = collections.defaultdict(set)
     for sha, idx in indexes.items():
         for r in idx:
             n = drawn.get((sha, r["i"]), 0.0)
+            g = (sha, r["part"], r["h"], r["d"])
             keys = [("parts", r["part"]), ("tags", r["tag"] or "(none)"), ("langs", r["lang"])]
             keys += [("cells", f"{r['lang']}/{k}") for k in r["kinds"]]
             for kind, key in keys:
@@ -193,7 +203,11 @@ def exposure(exp: str, group_by=("part",)) -> dict:
                     b["listed_sec"] += r["d"] / 100
                 b["draws"] += n
                 b["draw_sec"] += n * r["d"] / 100
-                b["distinct"] += min(n, 1.0)
+                if g not in seen_groups[(kind, key)]:  # one count per unique row in this bucket
+                    seen_groups[(kind, key)].add(g)
+                    if sha == last:
+                        b["listed_unique"] += 1
+                    b["distinct"] += min(group_draws[g], 1.0)
     out["listed_rows"] = len(indexes[last]) if last else 0
     return out
 
@@ -209,8 +223,8 @@ def report(exp: str) -> str:
                                                                                    "of its kinds)", "cells")):
         L += ["", f"{title:<46} {'listed':>8} {'drawn':>9} {'draws/row':>9} {'distinct%':>9} {'listed h':>8} {'drawn h':>8}"]
         for key, b in sorted(e[kind].items()):
-            lr = b["listed_rows"]
+            lr, lu = b["listed_rows"], b["listed_unique"]
             L.append(f"{key:<46} {lr:>8} {b['draws']:>9.0f} {b['draws'] / lr if lr else 0:>9.2f} "
-                     f"{100 * b['distinct'] / lr if lr else 0:>9.1f} {b['listed_sec'] / 3600:>8.2f} "
+                     f"{100 * b['distinct'] / lu if lu else 0:>9.1f} {b['listed_sec'] / 3600:>8.2f} "
                      f"{b['draw_sec'] / 3600:>8.2f}")
     return "\n".join(L)
