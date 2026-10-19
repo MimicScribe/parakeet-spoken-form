@@ -288,11 +288,13 @@ def refs_en(tag: str, cv_shards: int = 6, cv_per_accent: int = 3, vctk_n: int = 
 
 @app.function(image=refs_img, volumes={VOL: vol}, cpu=4, memory=32768, timeout=3 * 3600)
 def refs_cv(tag: str, lang: str = "pt", shards: int = 8, per_gender: int = 12, min_snr: float = 30.0,
-            accent_re: str = "", min_dur: float = 4.5, probe: bool = False):
+            accent_re: str = "", min_dur: float = 4.5, probe: bool = False, groups: str = ""):
     """Clone references from Common Voice 17 TRAIN (CC0-1.0; the fixie-ai parquet mirror; train / dev / test speakers
     are disjoint in Common Voice): one clip per client, no down votes, 4.5-13 s, crude SNR >= min_snr. The accent is the
     speaker's own tag ("" when untagged); accent_re keeps only the tags that match (pt: Portugal). probe: only count
-    the accent tags (nothing written). -> ml/<tag>/refs/<lang>/ (new path)."""
+    the accent tags (nothing written). groups: a JSON {group name: regex over the accent tag}; per_gender speakers per
+    gender are picked in EACH group (the speaker's group is the first that matches) and carry it as "accent".
+    -> ml/<tag>/refs/<lang>/ (new path)."""
     import collections
     import io
     import json
@@ -310,6 +312,8 @@ def refs_cv(tag: str, lang: str = "pt", shards: int = 8, per_gender: int = 12, m
     files = sorted(f for f in HfApi().list_repo_files("fixie-ai/common_voice_17_0", repo_type="dataset")
                    if f.startswith(f"{lang}/train-"))[:shards]
     rx = re.compile(accent_re, re.I) if accent_re else None
+    grp = [(k, re.compile(v, re.I)) for k, v in json.loads(groups).items()] if groups else []
+    group_of = lambda acc: next((k for k, g in grp if g.search(acc)), None)  # noqa: E731
     tags = collections.Counter()
     best = {}
     for fn in files:
@@ -317,7 +321,8 @@ def refs_cv(tag: str, lang: str = "pt", shards: int = 8, per_gender: int = 12, m
         for r in df.itertuples():
             acc = str(getattr(r, "accent", "") or "").strip()
             tags[acc] += 1
-            if probe or (rx and not rx.search(acc)) or int(getattr(r, "down_votes", 0) or 0) > 0:
+            if probe or (rx and not rx.search(acc)) or (grp and group_of(acc) is None) \
+                    or int(getattr(r, "down_votes", 0) or 0) > 0:
                 continue
             try:
                 x, sr = sf.read(io.BytesIO(r.audio["bytes"]), dtype="float32")
@@ -331,15 +336,16 @@ def refs_cv(tag: str, lang: str = "pt", shards: int = 8, per_gender: int = 12, m
             snr = _snr_db(x, sr)
             if snr < min_snr or (r.client_id in best and best[r.client_id][5] >= snr):
                 continue
-            best[r.client_id] = (x, sr, str(r.gender or ""), r.sentence, r.path, snr, acc)
+            best[r.client_id] = (x, sr, str(r.gender or ""), r.sentence, r.path, snr, group_of(acc) if grp else acc)
     if probe:
         return {"accent_tags": tags.most_common(30)}
     os.makedirs(out)
     meta, picked = [], []
-    for g in ("female", "male"):
-        pool = [k for k, v in best.items() if v[2].startswith(g)]
-        rng.shuffle(pool)
-        picked += pool[:per_gender]
+    for grp_name in (sorted({v[6] for v in best.values()}) if grp else [None]):
+        for g in ("female", "male"):
+            pool = sorted(k for k, v in best.items() if v[2].startswith(g) and (grp_name is None or v[6] == grp_name))
+            rng.shuffle(pool)
+            picked += pool[:per_gender]
     for k in picked:
         x, sr, g, t, clip, snr, acc = best[k]
         p = f"{out}/cv_{k[:12]}.wav"
@@ -357,13 +363,13 @@ def refs_cv(tag: str, lang: str = "pt", shards: int = 8, per_gender: int = 12, m
 
 @app.local_entrypoint()
 def run_refs_cv(tag: str, lang: str = "pt", shards: int = 8, per_gender: int = 12, accent_re: str = "",
-                probe: bool = False, min_snr: float = 30.0, min_dur: float = 4.5):
-    print(refs_cv.remote(tag, lang, shards, per_gender, min_snr, accent_re, min_dur, probe))
+                probe: bool = False, min_snr: float = 30.0, min_dur: float = 4.5, groups: str = ""):
+    print(refs_cv.remote(tag, lang, shards, per_gender, min_snr, accent_re, min_dur, probe, groups))
 
 
 @app.local_entrypoint()
-def run_refs_en(tag: str = "ttsSYM1r_en"):
-    print(refs_en.remote(tag))
+def run_refs_en(tag: str = "ttsSYM1r_en", cv_shards: int = 6, cv_per_accent: int = 3, vctk_n: int = 6, libri_n: int = 6):
+    print(refs_en.remote(tag, cv_shards, cv_per_accent, vctk_n, libri_n))
 
 
 import re as _re0
