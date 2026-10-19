@@ -1886,6 +1886,11 @@ R3_ARMS.update({
     # R8-s-en3 = the English levers together (2026-10-18): B as the English KL teacher, its KL x 3, English wf_pen x 3
     "R8-s-en3": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, en_teacher="w3soup_a0.5@0", en_kl_scale=3.0,
                      wf_en_weight=3.0),
+    # R10-main = the main-run arm (2026-10-18): the R8-s-en3 settings under their final name. Stock start (recipe: init
+    # ultra, --anchor-init, dur 0, warmup 20, RUN2_LANGS), B as the English KL teacher with its KL x 3, English wf_pen
+    # x 3; no kl_mask_space, wf_pen on all pieces. Launch only through the run launcher (approval + new run name).
+    "R10-main": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, en_teacher="w3soup_a0.5@0", en_kl_scale=3.0,
+                     wf_en_weight=3.0),
     "R9-S2": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0",
                   wf_weight=0.0),
     "R9-S3": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R7_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0"),
