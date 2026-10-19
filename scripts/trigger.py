@@ -451,7 +451,7 @@ class Trigger:
                 items.append((0, role, s))
         items.append((1, "brEr", 500))
         items.append((1, "brCs2", 500))
-        if "anc1" in self.runs:  # the anchor-weight test and its matched control, the main run at step 500
+        if "anc1" in self.runs and self.exists.get(self.runs["anc1"]["run"]):  # the anchor test and its matched control (main@500)
             items += [(1, "anc1", 500), (1, "main", 500)]
         es = c.get("early_stop", {})
         if es:
