@@ -125,7 +125,7 @@ if modal is not None:
 
     @app.function(image=image, volumes={VOL: vol}, gpu=["L4", "A10G", "L40S"], timeout=3 * 3600, max_containers=4)
     def build_lang(lang: str, src: str, tag: str = "", hours: float = 0.6, seed: int = 1, seam_positions: int = 3,
-                   seam_limit: int = 0, phases: int = 3) -> dict:
+                   seam_limit: int = 0, phases: int = 3, root: str = "esfr_dense1") -> dict:
         from collections import Counter
 
         import librosa
@@ -135,7 +135,7 @@ if modal is not None:
         import ml_p3
         import ml_decide as D
 
-        out = f"{VOL}/ml/esfr_dense1/{lang}"
+        out = f"{VOL}/ml/{root}/{lang}"
         src_paths = [f"{VOL}/{x.format(lang=lang)}" for x in src.split(",")]  # several judged pass files of the language
         for sp_ in src_paths:
             assert os.path.exists(f"{out}/judged_{os.path.basename(sp_)[:-6]}.json"), f"{lang}: {sp_} never judged"
@@ -260,6 +260,6 @@ if modal is not None:
 
     @app.local_entrypoint()
     def main(langs: str, src: str = "ml/esfr_dense1/{lang}/rows_dense1.jsonl", tag: str = "", hours: float = 0.6,
-             seed: int = 1, seam_positions: int = 3, seam_limit: int = 0):
-        for r in build_lang.starmap([(l, src, tag, hours, seed, seam_positions, seam_limit) for l in langs.split(",")]):
+             seed: int = 1, seam_positions: int = 3, seam_limit: int = 0, root: str = "esfr_dense1"):
+        for r in build_lang.starmap([(l, src, tag, hours, seed, seam_positions, seam_limit, 3, root) for l in langs.split(",")]):
             print(json.dumps(r, ensure_ascii=False)[:3000])
