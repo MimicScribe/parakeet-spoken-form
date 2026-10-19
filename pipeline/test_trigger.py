@@ -370,7 +370,7 @@ def test_early_stop_at_main_2500_stops_only_the_main_app(world):
                          "M_step2500": {"pooled_v_vs_stock_pp": 3.6, "wer_ok": True}}
     t = w["make"]()
     settle(w, t, 4)
-    assert w["ex"].stops == ["ap-MAINAPP"] and t.state["early_stop"]["action"] == "stopped"
+    assert w["ex"].stops == ["ap-MAINAPP"] and t.state["early_stop"]["main"]["action"] == "stopped"
     w["vol"].put("M", 3000)
     settle(w, t, 3)
     assert w["ex"].stops == ["ap-MAINAPP"]  # once
@@ -490,6 +490,130 @@ def test_without_quiet_max_other_the_launch_does_not_look_at_other_apps(world):
     w["ex"].apps = [app("ap-DENSE")] * 5
     w["make"]().cycle()
     assert launched_runs(w) == ["C"]
+
+
+def test_second_seed_control_branch_launches_5_min_after_brE_with_its_seed_and_does_not_enter_the_gate(world):
+    w = world
+    cfg = json.loads(json.dumps(w["cfg"]))
+    cfg["runs"]["brCs2"] = dict(run="C2", arm="R10-brC", seed=777)
+    w["vol"].put("M", 1000)
+    t = w["make"](cfg)
+    t.cycle()
+    assert launched_runs(w) == ["C"]
+    w["clock"].t += 301
+    t.cycle()
+    assert launched_runs(w) == ["C", "E"]
+    w["clock"].t += 200
+    t.cycle()
+    assert launched_runs(w) == ["C", "E"]  # only 200 s after brE
+    w["clock"].t += 101
+    t.cycle()
+    assert launched_runs(w) == ["C", "E", "C2"]
+    c2 = w["ex"].launches[-1]
+    assert c2[c2.index("--arm") + 1] == "R10-brC" and c2[c2.index("--init-from") + 1] == "M@1000"
+    assert c2[c2.index("--max-steps") + 1] == "500" and c2[c2.index("--seed") + 1] == "777"
+    assert all("--seed" not in a for a in w["ex"].launches[:2])  # brC and brE keep the arm's own seed
+    # brEr (flag) goes after brCs2, not at the same time
+    open(w["cfg"]["brEr_flag"], "w").close()
+    t.cycle()
+    assert launched_runs(w) == ["C", "E", "C2"]
+    w["clock"].t += 301
+    t.cycle()
+    assert launched_runs(w) == ["C", "E", "C2", "Er"]
+    # scored like brC, never read by the gate
+    w["vol"].put("C", 250, 500)
+    w["vol"].put("E", 250, 500)
+    w["vol"].put("C2", 250, 500)
+    gate_says(w, 0, 0, 0)
+    settle(w, t, 10)
+    assert {(a[1], a[2]) for a in w["ex"].scores} >= {("C2", "500")} and ("C2", "250") not in {(a[1], a[2]) for a in w["ex"].scores}
+    assert all("C2" not in g for g in w["ex"].gates) and all(g[g.index("--steps") - 1] == "C" for g in w["ex"].gates)
+
+
+def test_anchor_test_is_scored_with_the_main_runs_step_500_and_compared(world, tmp_path):
+    w = world
+    (tmp_path / "cmp.py").write_text("")
+    cfg = json.loads(json.dumps(w["cfg"]))
+    cfg["runs"]["anc1"] = dict(run="A1", arm="R10-anc1")
+    cfg["compare"] = [dict(name="anc1_vs_main500", a="anc1@500", b="main@500", script=str(tmp_path / "cmp.py"),
+                           cmd=["CMP", "{a_dir}", "{b_dir}"])]
+    w["vol"].put("M", 250, 500)
+    w["vol"].put("A1", 250, 500)
+    seen = []
+    orig = w["ex"].run
+    w["ex"].run = lambda argv, *a, **k: (0, "metric A B A-B\nen_value +1 +2 -1\n") if argv[0] == "CMP" and not seen.append(argv) else orig(argv, *a, **k)
+    t = w["make"](cfg)
+    settle(w, t, 5)
+    assert {(a[1], a[2]) for a in w["ex"].scores} >= {("A1", "500"), ("M", "500")}
+    assert len(seen) == 1 and seen[0][1].endswith("A1@500__") is False and "A1_step500" in seen[0][1] and "M_step500" in seen[0][2]
+    assert open(os.path.join(cfg["score_root"], "anc1_vs_main500.txt")).read().startswith("metric")
+    settle(w, t, 3)
+    assert len(seen) == 1  # once
+    assert "compare anc1_vs_main500" in log_text(w)
+
+
+def test_the_trimmed_plan_scores_only_the_decision_points(world):
+    w = world
+    cfg = json.loads(json.dumps(w["cfg"]))
+    cfg["runs"]["cap"] = dict(run="CAP", arm="R10-main")
+    cfg["runs"]["enfree2"] = dict(run="EF2", arm="R8-s-enfree")
+    cfg["runs"].pop("lr05")
+    cfg["runs"]["brCs2"] = dict(run="C2", arm="R10-brC", seed=777)
+    cfg["score_plan"] = dict(main=[1000, 2500, 5000], cap=[2500, 5000], encF=[4000], enfree2=[500])
+    cfg["early_stop"] = dict(step=2500, v_limit_pp=3.0, roles=["main", "cap"], summary_cmd=["SUMMARY", "{scores_dir}"],
+                             ref={"cap": "main@1000"})
+    for run, steps in (("M", range(250, 5001, 250)), ("CAP", range(250, 5001, 250)), ("EF2", (250, 500)),
+                       ("C", (250, 500)), ("E", (250, 500)), ("C2", (250, 500)), ("F", range(250, 4001, 250))):
+        w["vol"].put(run, *steps)
+    w["ex"].summaries = {n: {"pooled_v_vs_stock_pp": 1.0, "wer_ok": True} for n in ("M_step1000", "M_step2500", "CAP_step2500")}
+    gate_says(w, 0, 0, 0)
+    t = w["make"](cfg)
+    settle(w, t, 30)
+    got = sorted((a[1], int(a[2])) for a in w["ex"].scores)
+    assert got == sorted([("M", 1000), ("M", 2500), ("M", 5000), ("CAP", 2500), ("CAP", 5000), ("F", 4000), ("EF2", 500),
+                          ("C", 250), ("C", 500), ("E", 250), ("E", 500), ("C2", 500)])  # nothing else is scored
+    assert t.state["early_stop"]["main"]["action"] == "kept" and t.state["early_stop"]["cap"]["action"] == "kept"
+
+
+def test_early_stop_applies_to_each_main_and_stops_only_that_runs_app(world):
+    w = world
+    cfg = json.loads(json.dumps(w["cfg"]))
+    cfg["runs"]["cap"] = dict(run="CAP", arm="R10-main")
+    cfg["early_stop"] = dict(step=2500, v_limit_pp=3.0, roles=["main", "cap"], summary_cmd=["SUMMARY", "{scores_dir}"],
+                             ref={"cap": "main@1000"})
+    capdir = w["tmp"] / "runs" / "CAP"
+    capdir.mkdir(parents=True)
+    (capdir / "launch_manifest.txt").write_text("run CAP\ncommit abc\napp ap-CAPAPP\n")
+    w["vol"].put("M", 1000, 2500)
+    w["vol"].put("CAP", 2500)
+    w["ex"].summaries = {"M_step1000": {"pooled_v_vs_stock_pp": 1.2, "wer_ok": True},
+                         "M_step2500": {"pooled_v_vs_stock_pp": 1.0, "wer_ok": True},    # main is fine
+                         "CAP_step2500": {"pooled_v_vs_stock_pp": 3.6, "wer_ok": True}}  # cap: > +3 and worse than main@1000
+    t = w["make"](cfg)
+    settle(w, t, 4)
+    assert w["ex"].stops == ["ap-CAPAPP"]
+    assert t.state["early_stop"]["main"]["action"] == "kept" and t.state["early_stop"]["cap"]["action"] == "stopped"
+
+
+def test_a_role_mix_overrides_the_config_mix_in_the_templates(world):
+    w = world
+    cfg = json.loads(json.dumps(w["cfg"]))
+    cfg.update(mix="mixA", score_dir_template="{score_root}/{run}@{step}__{mix}", score_argv=["S", "{run}", "{step}", "--mix", "{mix}"])
+    cfg["runs"]["cap"] = dict(run="CAP", arm="R10-main", mix="mixCAP")
+    cfg["score_plan"] = dict(main=[1000], cap=[1000])
+    w["vol"].put("M", 1000)
+    w["vol"].put("CAP", 1000)
+    t = w["make"](cfg)
+    settle(w, t, 3)
+    by = {a[1]: a for a in w["ex"].scores}
+    assert by["M"][-1] == "mixA" and by["CAP"][-1] == "mixCAP"
+    assert t.out_dir("cap", 1000).endswith("CAP@1000__mixCAP")
+
+
+def test_without_the_anchor_test_nothing_waits_for_it(world):
+    w = world
+    t = w["make"]()
+    assert "anc1" not in {r for _, r, _ in t.plan()} and ("main", 500) not in {(r, s) for _, r, s in t.plan()}
 
 
 def test_helpers():

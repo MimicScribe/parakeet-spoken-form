@@ -214,6 +214,22 @@ def test_branch_start_is_checked_before_anything_launches(world):
     assert "run --detach" not in calls(world)
 
 
+def test_seed_flag_reaches_the_sampler_seed_and_is_validated(world):
+    (world["fake"] / "exists.txt").write_text("exp/R10_main/step1000.pt\n")
+    r, log = world["launch"]("--init-from", "R10_main@1000", "--seed", "777", arm="R10-brC", steps="500")
+    assert r.returncode == 0, r.stderr
+    cmd = [l for l in calls(world).splitlines() if "run --detach" in l][0].split(" :: ")[1]
+    assert "--sampler-seed 777" in cmd and "--seed" not in cmd.replace("--sampler-seed", "")  # the mix seed is not touched
+    assert "--sampler-seed 777" in (log / "launch_manifest.txt").read_text()
+    for bad in ("0", "-3", "x", "1.5"):
+        r, _ = world["launch"]("--seed", bad, log=world["tmp"] / f"log_{bad}")
+        assert r.returncode == 2 and "positive integer" in r.stderr, bad
+    r, _ = world["launch"](log=world["tmp"] / "log_none")  # control: no flag, no sampler seed on the command
+    assert r.returncode == 0
+    last = [l for l in calls(world).splitlines() if "run --detach" in l][-1]
+    assert "--sampler-seed" not in last
+
+
 def test_default_launch_keeps_the_stock_start_flags(world):
     r, _ = world["launch"]()
     cmd = [l for l in calls(world).splitlines() if "run --detach" in l][0].split(" :: ")[1]
@@ -280,4 +296,4 @@ def test_the_real_modal_app_is_readable_by_the_launcher():
     assert "ft_train" in RM.mounted_modules(HERE) and "mix_build" in RM.mounted_modules(HERE)
     assert RM.run2_langs(HERE).startswith("de,es,fr,it,nl,pt,ru")
     assert RM.has_arm(HERE, "R10-main")
-    assert all(RM.has_arm(HERE, a) for a in ("R10-brC", "R10-brE", "R10-brEr", "R10-encF"))
+    assert all(RM.has_arm(HERE, a) for a in ("R10-brC", "R10-brE", "R10-brEr", "R10-encF", "R10-anc1"))

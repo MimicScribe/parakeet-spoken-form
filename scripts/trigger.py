@@ -5,25 +5,29 @@
 It never launches a main run: those are started by hand through launch_run.sh. It watches the volume for
 exp/<main>/step<branch_step>.pt.done and then, through launch_run.sh only,
   * launches the two branch runs (decoder-only control `brC`, then the encoder branch `brE`, `stagger_s` apart);
+  * with a `brCs2` role in the config, launches the control branch again on another sampler seed (`seed` of that role, same
+    rows, another batch order) `stagger_s` after brE: a noise-floor read, scored like brC and not part of the gate;
   * launches the real-only encoder branch `brEr` only if the flag file named in the config exists;
   * scores every branch checkpoint (step 250 and 500) and runs the interim gate on E vs C at 250, at 500 and over both
     (sign agreement); when all three say GO it launches the full encoder continuation `encF`;
   * scores the planned checkpoints of the main, half-lr and encF runs as each `step<N>.pt.done` appears;
-  * applies the early-stop rule to the main run at `early_stop.step` (stops its app).
+  * applies the early-stop rule to each run of `early_stop.roles` (default the main run) at `early_stop.step` (stops its app);
+  * with an `anc1` role (a run launched by hand), scores it at step 500 together with the main run's step 500, and runs each
+    configured `compare` command (a, b = "<role>@<step>") once both are scored.
 Every action goes to the log file; the state file makes a restart harmless: a run whose exp/<run> exists on the volume (or
 whose launch the state records) is never launched again, a listing that fails is never read as "absent", and a scoring
 job already done is not repeated. The approvals file is only read by launch_run.sh: this script never writes it, so a run
 without its approval line is refused by the launcher and retried (logged once) until the line appears.
 
 Contracts with the scoring tools (argv templates `score_argv` / `gate_argv` in the config; {score_script} {gate_script}
-{run} {step} {out} {e_run} {c_run} {steps} {python} are filled in; the defaults are `<scorer> <run> <step> <out>` and
+{run} {step} {out} {mix} {e_run} {c_run} {steps} {python} are filled in; the defaults are `<scorer> <run> <step> <out>` and
 `python <gate> <E run> <C run> --steps <steps>`):
   * the scorer is run once per checkpoint; exit 0 = scored. Its results must be where `score_dir_template` says (it is
     also the directory the gate reads);
   * the gate is run over step 250, over step 500 and over both (its sign-agreement read): exit 0 = GO, 1 = NO-GO, anything
     else = no verdict (retried, then left to hand). The encoder run launches only when all three say GO;
-  * the early-stop rule reads `pooled_v_vs_stock_pp` (number) and `wer_ok` (bool) of the main run's early_stop step and of
-    its branch_step checkpoint, from the JSON object printed by `early_stop.summary_cmd` (argv template, {scores_dir}) or,
+  * the early-stop rule reads `pooled_v_vs_stock_pp` (number) and `wer_ok` (bool) of the run's early_stop step and of its
+    reference checkpoint (early_stop.ref[role] = "<role>@<step>", default its own branch_step checkpoint), from the JSON object printed by `early_stop.summary_cmd` (argv template, {scores_dir}) or,
     without one, from <scores dir>/summary.json (key names are config values).
 A missing scorer or gate is logged once and waited for, never treated as a failure.
 """
@@ -43,7 +47,7 @@ RETRY_S = 300  # a refused / transiently failed launch is tried again no sooner 
 MAX_ATTEMPTS = 3  # for a launcher refusal that retrying cannot fix (bad arguments, wrong commit)
 SWITCHES = ("--anchor-init", "--detach")  # flags of the launcher's training command that take no value
 GATE_KEYS = ("250", "500", "250,500")  # the step sets the interim gate is read over
-ROLES = ("main", "lr05", "brC", "brE", "brEr", "encF")
+ROLES = ("main", "lr05", "cap", "enfree2", "brC", "brCs2", "brE", "brEr", "encF", "anc1")  # brCs2: brC again on another sampler seed; anc1: launched by hand
 
 
 def local_time(t: float) -> str:
@@ -337,7 +341,7 @@ class Trigger:
             p["mix_dir"] = ""
         return p
 
-    def try_launch(self, role: str, steps: int, init_from: str = "") -> None:
+    def try_launch(self, role: str, steps: int, init_from: str = "", seed: int = 0) -> None:
         """Launch `role` unless its exp/<run> exists or the state says it was launched. Idempotent."""
         run, arm = self.runs[role]["run"], self.runs[role]["arm"]
         rec = self.state["launched"].get(role)
@@ -369,6 +373,8 @@ class Trigger:
             argv += ["--extra-parts", p["extra_parts"]]
         if init_from:
             argv += ["--init-from", init_from]
+        if seed:
+            argv += ["--seed", str(seed)]
         if self.dry:
             self.log(f"DRY-RUN {role}: would run {shlex.join(argv)}")
             self.state["launched"][role] = dict(status="dry", ts=self.clock())
@@ -411,8 +417,13 @@ class Trigger:
             if self.settled("brC"):
                 if self.after_stagger("brC"):
                     self.try_launch("brE", c.get("branch_steps", 500), init)
+                last = "brE"  # each further branch starts stagger_s after the one before it
+                if "brCs2" in self.runs and self.settled("brE") and self.after_stagger("brE"):
+                    self.try_launch("brCs2", c.get("branch_steps", 500), init, self.runs["brCs2"].get("seed", 0))
+                if "brCs2" in self.runs:
+                    last = "brCs2"
                 flag = c.get("brEr_flag")
-                if flag and os.path.exists(flag) and self.settled("brE") and self.after_stagger("brE"):
+                if flag and os.path.exists(flag) and self.settled(last) and self.after_stagger(last):
                     self.try_launch("brEr", c.get("branch_steps", 500), init)
                 elif flag and not os.path.exists(flag):
                     self.clear_warn("brEr-flag")
@@ -438,9 +449,14 @@ class Trigger:
             for s in (250, 500):
                 items.append((0, role, s))
         items.append((1, "brEr", 500))
+        items.append((1, "brCs2", 500))
+        if "anc1" in self.runs:  # the anchor-weight test and its matched control, the main run at step 500
+            items += [(1, "anc1", 500), (1, "main", 500)]
         es = c.get("early_stop", {})
         if es:
-            items += [(1, "main", es["step"]), (1, "main", c.get("branch_step", 1000))]
+            for role in es.get("roles", ["main"]):
+                ref_role, ref_step = self.es_ref(role)
+                items += [(1, role, es["step"]), (1, ref_role, ref_step)]
         for role, steps in c.get("score_plan", {}).items():
             items += [(2, role, s) for s in steps]
         seen, out = set(), []
@@ -455,7 +471,11 @@ class Trigger:
 
     def out_dir(self, role: str, step: int) -> str:
         tpl = self.cfg.get("score_dir_template") or "{score_root}/{run}_step{step}"
-        return tpl.format(score_root=self.cfg["score_root"], run=self.runs[role]["run"], step=step)
+        return tpl.format(score_root=self.cfg["score_root"], run=self.runs[role]["run"], step=step, mix=self.mix_of(role))
+
+    def mix_of(self, role: str) -> str:
+        """The mix a run's held-out read uses ({mix} in the templates): the role's own `mix`, else the config's."""
+        return self.runs.get(role, {}).get("mix") or self.cfg.get("mix", "")
 
     def tool_ready(self, name: str, path: str) -> bool:
         if os.path.exists(path):
@@ -507,6 +527,7 @@ class Trigger:
                 continue
             out = self.state["scores"][key]["out"]
             argv = self.fill(c.get("score_argv") or ["{score_script}", "{run}", "{step}", "{out}"], score_script=scorer,
+                             mix=self.mix_of(role),
                              run=self.runs[role]["run"], step=step, out=out, role=role)
             if self.dry:
                 self.log(f"DRY-RUN would score {key}: {shlex.join(argv)}")
@@ -523,12 +544,54 @@ class Trigger:
             self.state["scores"][key]["status"] = "running"
             self.save()
 
+    def es_ref(self, role: str):
+        """(role, step) of the checkpoint the early-stop rule compares `role`'s step against: early_stop.ref[role] =
+        "<role>@<step>", default its own checkpoint at branch_step."""
+        ref = self.cfg.get("early_stop", {}).get("ref", {}).get(role)
+        if ref:
+            r, st = ref.split("@")
+            return r, int(st)
+        return role, self.cfg.get("branch_step", 1000)
+
     def skipped(self, role: str, step: int) -> bool:
-        es = self.state["early_stop"]
-        return role == "main" and es.get("action") == "stopped" and step > self.cfg["early_stop"]["step"]
+        es = self.state["early_stop"].get(role, {})
+        return es.get("action") == "stopped" and step > self.cfg["early_stop"]["step"]
 
     def done(self, role: str, step: int) -> bool:
         return self.state["scores"].get(self.key(role, step), {}).get("status") == "done"
+
+    def compare_step(self) -> None:
+        """Run each configured `compare` command (a: "<role>@<step>", b: ..., cmd argv with {a_dir} {b_dir}, script) once both
+        checkpoints are scored; its output goes to <score_root>/<name>.txt and the first lines to the log."""
+        c = self.cfg
+        done = self.state.setdefault("compares", {})
+        for cmp_ in c.get("compare", []):
+            name = cmp_["name"]
+            rec = done.get(name, {})
+            if rec.get("status") in ("done", "failed") or self.clock() - rec.get("last", 0) < RETRY_S:
+                continue
+            (ra, sa), (rb, sb) = (x.split("@") for x in (cmp_["a"], cmp_["b"]))
+            if ra not in self.runs or rb not in self.runs or not (self.done(ra, int(sa)) and self.done(rb, int(sb))):
+                continue
+            if cmp_.get("script") and not self.tool_ready("compare " + name, cmp_["script"]):
+                continue
+            argv = self.fill(cmp_["cmd"], a_dir=self.out_dir(ra, int(sa)), b_dir=self.out_dir(rb, int(sb)))
+            out_path = os.path.join(c["score_root"], f"{name}.txt")
+            if self.dry:
+                self.log(f"DRY-RUN would compare {name}: {shlex.join(argv)}")
+                continue
+            self.log(f"ACTION compare {name}: {shlex.join(argv)}")
+            rc, out = self.ex.run(argv, timeout=600, cwd=c.get("score_cwd"))
+            n = rec.get("n", 0) + 1
+            if rc == 0:
+                with open(out_path, "w") as f:
+                    f.write(out)
+                done[name] = dict(status="done")
+                self.log(f"compare {name} -> {out_path}\n" + out.rstrip())
+            else:
+                done[name] = dict(status="failed" if n >= 2 else "retry", n=n, last=self.clock())
+                self.log(f"{'ALARM ' if n >= 2 else ''}compare {name} exit {rc}: {' | '.join(out.strip().splitlines()[-2:])}")
+            self.save()
 
     # --- gates, encF, early stop -------------------------------------------------------------------------------
 
@@ -548,7 +611,7 @@ class Trigger:
             if not self.tool_ready("interim gate", c["gate_script"]):
                 return
             argv = self.fill(c.get("gate_argv") or ["{python}", "{gate_script}", "{e_run}", "{c_run}", "--steps", "{steps}"],
-                             gate_script=c["gate_script"], e_run=self.runs["brE"]["run"], c_run=self.runs["brC"]["run"],
+                             gate_script=c["gate_script"], mix=self.mix_of("brE"), e_run=self.runs["brE"]["run"], c_run=self.runs["brC"]["run"],
                              steps=key, out=os.path.join(c["score_root"], f"gate_{key.replace(',', '_')}.json"))
             if self.dry:
                 self.log(f"DRY-RUN would run the gate over steps {key}: {shlex.join(argv)}")
@@ -584,28 +647,36 @@ class Trigger:
 
     def early_stop_step(self) -> None:
         es = self.cfg.get("early_stop")
-        st = self.state["early_stop"]
-        if not es or st.get("action") in ("stopped", "kept"):
+        if not es:
             return
-        step, ref = es["step"], self.cfg.get("branch_step", 1000)
-        if not self.done("main", step):
+        for role in es.get("roles", ["main"]):
+            if role in self.runs:
+                self.early_stop_role(role, es)
+
+    def early_stop_role(self, role: str, es: dict) -> None:
+        st = self.state["early_stop"].setdefault(role, {})
+        if st.get("action") in ("stopped", "kept"):
             return
-        read = lambda s: self.read_summary("main", s)
-        now, then = read(step), read(ref)
+        step = es["step"]
+        ref_role, ref = self.es_ref(role)
+        if not self.done(role, step):
+            return
+        now, then = self.read_summary(role, step), self.read_summary(ref_role, ref)
         v_key, w_key = es.get("v_key", "pooled_v_vs_stock_pp"), es.get("wer_key", "wer_ok")
         verdict, why = early_stop_decision(now.get(v_key), then.get(v_key), now.get(w_key), es.get("v_limit_pp", 3.0))
+        name = self.runs[role]["run"]
         if verdict == "undetermined":
-            self.once("early-stop-undetermined", f"ALARM early stop at main step {step} cannot be decided: {why} "
-                      f"(wanted {v_key} and {w_key} in the summary of main@{step}; reference main@{ref}); decide by hand")
+            self.once(f"early-stop-undetermined-{role}", f"ALARM early stop at {name} step {step} cannot be decided: {why} "
+                      f"(wanted {v_key} and {w_key} in the summary of {role}@{step}; reference {ref_role}@{ref}); decide by hand")
             return
-        self.log(f"early-stop rule at main step {step}: {verdict.upper()} ({why})")
+        self.log(f"early-stop rule at {name} step {step} (reference {ref_role}@{ref}): {verdict.upper()} ({why})")
         if verdict == "keep":
             st["action"] = "kept"
             self.save()
             return
-        app = self.launch_params().get("app")
+        app = self.app_of(role)
         if es.get("action", "stop") != "stop" or not app:
-            self.log(f"ALARM early stop says STOP main; {'action is log-only' if app else 'no app id in its launch manifest'}"
+            self.log(f"ALARM early stop says STOP {name}; {'action is log-only' if app else 'no app id in its launch manifest'}"
                      f" -> stop it by hand{': modal app stop --yes ' + app if app else ''}")
             st["action"] = "stopped"
             self.save()
@@ -613,12 +684,25 @@ class Trigger:
         if self.dry:
             self.log(f"DRY-RUN would stop app {app}")
             return
-        self.log(f"ACTION stop the main run's app {app}")
+        self.log(f"ACTION stop {name}'s app {app}")
         rc, out = self.ex.run(["modal", "app", "stop", "--yes", app], timeout=180)  # --yes: without it the CLI asks and aborts
         self.log(f"modal app stop exit {rc}: {out.strip()[-200:]}" + ("" if rc == 0 else "  ALARM stop it by hand"))
         if rc == 0:
             st["action"] = "stopped"
         self.save()
+
+    def app_of(self, role: str) -> str:
+        """The Modal app id of a run launched through the launcher: its launch manifest under runs_log_root/<run> (the main
+        run's under main_log_dir as well)."""
+        run = self.runs[role]["run"]
+        paths = [os.path.join(self.cfg["runs_log_root"], run, "launch_manifest.txt")]
+        if role == "main" and self.cfg.get("main_log_dir"):
+            paths.append(os.path.join(self.cfg["main_log_dir"], "launch_manifest.txt"))
+        for p in paths:
+            app = parse_manifest(p).get("app")
+            if app:
+                return app
+        return ""
 
     def read_summary(self, role: str, step: int) -> dict:
         """{pooled V vs stock, WER verdict} of a scored checkpoint: from the early-stop `summary_cmd` (argv template with
@@ -645,13 +729,21 @@ class Trigger:
         if self.state["encF"] == "go" and not self.settled("encF"):
             return False
         for _, role, step in self.plan():
-            if role == "brEr" and not self.settled("brEr"):
-                continue  # only scored when the flag launched it
+            if role in ("brEr", "brCs2") and not self.settled(role):
+                continue  # only scored when launched
+            if role == "anc1" and not self.exists.get(self.runs["anc1"]["run"]):
+                continue  # launched by hand, or not at all
             if role == "encF" and self.state["encF"] != "go":
                 continue
             if self.skipped(role, step):
                 continue
             if self.state["scores"].get(self.key(role, step), {}).get("status") not in ("done", "failed"):
+                return False
+        for cmp_ in self.cfg.get("compare", []):
+            ra, rb = (x.split("@")[0] for x in (cmp_["a"], cmp_["b"]))
+            if ra == "anc1" and not self.exists.get(self.runs["anc1"]["run"]):
+                continue
+            if self.state.get("compares", {}).get(cmp_["name"], {}).get("status") not in ("done", "failed"):
                 return False
         return True
 
@@ -664,13 +756,14 @@ class Trigger:
         for k, v in self.state["scores"].items():
             scores.setdefault(v["status"], []).append(k)
         self.log(f"heartbeat: launched {launched}; encF {self.state['encF']}; scores {scores}; early stop "
-                 f"{self.state['early_stop'].get('action')}")
+                 f"{ {r: v.get('action') for r, v in self.state['early_stop'].items()} }")
 
     def cycle(self) -> None:
         self.refresh()
         if self.listing_ok:
             self.launch_step()
         self.score_step()
+        self.compare_step()
         self.gate_step()
         self.early_stop_step()
         if self.listing_ok:

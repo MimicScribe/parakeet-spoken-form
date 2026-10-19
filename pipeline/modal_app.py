@@ -1972,6 +1972,10 @@ R3_ARMS.update({
     # schedule over the 4,000 steps (warmup 50, peak 2e-5, cosine to 2e-6).
     "R10-encF": dict(_BRANCH_ENC, enc_lr_steps=MAIN_RUN_STEPS - BRANCH_STEP),
 })
+# R10-anc1 = the anchor-weight test (2026-10-18): R10-main on the same mix, run for 500 steps on the lr schedule of the 5,000-step
+# main (lr_total, offset 0 = the plain schedule), so main@500 is its matched control. Only the --extra-parts weights differ
+# (the ancRH2 parts at x1); the arm itself is R10-main's settings.
+R3_ARMS.update({"R10-anc1": dict(R3_ARMS["R10-main"], lr_total=MAIN_RUN_STEPS)})
 # arm keys of the branch options and their off values (= ft_train.train's defaults): retrain3 sets them for every arm
 _BRANCH_DEFAULTS = dict(anchor_from="", sampler_seed=0, lr_offset=0, lr_total=0, enc_lr_peak=0.0, enc_lr_floor=0.0,
                         enc_lr_warmup=0, enc_lr_steps=0, enc_clip=0.0, enc_real_only=False)
@@ -2015,7 +2019,8 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
              en_weight: float = -1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
              dur_weight: float = 1.0, init_from: str = "v10pt@1500", lr: float = 0.0, mix: str = "mix3",
              anchor_init: bool = False, cons_weight: float = -1.0, langs: str = "", mix_dir: str = "mix4",
-             r3_sub_batch: int = 2, unfreeze_top: int = 0, part_weights: str = "", extra_parts: str = ""):
+             r3_sub_batch: int = 2, unfreeze_top: int = 0, part_weights: str = "", extra_parts: str = "",
+             sampler_seed: int = 0):
     """One retrain-3 run (R3.13): r3 losses, decoupled L2-SP to v10pt@1500, 200 s x 2 accumulated batches.
     Rehearsal (E2) = a small max_steps. Resumes from exp/<run>/last.ckpt after a preemption.
     cons_weight >= 0 overrides the arm's cross-window consistency weight (R4-c tuning knob).
@@ -2027,6 +2032,9 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     (200 s x 2 accumulated), the losses and their values are unchanged.
     unfreeze_top > 0: the last unfreeze_top conformer blocks of the encoder train too (ft_train.unfreeze_top_layers); step
     checkpoints then hold those blocks, and every reader must load them (_load_runs, eval_multi re-encodes).
+    sampler_seed > 0: the batch-order seed, replacing the arm's (a branch arm has its own; every other arm uses `seed`); the
+    mix itself, written with `seed`, is unchanged, so two runs differing only in sampler_seed read the same rows in another
+    order (the launcher's --seed).
     part_weights "<path>=<n>,..." / extra_parts "<path>:<tag>:<n>,..." (mix v4 only; default "" = the arm's listing as
     is): per-part listing counts, apply_part_weights; merged over the arm's own part_weights / extra_parts.
     Branch arms (R10-brC / R10-brE / R10-brEr): init_from "<main run>@1000", the stock L2-SP anchor (arm key anchor_from),
@@ -2066,6 +2074,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     cfg.setdefault("lora_alpha", 16.0)
     for k, v in _BRANCH_DEFAULTS.items():
         cfg.setdefault(k, v)
+    cfg["sampler_seed"] = sampler_seed or cfg["sampler_seed"]
     arm_top = cfg.pop("unfreeze_top", 0)  # an arm may fix the number of unfrozen encoder blocks (the launcher has no flag)
     assert not (arm_top and unfreeze_top and arm_top != unfreeze_top), f"arm {arm} sets unfreeze_top {arm_top}, given {unfreeze_top}"
     unfreeze_top = unfreeze_top or arm_top
@@ -2139,7 +2148,8 @@ def retrain3_80(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000
                 en_weight: float = -1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
                 dur_weight: float = 1.0, init_from: str = "v10pt@1500", lr: float = 0.0, mix: str = "mix3",
                 anchor_init: bool = False, cons_weight: float = -1.0, langs: str = "", mix_dir: str = "mix4",
-                r3_sub_batch: int = 2, unfreeze_top: int = 0, part_weights: str = "", extra_parts: str = ""):
+                r3_sub_batch: int = 2, unfreeze_top: int = 0, part_weights: str = "", extra_parts: str = "",
+                sampler_seed: int = 0):
     """retrain3 on an 80 GB A100: the same code, arguments (signature kept equal by test_unfreeze_top) and batch;
     more memory headroom (e.g. for --unfreeze-top)."""
     return retrain3.local(**locals())
@@ -2157,7 +2167,8 @@ def retrain3_80_main(run: str, arm: str = "S-A", seed: int = 1, max_steps: int =
                      en_weight: float = -1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
                      dur_weight: float = 1.0, init_from: str = "v10pt@1500", lr: float = 0.0, mix: str = "mix3",
                      anchor_init: bool = False, cons_weight: float = -1.0, langs: str = "", mix_dir: str = "mix4",
-                     r3_sub_batch: int = 2, unfreeze_top: int = 0, part_weights: str = "", extra_parts: str = ""):
+                     r3_sub_batch: int = 2, unfreeze_top: int = 0, part_weights: str = "", extra_parts: str = "",
+                     sampler_seed: int = 0):
     """retrain3_80 for the main run: identical code, arguments and batch, but a MAIN_TIMEOUT_S limit per attempt."""
     return retrain3.local(**locals())
 

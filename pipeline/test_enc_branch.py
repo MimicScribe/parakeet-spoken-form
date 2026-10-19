@@ -405,7 +405,7 @@ def test_branch_arms_differ_from_the_main_arm_and_from_each_other_by_named_knobs
 def test_no_other_arm_sets_a_branch_option_and_defaults_are_off():
     MA = pytest.importorskip("modal_app")
     keys = set(MA._BRANCH_DEFAULTS) | {"unfreeze_top"}
-    new = {"R10-brC", "R10-brE", "R10-brEr", "R10-encF"}
+    new = {"R10-brC", "R10-brE", "R10-brEr", "R10-encF", "R10-anc1"}
     assert not [a for a, cfg in MA.R3_ARMS.items() if a not in new and keys & set(cfg)]
     assert all(not v for v in MA._BRANCH_DEFAULTS.values())  # every option off
 
@@ -423,3 +423,15 @@ def test_retrain3_forwards_every_branch_option_and_the_three_signatures_agree():
     assert inspect.signature(MA.retrain3_80._raw_f_) == sig == inspect.signature(MA.retrain3_80_main._raw_f_)
     src = inspect.getsource(MA.retrain3._raw_f_)
     assert "resolve_l2sp_anchor(" in src and "check_branch_start(" in src and "_BRANCH_DEFAULTS" in src
+
+
+def test_anchor_test_arm_is_the_main_arm_on_the_main_schedule_and_the_seed_flag_is_forwarded():
+    MA = pytest.importorskip("modal_app")
+    a, m = MA.R3_ARMS["R10-anc1"], MA.R3_ARMS["R10-main"]
+    assert {k: (m.get(k), a.get(k)) for k in set(a) | set(m) if a.get(k) != m.get(k)} == {"lr_total": (None, 5000)}
+    assert a["recipe"] == m["recipe"] and a.get("lr_offset", 0) == 0  # a stock start, the plain (offset 0) schedule
+    for k in (0, 5, 20, 250, 499):  # the 500-step run's lr is the 5,000-step main's lr at the same step
+        assert F.decoder_lr_at(k, a["lr"], 20, a["lr_total"], 0) == pytest.approx(F.cosine_lr_at(k, m["lr"], m["lr"] / 10, 20, 5000))
+    assert "sampler_seed" in inspect.signature(MA.retrain3._raw_f_).parameters
+    assert 'cfg["sampler_seed"] = sampler_seed or cfg["sampler_seed"]' in inspect.getsource(MA.retrain3._raw_f_)
+    assert F.resolve_sampler_seed(1, 777) == 777 and F.resolve_sampler_seed(1, 0) == 1  # an explicit seed beats `seed`
