@@ -29,6 +29,10 @@ WORD_MIN_LETTERS = 3  # shorter words ("y", "e", "de", "et") are dropped by the 
 MAX_ALTS = 10
 MAX_DIST = 3
 
+# Connector words the reader often does not hear (<= 80 ms): a rival reading that differs from the label's only by such a
+# word is no evidence against the label (pt "cinquenta e quatro" / "cinquenta quatro"); every number value must still be heard
+CONNECTOR = {"pt": {"e"}}
+
 _WORD = re.compile(r"[^\W\d_]+(?:['’][^\W\d_]+)?", re.U)
 _LEX: dict = {}
 _MORPH: dict = {}
@@ -136,13 +140,23 @@ def variants(T: str, a: int, b: int, lang: str) -> list:
     return out
 
 
+def connector_only(lang: str, reading: str, cand: str) -> bool:
+    """cand differs from the reading only by connector words (CONNECTOR) added or dropped."""
+    cw = CONNECTOR.get(lang)
+    if not cw:
+        return False
+    strip = lambda t: [D.key(w) for w in t.split() if D.key(w) and w.lower() not in cw]  # noqa: E731
+    return D.key(cand) != D.key(reading) and strip(cand) == strip(reading)
+
+
 def span_probe(nll, T: str, a: int, b: int, lang: str, cands: list, chosen_key: str, base: float | None = None) -> dict:
     """Run the four tests on the span T[a:b] (nll(text) -> nats, base = nll(T)). Returns the minimum margin of each test
     ("cand", "del", "wdel", "wsub"; inf = no probe), the probe counts ("n_*") and the weakest probe ("worst")."""
     base = nll(T) if base is None else base
     res = {k: float("inf") for k in ("cand", "del", "wdel", "wsub")}
     res.update(n_cand=0, n_del=1, n_wdel=0, n_wsub=0, worst=None)
-    probes = [("cand", T[:a] + c.strip() + T[b:]) for c in cands if D.key(c) != chosen_key and c.strip()]
+    probes = [("cand", T[:a] + c.strip() + T[b:]) for c in cands
+              if D.key(c) != chosen_key and c.strip() and not connector_only(lang, T[a:b], c)]
     probes.append(("del", _tidy(T[:a] + " " + T[b:])))
     probes += variants(T, a, b, lang)
     for kind, text in probes:
