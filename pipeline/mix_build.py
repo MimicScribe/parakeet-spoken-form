@@ -1466,7 +1466,7 @@ def _en_value_trim(rows: dict, out: set, flat: list, tparts: list, done, year_re
 def en_balance(vol: str, mix: list, seed: int = 43, band: tuple = (0.35, 0.40), target: float = 0.39,
                non_en: tuple = (), write: bool = False, trim_parts: tuple = EN_TRIM_PARTS, fixed_n: int | None = None,
                out_dir: str = "", value_aware: bool = True, year_real_floor: int = EN_YEAR_REAL_FLOOR,
-               bcap_dir: str = "mix4") -> dict:
+               bcap_dir: str = "mix4", drop_audio: frozenset = frozenset()) -> dict:
     """English balance for the v4 mix (2026-10-17), on the real span parts (EN_REAL_PARTS) as `mix` lists them:
     1. the data gate's caps across those parts jointly: <= TEMPLATE_CAP crops per number-masked label, <= GROUP_CAP_LANG
        rows per YouTube video (30) and GROUP_CAP per parliament session (13); rare-class crops kept first;
@@ -1484,6 +1484,10 @@ def en_balance(vol: str, mix: list, seed: int = 43, band: tuple = (0.35, 0.40), 
     en_mix = [((_bcap_source(m[0]) or m[0]),) + tuple(m[1:]) for m in en_mix]  # _bcap copies: judged on their sources
     real = [p for p in EN_REAL_PARTS if any(m[0] == p for m in en_mix)]
     rows = {p: _rows(f"{vol}/{p}") for p in real}
+    n_listed = 0
+    if drop_audio:
+        n_listed = sum(1 for p in real for x in rows[p] if x.get("audio_filepath") in drop_audio)
+        rows = {p: [x for x in rows[p] if x.get("audio_filepath") not in drop_audio] for p in real}
     cache = {}
     flat = [(p, i) for p in real for i in range(len(rows[p]))]
     rng.shuffle(flat)
@@ -1568,7 +1572,7 @@ def en_balance(vol: str, mix: list, seed: int = 43, band: tuple = (0.35, 0.40), 
     gone = out | trim
     st = {"share_before": before, "share_after_caps": capped, "share_after": after, "band": list(band),
           "in_band": band[0] <= after["share"] <= band[1], "caps_out": why,
-          "common_per_video": n_per_video, "value_trim": vst,
+          "common_per_video": n_per_video, "value_trim": vst, "dropped_listed": n_listed,
           "top_year_trim": {str(y): v for y, v in yst.items()}, "top_year_trim_rows": len(ytrim),
           "trim_rows": len(trim), "trim_h": round(_h([rows[p][i] for p, i in trim]), 2),
           "parts": {p: {"rows": [len(rows[p]), len(rows[p]) - sum(1 for q, _ in gone if q == p)],
@@ -2599,6 +2603,10 @@ NUMBER_PART.update({"mix3b/d1_ycap.jsonl": 1.0, "mix3b/d10n_ycap.jsonl": 1.0,
                     "d1/en4_ok/tts11_en_train.jsonl": 1.0, "d1/en4_ok/yodas_enh_train_ycap.jsonl": 1.0,
                     "d1/en4_ok/tts12_en_train.jsonl": 1.0, "d1/en4_ok/yodas_rare_train_ycap.jsonl": 1.0,
                     "d1/en4_ok/ttsSYM1_en_train.jsonl": 1.0,
+                    # 2026-10-18 (listed with extra_parts): the slot-fixed symbol set, its cloned-voice companion and the
+                    # caption-scan top-up; shares measured on the manifests (number words in the label)
+                    "d1/en4_ok/ttsSYM1_en_train_v2.jsonl": 0.992, "d1/en4_ok/ttsSYM1en2_en_train.jsonl": 0.992,
+                    "d1/en4_ok/yodas_en5_train_ycap.jsonl": 0.975,
                     "d1/en4_ok/vox_rare_train_ycap.jsonl": 1.0,
                     "d1/en4_ok/win_en.jsonl": 1.0, "d1/en4_ok/seam_en.jsonl": 0.977})
 # the balance-capped English copies (en_balance) carry their source part's number share

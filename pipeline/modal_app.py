@@ -1424,7 +1424,8 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
                en_win_repeat: int = 1, mix_dir: str = "mix4", seam_long_h: float = 0.0, seam_long_repeat: int = 0, en_free_repeat: int = 1, final: bool = False,
                split_compounds: str = "", win15_share: float = 0.0, win15_dir: str = "ml/win15b", win15_repeat: int = 1,
                en_win15: bool = True, edge_fix_dir: str = "", extra_passes: str = "", relabel_rows: str = "",
-               relabel_parts_dir: str = "", relabel_tts: bool = False, part_weights: str = "", extra_parts: str = ""):
+               relabel_parts_dir: str = "", relabel_tts: bool = False, part_weights: str = "", extra_parts: str = "",
+               en_drop_list: str = ""):
     """Greek ς restore (idempotent) + mix_build.build4 + the number share of the v4 mix (total and English-only).
     Run 2 (2026-10-17): balance = build4 template / session caps; en_bal = mix_build.en_balance on the English real
     parts (writes their _bcap copies: caps, then the YouTube top-up trim into the 35-40% band); repeat / win_repeat /
@@ -1436,12 +1437,16 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
     win15_share > 0 (2026-10-18): the 15 s windows (mix_build.build4 win15_share / win15_dir) and, with en_win15, the
     English windows (<win15_dir>/en, held-out videos / days of the CURRENT lists out: en_win15_part), listed
     win15_repeat times. edge_fix_dir: the real rows' edge-word fixes (edge_fix.py; mix_build.build4 edge_fix_dir).
-    extra_passes ("a,b": patterns with {lang}) / relabel_rows / relabel_parts_dir / relabel_tts: mix_build.build4."""
+    extra_passes ("a,b": patterns with {lang}) / relabel_rows / relabel_parts_dir / relabel_tts: mix_build.build4.
+    part_weights / extra_parts: the listing's per-part counts and the parts the builders do not list (the same strings
+    the training launch takes). en_drop_list (a volume path, one audio_filepath per line): English real rows that leave
+    the balance-capped copies (mix_build.en_balance drop_audio)."""
     import json
 
     import mix_build
 
     vol.reload()
+    drop = frozenset(l.strip() for l in open(f"{VOL}/{en_drop_list}", encoding="utf-8") if l.strip()) if en_drop_list else frozenset()
     ls = _langs(langs)
     out = {"unk": mix_build.restore_unk_nonen(VOL),
            "build4": mix_build.build4(VOL, ls, rows_h=rows_h, win_h=win_h, allow_no_judge=allow_no_judge,
@@ -1458,7 +1463,8 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
               part_weights=part_weights, extra_parts=extra_parts)  # the share report is the share retrain3 will assert
     mix = retrain3_mix_v4(ls, en_bal=False, **kw)
     if en_bal:  # a dry build only reports what en_balance would write (the listing keeps the source parts)
-        out["en_balance"] = mix_build.en_balance(VOL, mix, non_en=_NON_EN_PARTS, write=not dry, bcap_dir=mix_dir)
+        out["en_balance"] = mix_build.en_balance(VOL, mix, non_en=_NON_EN_PARTS, write=not dry, bcap_dir=mix_dir,
+                                                 drop_audio=drop)
         if not dry:
             vol.commit()
             mix = retrain3_mix_v4(ls, en_bal=True, **kw)  # the listing training reads (the capped copies)
@@ -1475,24 +1481,26 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
 
 
 def en_win15_part(mix_dir: str, win15_dir: str, write: bool) -> dict:
-    """<mix_dir>/en_win15.jsonl: the English 15 s windows (<win15_dir>/en/windows.jsonl) minus any window with a parent
+    """<mix_dir>/en_win15.jsonl: the English 15 s windows (<win15_dir>/en/windows.jsonl; win15_dir may list several dirs,
+    "a,b", all read) minus any window with a parent
     from a held-out video or plenary day of the CURRENT held-out lists (en_win.held_out's rule; the lists can move
     after the windows were cut). write False removes a stale copy (a part this build does not make must not survive)."""
     import json
 
     dst = f"{VOL}/{mix_dir}/en_win15.jsonl"
-    src = f"{VOL}/{win15_dir}/en/windows.jsonl"
-    if not write or not os.path.exists(src):
+    srcs = [f"{VOL}/{d_}/en/windows.jsonl" for d_ in win15_dir.split(",") if d_]
+    srcs = [p_ for p_ in srcs if os.path.exists(p_)]
+    if not write or not srcs:
         if os.path.exists(dst):
             os.remove(dst)
-        return {"written": False, "source": os.path.exists(src)}
+        return {"written": False, "source": bool(srcs)}
     vids = {l.strip() for l in open(f"{VOL}/d1/en4_ok/heldout_videos_enh.txt") if l.strip() and not l.startswith("#")}
     days = set()
     for l in open(f"{VOL}/d1/en4_ok/heldout_days_vox_en.txt"):
         m = re.match(r"(?:# group vox:)?(\d{8})", l.strip())
         if m:
             days.add(m.group(1))
-    rows = [json.loads(l) for l in open(src, encoding="utf-8") if l.strip()]
+    rows = [json.loads(l) for p_ in srcs for l in open(p_, encoding="utf-8") if l.strip()]
     keep = [r for r in rows if not en_win15_held(r, vids, days)]
     with open(dst, "w", encoding="utf-8") as f:
         for r in keep:
@@ -1528,14 +1536,15 @@ def share_report_of(mix: list) -> dict:
 def share_report(langs: str = ",".join(WAVE1), repeat: int = 1, win_repeat: int = 0, anchor18: int = 0,
                  en_bal: bool = False, dry_en_bal: bool = True, en_plain_h: float = 0.0, en_win_repeat: int = 1,
                  target: float = 0.39, mix_dir: str = "mix4", seam_long_repeat: int = 0, out_path: str = "",
-                 en_free_repeat: int = 1, part_weights: str = "", extra_parts: str = ""):
+                 en_free_repeat: int = 1, part_weights: str = "", extra_parts: str = "", en_drop_list: str = ""):
     """Read-only: the v4 mix shares for an arm's listing on the CURRENT volume (no build). dry_en_bal: also what
-    mix_build.en_balance would do (nothing written)."""
+    mix_build.en_balance would do (nothing written); en_drop_list: as build_mix4."""
     import json
 
     import mix_build
 
     vol.reload()
+    drop = frozenset(l.strip() for l in open(f"{VOL}/{en_drop_list}", encoding="utf-8") if l.strip()) if en_drop_list else frozenset()
     mix = retrain3_mix_v4(_langs(langs), repeat=repeat, anchor18=anchor18, win_repeat=win_repeat, en_bal=en_bal,
                           en_plain_h=en_plain_h, en_win_repeat=en_win_repeat, mix_dir=mix_dir,
                           seam_long_repeat=seam_long_repeat, en_free_repeat=en_free_repeat,
@@ -1546,7 +1555,8 @@ def share_report(langs: str = ",".join(WAVE1), repeat: int = 1, win_repeat: int 
         mix = [(orig.get(p, p), h, t) for p, h, t in mix]
     out = share_report_of(mix)
     if dry_en_bal:
-        out["en_balance_dry"] = mix_build.en_balance(VOL, mix, non_en=_NON_EN_PARTS, write=False, target=target)
+        out["en_balance_dry"] = mix_build.en_balance(VOL, mix, non_en=_NON_EN_PARTS, write=False, target=target,
+                                                     drop_audio=drop)
     print(json.dumps(out, indent=1, ensure_ascii=False))
     if out_path:  # the full report as a volume file (long logs get cut)
         json.dump(out, open(f"{VOL}/{out_path}", "w"), indent=1, ensure_ascii=False)
