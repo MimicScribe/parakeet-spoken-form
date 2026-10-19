@@ -1759,6 +1759,13 @@ SELECT_ORDER = [("blend", -1, 0), ("en_wf", -1, 2), ("chimeras", -1, 0),
                 ("nonen_leak", -1, 1), ("fleurs_worst", -1, 0), ("wer_dev", -1, 0.1)]
 
 
+# 2026-10-18 (scorer review): REPORT-ONLY keys. `en_wf` counts English rows that hold ANY digit or symbol (value-blind: a
+# row that writes the wrong number in words passes, a right number in digits fails) and `fast_d1_ok` matches ONE literal
+# gold reading on synthetic `say` audio. Both stay in sel_metrics (printed, compared) but no longer decide a selection;
+# the English value metrics (en_value) are the English yardstick. select(report_only=()) walks the old order.
+SELECT_REPORT_ONLY = ("en_wf", "fast_d1_ok")
+
+
 def sel_metrics(s):
     fl = [v for v in (s.get("wer_fleurs_delta") or {}).values() if v is not None]
     boot = next((v for k, v in s.items() if k.startswith("fleurs_bootstrap_vs_")), None)
@@ -1772,11 +1779,12 @@ def sel_metrics(s):
             "year_garble": s.get("year_garble", 0)}
 
 
-def select(res, runs, baseline=None, veto=None):
+def select(res, runs, baseline=None, veto=None, report_only=SELECT_REPORT_ONLY):
     """Pick one run: walk SELECT_ORDER; at each key keep the runs within the noise band of the best; stop when one is
     left (ties after the last key: the first listed). `baseline` (e.g. v10pt) fills wer_fleurs_delta.
     veto ({run: [reasons]}, e.g. the seam gate's "vetoed"): those runs never enter the walk; when every run is vetoed
-    the result is run None (nothing is selected)."""
+    the result is run None (nothing is selected). report_only: keys of SELECT_ORDER that are skipped in the walk (still in
+    "metrics"); () = the retrain-3 order unchanged."""
     veto = veto or {}
     vetoed = {r: veto[r] for r in runs if r in veto}
     runs = [r for r in runs if r not in veto]
@@ -1789,6 +1797,8 @@ def select(res, runs, baseline=None, veto=None):
     m = {r: sel_metrics(res[r]) for r in runs}
     alive = list(runs)
     for k, sign, band in SELECT_ORDER:
+        if k in report_only:
+            continue
         best = max(sign * m[r][k] for r in alive)
         alive = [r for r in alive if best - sign * m[r][k] <= band]
         if len(alive) == 1:

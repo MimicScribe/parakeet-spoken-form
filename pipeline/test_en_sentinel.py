@@ -40,3 +40,23 @@ def test_a_lost_19xx_year_is_not_a_two_thousand_truncation(tmp_path):
         (run / f"{name}.jsonl").write_text("")
     s = S.score(str(tmp_path), "r", stock_run="r")
     assert s["year_value_n"] == 1 and s["year_value_kept"] == 0 and s["year_trunc"] == 0
+
+
+# ---- en_wf and fast_d1_ok are report-only in the checkpoint selection
+BASE = {"blend_twenty_thousand": 0, "digits_e22_numbers": 5, "digits_d1_dev": 5, "chimeras": 0, "adv_en_ok": 50,
+        "fast_d1_ok": 40, "leak_vox_dev_total": 0, "leak_fleurs_num_total": 0, "wer_lspc_dev": 5, "wer_d1_dev": 5,
+        "wer_fleurs": {}}
+
+
+def test_a_value_blind_digit_count_and_a_say_clip_match_do_not_decide_a_selection():
+    res = {"a": dict(BASE), "b": dict(BASE, digits_e22_numbers=0, digits_d1_dev=0, fast_d1_ok=90)}  # b: fewer digits, more say hits
+    sel = S.select(res, ["a", "b"])
+    assert sel["tied"] == ["a", "b"] and sel["run"] == "a"  # nothing else differs: a tie, first listed
+    assert sel["metrics"]["b"]["en_wf"] == 0 and sel["metrics"]["b"]["fast_d1_ok"] == 90  # still reported
+    assert S.select(res, ["a", "b"], report_only=())["run"] == "b"  # the retrain-3 order, still available
+    assert S.SELECT_REPORT_ONLY == ("en_wf", "fast_d1_ok")
+
+
+def test_the_remaining_keys_still_decide():  # red-on-base: control
+    res = {"a": dict(BASE), "b": dict(BASE, adv_en_ok=60), "c": dict(BASE, chimeras=3)}
+    assert S.select(res, ["a", "b", "c"])["run"] == "b"
