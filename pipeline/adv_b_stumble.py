@@ -149,10 +149,12 @@ def trail_resume(lang):
     return make
 
 
+# pilot gate (10-19): "kilo" -> "kilos" in every transcriber (the judges cannot confirm it) and the unit sat before a second noun in the
+# count frames; only the fragments a transcriber keeps are used, in frames that end on the unit (cat "ufs")
 UNIT_PAIRS = {
-    "en": [("per", "percent", "pct"), ("kilo", "kilometres", "unit"), ("dollar", "dollars", "cur"), ("per", "percent", "pct")],
-    "es": [("por", "por ciento", "pct"), ("kilo", "kilómetros", "unit"), ("por", "por ciento", "pct")],
-    "fr": [("pour", "pour cent", "pct"), ("kilo", "kilomètres", "unit"), ("pour", "pour cent", "pct")],
+    "en": [("per", "percent", "pct"), ("dollar", "dollars", "cur"), ("per", "percent", "pct")],
+    "es": [("por", "por ciento", "pct")],
+    "fr": [("pour", "pour cent", "pct")],
 }
 
 

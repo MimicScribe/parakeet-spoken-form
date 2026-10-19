@@ -40,6 +40,8 @@ C_B = {
     "fr": {"fr.phone.be_septante", "fr.phone.tollfree", "fr.stum.trail_resume", "fr.stum.digit_fix", "fr.phr.clock_24", "fr.phr.fever", "fr.phr.range_fast"},
     "de": {"de.phone.country"}, "pt": {"pt.phone.country"}, "it": {"it.phone.country"}, "nl": {"nl.phone.country"},
 }
+# constructions the pilot gate dropped (no judge or reader can confirm the audio: version numbers spoken "diez punto quince", fr "un et demi")
+DROP = {"es.phr.version", "fr.phr.version", "fr.phr.fraction"}
 P_TWO = 0.2
 P_LEAD, P_TAIL = 0.5, 0.4
 WCAP = 5.0
@@ -138,7 +140,7 @@ def _cores(lang, c, short):
     return cores
 
 
-def plan(lang: str, split: dict, counts: dict, seed: int = 19, tag: str = TAG, per_template: int = 3, min_each: int = 20) -> tuple:
+def plan(lang: str, split: dict, counts: dict, seed: int = 19, tag: str = TAG, per_template: int = 3, min_each: int = 20, only: dict | None = None) -> tuple:
     """Planned rows for the A halves: counts {family: sentences}. Every C_a construction gets min_each rows first (the pilot gate needs n per
     construction), the rest by weight x sqrt(values). Returns (rows, report)."""
     cons = {c.id: c for c in inventory(lang)}
@@ -173,17 +175,23 @@ def plan(lang: str, split: dict, counts: dict, seed: int = 19, tag: str = TAG, p
 
     for fam in FAMILIES:
         n = counts.get(fam, 0)
-        pool = [c for c in cons.values() if c.family == fam and split["constructions"][c.id]["side"] == "C_a"]
+        pool = [c for c in cons.values() if c.family == fam and split["constructions"][c.id]["side"] == "C_a" and c.id not in DROP
+                and (only is None or c.id in only)]
+        if only is not None:
+            n = sum(only[c.id] for c in pool)
         if not pool or n <= 0:
             continue
         w = [c.weight * min(len(split["constructions"][c.id]["V_a"]) ** 0.5, WCAP) for c in pool]
         quota = collections.Counter()
-        base = min(min_each, n // len(pool))
-        for c in pool:
-            quota[c.id] = base
-        rest = n - base * len(pool)
-        for _ in range(max(rest, 0)):
-            quota[rng.choices(pool, w)[0].id] += 1
+        if only is not None:
+            quota.update({c.id: only[c.id] for c in pool})
+        else:
+            base = min(min_each, n // len(pool))
+            for c in pool:
+                quota[c.id] = base
+            rest = n - base * len(pool)
+            for _ in range(max(rest, 0)):
+                quota[rng.choices(pool, w)[0].id] += 1
         for c in pool:
             got, stall = 0, 0
             while got < quota[c.id] and stall < 60 * max(quota[c.id], 1):
@@ -220,6 +228,8 @@ def test_plan(lang: str, split: dict, per_cell: int = 5, seed: int = 23, tag: st
     rng = random.Random(f"{tag}|{seed}|{lang}")
     rows, ctrl_rows, seen, used = [], [], set(), collections.Counter()
     for cid, c in sorted(cons.items()):
+        if cid in DROP:
+            continue
         sc = split["constructions"][cid]
         cells = [("C_a_V_b", sc["V_b"])] if sc["side"] == "C_a" else [("C_b_V_a", sc["V_a"]), ("C_b_V_b", sc["V_b"])]
         for quad, keys in cells:
@@ -244,7 +254,7 @@ def test_plan(lang: str, split: dict, per_cell: int = 5, seed: int = 23, tag: st
                     cp = c.ctrl(key, random.Random(f"c|{key}|{c.id}|{seed}"))
                     crow = build_row(lang, c, None, [key], {"X": cp}, core, lead, tail, rng, tag + "c",
                                      {"half": "B", "bed": "control", "quad": quad, "control_of": row["id"], "family": c.family, "ambig": []})
-                    crow["id"] = row["id"] + "_ctl"
+                    crow["id"] = row["id"][:-10] + hashlib.md5((row["id"] + "ctl").encode()).hexdigest()[:10]       # hex tail (engines seed from the id)
                     crow["construction"] = c.id + "#ctrl"
                     crow["control_construction"] = c.id
                     ctrl_rows.append(crow)

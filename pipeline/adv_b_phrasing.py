@@ -53,7 +53,7 @@ def en_emerg(k, rng):
 
 def en_nought(k, rng):                       # k = "0.5" / "0.25"
     frac = k.split(".")[1]
-    lead = rng.choice(["nought", "zero", "oh", ""])
+    lead = rng.choice(["zero", "oh", ""])      # "nought" is said "not" by every engine: no judge can confirm it (pilot gate)
     f = " ".join("oh" if ch == "0" else W.DIGITS["en"][int(ch)] for ch in frac)
     lab = (lead + " " if lead else "") + "point " + f
     return _p(lab, [("dec", k, lab)])

@@ -117,7 +117,7 @@ def build_stumble(lang: str) -> list:
     add("filler_mid", "cnt", ST._num_keys(lang, "split"), ST.filler_mid(lang), ST.c_prefix(lang))
     add("self_fix", "cnt", [f"{a}-{b}" for a, b in ST.near_pairs(lang)], ST.self_fix(lang), ST.c_selffix(lang))
     add("trail_resume", "cnt", ST._num_keys(lang, "prefix"), ST.trail_resume(lang), ST.c_prefix(lang))
-    add("unit_false_start", "cnt", [str(n) for n in (2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 25, 30, 35, 40, 45, 50, 60, 75, 80, 90) if not (lang != "en" and n % 10 == 1)],
+    add("unit_false_start", "ufs", [str(n) for n in (2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 18, 20, 25, 30, 35, 40, 45, 50, 60, 75, 80, 90) if not (lang != "en" and n % 10 == 1)],
         ST.unit_false_start(lang), ST.c_unit(lang))
     add("digit_fix", "code", ST.digit_pairs(), ST.digit_fix(lang), ST.c_digits(lang))
     if lang in ("en", "es"):
