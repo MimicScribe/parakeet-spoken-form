@@ -429,3 +429,38 @@ class VarietyReadings(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlainSpaceGroupNeedsExactlyThreeDigits(unittest.TestCase):
+    """2026-10-18 (scorer review A): "UE 20 2020." was read as 202020 (the plain-space thousands group joined "20 202" and
+    left the last "0"). A group is exactly three digits: no digit may follow it."""
+
+    def vals(self, t, lang="fr"):
+        return [sorted(map(str, n.vals)) for n in N.extract_numbers(t, lang)]
+
+    def test_year_after_a_number_is_not_a_group(self):
+        self.assertEqual(self.vals("UE 20 2020."), [["20"], ["2020"]])
+        self.assertEqual(self.vals("le 20 2020 est"), [["20"], ["2020"]])
+        self.assertEqual(self.vals("12 345 6789", "de"), [["12345"], ["6789"]])
+
+    def test_real_groups_still_join(self):  # red-on-base: control
+        self.assertEqual(self.vals("5 000 euros"), [["5000"]])
+        self.assertEqual(self.vals("800 000"), [["800000"]])
+        self.assertEqual(self.vals("1 000 000"), [["1000000"]])
+        self.assertEqual(self.vals("3 000 4 000"), [["3000"], ["4000"]])
+
+    def test_outcome_of_a_year_pair(self):
+        out = N.number_outcomes("UE 20 2020.", "UE 20 2020.", "fr")
+        self.assertEqual([o["outcome"] for o in out], ["DIGITS_RIGHT_VALUE"] * 2)
+
+    def test_the_training_scorers_copy_reads_the_same(self):
+        import importlib.util
+
+        if not PUBLIC_SCORER.exists():
+            self.skipTest("public scorer not found")
+        sys.path.insert(0, str(PUBLIC_SCORER.parent))
+        spec = importlib.util.spec_from_file_location("score_retrain_copy", PUBLIC_SCORER)
+        S = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(S)
+        got = [sorted(map(str, n.vals)) for n in S.extract_numbers("UE 20 2020.", "fr")]
+        self.assertEqual(got, [["20"], ["2020"]])

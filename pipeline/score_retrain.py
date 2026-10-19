@@ -885,7 +885,7 @@ def extract_numbers(text: str, lang: str, keep_weak: bool = True, garbles: bool 
     t = re.sub(r"(\d):00\b", r"\1", t)
     # a plain-space thousands group ("800 000", "1 000 000") is one number (FLEURS references)
     for _ in range(3):
-        t = re.sub(r"(?<![\d.,])(\d{1,3}) (\d{3})(?![\d.,]\d)", "\\1\u00a0\\2", t)
+        t = re.sub(r"(?<![\d.,])(\d{1,3}) (\d{3})(?!\d)(?![.,]\d)", "\\1\u00a0\\2", t)
     toks = _TOKEN.findall(t)
     words = lang in _LEX
     runs, cur = [], []  # runs of consecutive number tokens: ("d", tok_index, vals) or ("m", tok_index, morph)
@@ -1241,7 +1241,7 @@ def _ext_numbers(text: str, lang: str, keep_weak: bool, garbles: bool = False) -
     t = unicodedata.normalize("NFKC", text).replace("\u2019", "'").lower()  # not folded: "što" must stay "što"
     t = re.sub(r"(\d):00\b", r"\1", t)
     for _ in range(3):
-        t = re.sub(r"(?<![\d.,])(\d{1,3}) (\d{3})(?![\d.,]\d)", "\\1\u00a0\\2", t)
+        t = re.sub(r"(?<![\d.,])(\d{1,3}) (\d{3})(?!\d)(?![.,]\d)", "\\1\u00a0\\2", t)
     toks = re.split(r"[ \t\r\n]+", t.strip()) if t.strip() else []
     nums, chunk = [], []
     stop = _EXT_NOT_NUM.get(lang, set())
