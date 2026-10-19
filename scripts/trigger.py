@@ -541,7 +541,7 @@ class Trigger:
         app = self.launch_params().get("app")
         if es.get("action", "stop") != "stop" or not app:
             self.log(f"ALARM early stop says STOP main; {'action is log-only' if app else 'no app id in its launch manifest'}"
-                     f" -> stop it by hand{': modal app stop ' + app if app else ''}")
+                     f" -> stop it by hand{': modal app stop --yes ' + app if app else ''}")
             st["action"] = "stopped"
             self.save()
             return
@@ -549,7 +549,7 @@ class Trigger:
             self.log(f"DRY-RUN would stop app {app}")
             return
         self.log(f"ACTION stop the main run's app {app}")
-        rc, out = self.ex.run(["modal", "app", "stop", app], timeout=180)
+        rc, out = self.ex.run(["modal", "app", "stop", "--yes", app], timeout=180)  # --yes: without it the CLI asks and aborts
         self.log(f"modal app stop exit {rc}: {out.strip()[-200:]}" + ("" if rc == 0 else "  ALARM stop it by hand"))
         if rc == 0:
             st["action"] = "stopped"

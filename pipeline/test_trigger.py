@@ -71,8 +71,8 @@ class FakeExec:
             if rc == 0 and self.on_launch:
                 self.on_launch(argv)
             return rc, f"launcher said {rc}\napp ap-X\n"
-        if argv[:3] == ["modal", "app", "stop"]:
-            self.stops.append(argv[3])
+        if argv[:4] == ["modal", "app", "stop", "--yes"]:
+            self.stops.append(argv[4])
             return 0, "stopped"
         if argv[0] == "SUMMARY":
             d = os.path.basename(argv[1])
