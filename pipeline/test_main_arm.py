@@ -24,3 +24,15 @@ def test_r10_main_recipe_is_the_standard_stock_start():
     arm = MA.R3_ARMS["R10-main"]
     assert arm["lr"] == 1e-4 and arm["l2sp_c"] == 10.0
     assert not arm.get("kl_mask_space") and not arm.get("wf_pen_digits_only")  # the damaging / untested switches stay off
+
+
+def test_main_variant_has_a_six_hour_cap_and_the_same_arguments():
+    import inspect
+    import re
+
+    assert MA.MAIN_TIMEOUT_S == 6 * 3600
+    assert inspect.signature(MA.retrain3_80_main._raw_f_) == inspect.signature(MA.retrain3._raw_f_)
+    src = inspect.getsource(MA)
+    deco = lambda fn: re.search(r"@app\.function\(([^@]*?)\)\ndef " + fn + r"\(", src, re.S).group(1)  # noqa: E731
+    assert "timeout=MAIN_TIMEOUT_S" in deco("retrain3_80_main") and "A100-80GB" in deco("retrain3_80_main")
+    assert "timeout=24 * 3600" in deco("retrain3_80") and "timeout=24 * 3600" in deco("retrain3")  # control: unchanged

@@ -2040,6 +2040,23 @@ def retrain3_80(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000
     return retrain3.local(**locals())
 
 
+# The main run's cost cap: ONE attempt may not run longer than this (retrain3 / retrain3_80 allow 24 h per attempt; with
+# 2 retries a stuck run could bill ~72 h). The planned 5,000 steps take ~3 h at ~2 s a step. A resumed attempt gets a
+# fresh window; run_watch.py stops the app when checkpoints stall, long before this bound.
+MAIN_TIMEOUT_S = 6 * 3600
+
+
+@app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-80GB", cpu=8, memory=32768, timeout=MAIN_TIMEOUT_S,
+              retries=modal.Retries(max_retries=2, initial_delay=30.0))
+def retrain3_80_main(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, save_every: int = 250,
+                     en_weight: float = -1.0, check_share: bool = True, warmup: int = 50, gradshare: bool = False,
+                     dur_weight: float = 1.0, init_from: str = "v10pt@1500", lr: float = 0.0, mix: str = "mix3",
+                     anchor_init: bool = False, cons_weight: float = -1.0, langs: str = "", mix_dir: str = "mix4",
+                     r3_sub_batch: int = 2, unfreeze_top: int = 0, part_weights: str = "", extra_parts: str = ""):
+    """retrain3_80 for the main run: identical code, arguments and batch, but a MAIN_TIMEOUT_S limit per attempt."""
+    return retrain3.local(**locals())
+
+
 @app.function(image=nemo_image, volumes={VOL: vol}, gpu="A100-40GB", cpu=8, memory=32768, timeout=6 * 3600,
               retries=modal.Retries(max_retries=2, initial_delay=30.0))
 def retrain(run: str, arm: str = "main", seed: int = 1, max_steps: int = 3000, kl_tok: float = 1.0,
