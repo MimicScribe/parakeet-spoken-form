@@ -10,7 +10,7 @@ usage: wer_sentinel.py RUN [RUN ...] [--control w3soup_a0.5@0] [--no-stock] [--d
 
 Metric: WER on text with case and punctuation removed (apostrophes dropped, hyphens split), number-word morphemes a model
 spaced out ("zwei und zwanzig", "vier en twintig", "venti tre") joined with compound_split.join_morphemes in de / nl / it.
-Pooled WER = total word errors / total reference words. Pass bar (plan B6): pooled delta vs the control <= +0.15 points
+Pooled WER = total word errors / total reference words. Pass bar: pooled delta vs the control <= +0.15 points
 for all 13 languages and for each group (wave-1 = en, de, es, fr, it, nl, pt; other = ru, uk, pl, ro, cs, hu), and no
 language above +0.5 points. A paired bootstrap over utterances gives the 95% interval of each delta (report-only).
 Bed: pipeline/wer_sentinel.py (FLEURS dev, number-free, ~200 utterances per language)."""
@@ -19,6 +19,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import unicodedata
 from pathlib import Path
 
@@ -184,7 +185,7 @@ def main() -> int:
     ap.add_argument("--control", default="w3soup_a0.5@0")
     ap.add_argument("--no-stock", action="store_true")
     ap.add_argument("--decode", action="store_true")
-    ap.add_argument("--work", type=Path, default=Path("/tmp/wer_sentinel_work"))
+    ap.add_argument("--work", type=Path, default=Path(tempfile.gettempdir()) / "wer_sentinel_work")
     ap.add_argument("--pipeline", type=Path, default=PIPE, help="pipeline dir to launch modal from (a clean export)")
     ap.add_argument("--out", type=Path)
     ap.add_argument("--json", type=Path)
