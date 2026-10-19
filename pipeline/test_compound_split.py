@@ -130,3 +130,28 @@ def test_it_final_tre_loses_its_accent_when_split_and_regains_it_when_joined():
     assert C.split_token("tre", "it") == ["tre"] and C.split_token("tremila", "it") == ["tre", "mila"]
     assert C.join_morphemes(["due", "mila", "venti", "tre"], "it") == "duemilaventitré"
     assert C.join_morphemes(["tre", "mila"], "it") == "tremila"
+
+# ---- Italian restored-vowel form ("it+", also plain "it" while IT_SPLIT_ELIDED is on): num_chars offsets (2026-10-18)
+import tempfile  # noqa: E402
+
+for bad in (["it"], ["it+"], ["de", "nl", "it"]):
+    try:
+        C.check_split_langs(bad)
+    except ValueError as e:
+        assert "it-" in str(e) and "num_chars" in str(e), str(e)
+    else:
+        raise AssertionError(f"{bad} must be refused while the Italian offsets are misaligned")
+C.check_split_langs(["de", "nl", "it-"])  # the whole-elided form is exact (red-on-base: control)
+C.check_split_langs([])
+with tempfile.TemporaryDirectory() as d:  # build4 refuses before it reads or writes anything
+    try:
+        mix_build.build4(d, ("it",), split_langs=("it",))
+    except ValueError as e:
+        assert "num_chars" in str(e)
+    else:
+        raise AssertionError("build4 must refuse the restored-vowel Italian split")
+    assert not __import__("os").listdir(d), "refused before creating the mix dir"
+# the bug itself, expected to fail until compound_split counts the restored vowel (then set IT_OFFSETS_FIXED = True)
+_r = C.split_row({"text": "ne arrivarono ventotto", "num_chars": [[14, 22]]}, "it", it_elided=True)
+_still_broken = _r["text"][slice(*_r["num_chars"][0])] != "venti otto"  # today: "venti ott"
+assert _still_broken == (not C.IT_OFFSETS_FIXED), "IT_OFFSETS_FIXED must be True exactly when the offsets are exact"

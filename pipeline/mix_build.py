@@ -2068,6 +2068,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
     import compound_split as CS
     import ml_balance as B
 
+    CS.check_split_langs(split_langs)  # before any work: the restored-vowel Italian form misaligns num_chars
     stats = {"langs": {}}
     os.makedirs(f"{vol}/{mix_dir}", exist_ok=True)
     unsplit_targets = set()  # the unsplit texts of split target rows (the anchor-collision check below)

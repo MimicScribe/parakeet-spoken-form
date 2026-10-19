@@ -1274,6 +1274,7 @@ def mix_add_tts(base_dir: str, new_dir: str, add: str, langs: str, aug_frac: flo
     import compound_split as CS
     import mix_build
 
+    CS.check_split_langs([l for l in split_compounds.split(",") if l])  # the restored-vowel Italian form misaligns num_chars
     vol.reload()
     src, dst = f"{VOL}/{base_dir}", f"{VOL}/{new_dir}"
     assert os.path.isdir(src) and not os.path.exists(dst), (src, dst)

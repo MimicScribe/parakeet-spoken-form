@@ -130,6 +130,25 @@ _LEX_SRC = {"de": _DE, "nl": _NL, "it-": _IT, "it+": _IT_SPLIT}
 IT_SPLIT_ELIDED = True
 
 
+# KNOWN BUG (2026-10-18, ledger A97): with the elided forms split ("it+", which is also what plain "it" means while
+# IT_SPLIT_ELIDED is on) the restored vowel ("vent" -> "venti") adds a character that split_text's insertion points do
+# not count, so a row's `num_chars` end ONE CHARACTER too far per restored vowel inside the span (9.2% of the spans of a
+# built Italian part were misaligned). "it-" (elided forms whole) is exact. Builds must not write the "it+" form until
+# this is fixed; set IT_OFFSETS_FIXED = True only together with the fix and its (now passing) test.
+IT_OFFSETS_FIXED = False
+
+
+def check_split_langs(split_langs) -> None:
+    """Refuse an Italian split mode that misaligns `num_chars` (see IT_OFFSETS_FIXED). Called at the start of every
+    build that writes split rows. `split_langs`: the build's list ("de", "nl", "it", "it+", "it-")."""
+    for l in split_langs:
+        if l in ("it", "it+") and not IT_OFFSETS_FIXED and (l == "it+" or IT_SPLIT_ELIDED):
+            raise ValueError(
+                f"split language {l!r} writes the restored-vowel Italian form (venti uno), whose num_chars offsets are "
+                f"misaligned by the restored vowel (compound_split.IT_OFFSETS_FIXED is False). Use 'it-' (the elided "
+                f"forms stay whole) or fix the offsets first.")
+
+
 def _tab(lang: str, it_elided=None) -> str:
     """The table key of a language: Italian "it+" (elided forms split) or "it-" (whole); other keys unchanged."""
     if lang != "it":
