@@ -236,3 +236,97 @@ def test_retrain3_passes_the_english_kl_arms():
     src = inspect.getsource(MA.retrain3._raw_f_)
     assert 'en_teacher=cfg["en_teacher"]' in src and 'en_kl_scale=cfg["en_kl_scale"]' in src
     assert {"en_teacher", "en_teacher_num", "en_kl_scale"} <= set(inspect.signature(F.train).parameters)
+
+
+# ---------------------------------------------------------------- en_free_teacher / en_span_gate (spike 2026-10-18)
+FREE_ROWS = ROWS[:3] + [("the code is queue four seven nine", "free")]  # (the 4-row fake batch)
+
+
+def test_klu_row_free_anchors_only_with_the_flag():
+    # red-on-base: klu_row had no en_free; free rows never had a KL position
+    spm = T.FakeSPM()
+    ids = spm.encode("the code is queue four seven nine")
+    assert not any(F.klu_row(spm, "free", ids, en_full=True))
+    assert not any(F.klu_row(spm, "free", ids, suffix_anchor=True))
+    assert all(F.klu_row(spm, "free", ids, en_full=True, en_free=True))
+    assert F.klu_row(spm, "nonen_span", ids, span_prefix={tuple(ids): 2}, en_free=True) == \
+        F.klu_row(spm, "nonen_span", ids, span_prefix={tuple(ids): 2})  # no other tag changes
+
+
+def test_row_gate_span_only_with_the_flag():
+    # red-on-base: row_gate had no span_gate; English span rows always took `gate`
+    tags = ["span", "anchor", "anchor_num", "free", "nonen", "nonen_span", "nonen_span"]
+    keys = [(1,), (2,), (3,), (4,), (5,), (6,), (7,)]
+    base = F.row_gate(tags, keys, 0.9, 0.5, {(7,)})
+    assert base == [0.9, 0.5, 0.5, 0.9, 0.9, 0.5, 0.9]
+    assert F.row_gate(tags, keys, 0.9, 0.5, {(7,)}, span_gate=0.0) == base  # off = unchanged
+    on = F.row_gate(tags, keys, 0.9, 0.5, {(7,)}, span_gate=0.5)
+    assert on[0] == 0.5 and on[1:] == base[1:]  # the span rows only
+    assert F.row_gate(tags, keys, 0.9, 0.0, set(), span_gate=0.4) == [0.4] + [0.9] * 6  # also without gate_human
+    assert F.row_gate(tags, keys, 0.9, 0.0, set()) == [0.9] * 7
+
+
+def test_en_free_teacher_gives_free_rows_a_b_kl_only_with_the_flag():
+    # red-on-base: free rows got no KL at all (klu False, no teacher), whatever en_teacher was
+    st = lambda m: b_state(m, bias=2.0)  # noqa: E731
+    _, _, off = run(FREE_ROWS, perturb_student=0.5, en_teacher_state=st)
+    m, loss, on = run(FREE_ROWS, perturb_student=0.5, en_teacher_state=st, en_free_teacher=True)
+    for k in ("kl_b", "kl_p", "kl_t"):  # flag off: nothing on the free row
+        assert off["free"][k][1] == 0, k
+    assert off["free"].get("kl_te", (0.0, 0))[1] == 0
+    assert on["free"]["kl_p"][1] > 0 and on["free"]["kl_p"][0] > 0  # punct KL against B, student moved away
+    assert on["free"]["kl_te"][1] > 0 and on["free"]["kl_te"][0] > 0  # the English token KL against B: nonzero
+    assert on["free"]["kl_b"][1] > 0
+    assert torch.isfinite(loss) and m._r3_parts["kl_te"].item() > 0
+    for tg in ("nonen", "nonen_span", "span"):  # every other row: the same values, the same cells
+        for k in on[tg]:
+            assert on[tg][k] == pytest.approx(off[tg][k], rel=1e-5), (tg, k)
+    # the free row reads B, not stock: a B equal to stock gives the stock-teacher values on it
+    _, _, same = run(FREE_ROWS, perturb_student=0.5, en_teacher_state=lambda m: b_state(m, bias=0.0), en_free_teacher=True)
+    assert same["free"]["kl_p"][0] != pytest.approx(on["free"]["kl_p"][0], rel=1e-3)
+
+
+def test_en_free_teacher_needs_the_english_teacher():
+    with pytest.raises(AssertionError):
+        run(FREE_ROWS, en_free_teacher=True)  # no en_teacher
+    with pytest.raises(AssertionError):
+        run(FREE_ROWS, en_free_teacher=True, en_teacher_state=lambda m: b_state(m), en_teacher_num="mask")
+
+
+def test_en_free_teacher_follows_en_kl_scale():
+    st = lambda m: b_state(m, bias=2.0)  # noqa: E731
+    only_free = [("the code is queue four seven nine", "free"), ("wir haben two Hunde", "nonen")]
+    m1, _, _ = run(only_free, perturb_student=0.5, en_teacher_state=st, en_free_teacher=True)
+    m3, _, _ = run(only_free, perturb_student=0.5, en_teacher_state=st, en_free_teacher=True, en_kl_scale=3.0)
+    assert m3._r3_parts["kl_te"].item() == pytest.approx(3.0 * m1._r3_parts["kl_te"].item(), rel=1e-5)
+
+
+def test_en_span_gate_lowers_the_span_gate_only_with_the_flag():
+    # red-on-base: the span rows' blank-KL gate was `gate` (0.9) in add_r3_losses whatever the arm. A B whose blank logit is
+    # raised sits at P(non-blank) between 0.5 and 0.9 on these cells: the 0.9 gate drops them all, the 0.5 gate keeps them
+    st = lambda m: b_state(m, bias=8.2, piece=8192)  # noqa: E731
+    _, _, base = run(perturb_student=0.5, en_teacher_state=st)
+    _, _, same = run(perturb_student=0.5, en_teacher_state=st, en_span_gate=0.0)
+    assert base == same  # off = unchanged
+    assert base["span"]["kl_b"][1] == 0
+    _, _, g = run(perturb_student=0.5, en_teacher_state=st, en_span_gate=0.5)
+    assert g["span"]["kl_b"][1] > 0 and g["span"]["kl_b"][0] > 0  # the blank KL now reaches the span rows
+    for tg in ("nonen", "nonen_span", "anchor"):  # every other row keeps its gate
+        assert g[tg] == base[tg], tg
+
+
+def test_enfree_arm_is_the_en3_arm_plus_the_two_flags():
+    import inspect
+
+    MA = pytest.importorskip("modal_app")
+    arm, base = MA.R3_ARMS["R8-s-enfree"], MA.R3_ARMS["R8-s-en3"]
+    diff = {k: (base.get(k), arm.get(k)) for k in set(arm) | set(base) if arm.get(k) != base.get(k)}
+    assert diff == {"en_free_teacher": (None, True), "en_span_gate": (None, 0.5)}, diff
+    for name, a in MA.R3_ARMS.items():  # every other arm leaves both off
+        if name != "R8-s-enfree":
+            assert not a.get("en_free_teacher") and not a.get("en_span_gate"), name
+    src = inspect.getsource(MA.retrain3._raw_f_)
+    assert 'en_free_teacher=cfg["en_free_teacher"]' in src and 'en_span_gate=cfg["en_span_gate"]' in src
+    assert {"en_free_teacher", "en_span_gate"} <= set(inspect.signature(F.train).parameters)
+    assert inspect.signature(F.train).parameters["en_free_teacher"].default is False
+    assert inspect.signature(F.train).parameters["en_span_gate"].default == 0.0

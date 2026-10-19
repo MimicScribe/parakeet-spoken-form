@@ -1909,6 +1909,10 @@ R3_ARMS.update({
     # R10-main-lr05 = R10-main at half the peak learning rate (5e-5; the cosine floor follows as lr / 10). Run beside it.
     "R10-main-lr05": dict(_R8, lr=5e-5, l2sp_c=10.0, recipe=_R8S_RECIPE, en_teacher="w3soup_a0.5@0", en_kl_scale=3.0,
                           wf_en_weight=3.0),
+    # R8-s-enfree = R8-s-en3 + the English "free" rows routed to the English teacher (en_free_teacher) + a 0.5 blank-KL gate on
+    # the English span rows (en_span_gate), spike 2026-10-18 (500 steps, read against R8-s-en3). Both are off in every other arm.
+    "R8-s-enfree": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, en_teacher="w3soup_a0.5@0", en_kl_scale=3.0,
+                        wf_en_weight=3.0, en_free_teacher=True, en_span_gate=0.5),
     "R9-S2": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0",
                   wf_weight=0.0),
     "R9-S3": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R7_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0"),
@@ -2041,6 +2045,8 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     cfg.setdefault("en_teacher", "")
     cfg.setdefault("en_teacher_num", "anchor")
     cfg.setdefault("en_kl_scale", 1.0)
+    cfg.setdefault("en_free_teacher", False)
+    cfg.setdefault("en_span_gate", 0.0)
     cfg.setdefault("enc_lr_scale", 1.0)
     cfg.setdefault("enc_l2sp_c", None)
     cfg.setdefault("lora_rank", 0)
@@ -2105,6 +2111,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
                    l2sp_exempt_num=cfg["l2sp_exempt_num"], wf_pen_digits_only=cfg["wf_pen_digits_only"],
                    kl_mask_space_en=cfg["kl_mask_space_en"], en_teacher=cfg["en_teacher"],
                    en_teacher_num=cfg["en_teacher_num"], en_kl_scale=cfg["en_kl_scale"],
+                   en_free_teacher=cfg["en_free_teacher"], en_span_gate=cfg["en_span_gate"],
                    enc_lr_scale=cfg["enc_lr_scale"], enc_l2sp_c=cfg["enc_l2sp_c"], lora_rank=cfg["lora_rank"],
                    lora_alpha=cfg["lora_alpha"], sampler_seed=cfg["sampler_seed"], lr_offset=cfg["lr_offset"],
                    lr_total=cfg["lr_total"], enc_lr_peak=cfg["enc_lr_peak"], enc_lr_floor=cfg["enc_lr_floor"],
