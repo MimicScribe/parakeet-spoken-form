@@ -47,5 +47,5 @@ def dry(langs: str, mix_dir: str, extra: str, edge_fix: str, win15_dir: str, win
 @app.local_entrypoint()
 def run(langs: str = "es", mix_dir: str = "mix4dryrx_ctl", realx1: bool = False, edge_fix: str = "ml/edgefix2",
         win15_dir: str = "ml/win15b", win15_share: float = 0.11):
-    extra = "ml/l1conv/{lang}/rows_l1conv.jsonl" + (",ml/realx1/{lang}/rows_realx1.jsonl" if realx1 else "")
+    extra = "ml/l1conv/{lang}/rows_l1conv.jsonl" + (",ml/realx1/{lang}/rows_realx1_regional.jsonl" if realx1 else "")
     print(json.dumps(dry.remote(langs, mix_dir, extra, edge_fix, win15_dir, win15_share), indent=1))
