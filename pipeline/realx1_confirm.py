@@ -14,6 +14,7 @@ import json
 import os
 import random
 import re
+import time
 
 import modal
 
@@ -61,6 +62,7 @@ def score_chunk(lang: str, in_path: str, start: int, end: int, out_path: str, co
     ctc = D.LangCTC(lang, model=D.STRONG.get(lang))
     rng = random.Random(f"realx1-{lang}-{start}")
     st = {"rows": 0, "pass": 0, "unreadable": 0}
+    t_start = time.time()
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         for r in rows:
@@ -116,6 +118,7 @@ def score_chunk(lang: str, in_path: str, start: int, end: int, out_path: str, co
             st["rows"] += 1
             st["pass"] += ok_all
             f.write(json.dumps(out, ensure_ascii=False) + "\n")
+    st["sec"] = round(time.time() - t_start, 1)
     vol.commit()
     return st
 
