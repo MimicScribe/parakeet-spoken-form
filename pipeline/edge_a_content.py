@@ -348,7 +348,7 @@ def build_en() -> list:
 
     def uhpair(k, rng):
         a, b = map(int, k.split("-"))
-        f = rng.choice(["uh", "um", "uh", "er"])
+        f = rng.choice(["uh", "um", "uh"])   # "er" is read as "twentyer" (bulk pilot: 0 of 8 accepted)
         lab = f"{c(a)} {f} {c(b)}"
         return Piece(lab, f"{a}-{b}", [("int", str(a), c(a)), ("int", str(b), c(b))], A)
     add(id="en.dis.uh_pair", family="dis", cat="dis", ambig=A, values=[f"{a}-{b}" for a, b in up], make=uhpair)

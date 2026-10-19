@@ -983,7 +983,7 @@ if modal is not None:
         return res
 
     @app.function(image=image, volumes={VOL: vol}, gpu="L4", timeout=3 * 3600, max_containers=7)
-    def build_edge(lang: str, tag: str, set_tag: str, hours: float, seed: int = 1) -> dict:
+    def build_edge(lang: str, tag: str, set_tag: str, hours: float, seed: int = 1, root: str = "") -> dict:
         """Edge windows (plan_edge_windows) from synthetic sets' verified rows (ml/<set_tag>/<lang>/rows.jsonl, set_tag
         "a,b" for several sets;
         clean audio, one voice per stream); rows with a letter+digit code are left out (the build re-labels codes in
@@ -994,7 +994,7 @@ if modal is not None:
         import librosa
         import soundfile as sf
 
-        out = f"{VOL}/ml/win15{tag}/{lang}"
+        out = f"{VOL}/ml/{root or 'win15' + tag}/{lang}"   # root: another top directory (the edge pack: edgeA/win)
         assert not os.path.exists(f"{out}/windows.jsonl"), f"{out}/windows.jsonl exists: use a new tag"
         os.makedirs(f"{out}/wav", exist_ok=True)
         rng = random.Random(f"win15edge-{lang}-{seed}")
@@ -1099,10 +1099,10 @@ if modal is not None:
 
     @app.local_entrypoint()
     def edge(langs: str = "de,es,fr,it,nl,pt", tag: str = "sym", set_tag: str = "ttsSYM1", hours: str = "",
-             default_h: float = 0.5, seed: int = 1):
+             default_h: float = 0.5, seed: int = 1, root: str = ""):
         """Edge windows of one synthetic set: modal run win15.py::edge --tag sym --set-tag ttsSYM1 --hours de:0.6,nl:0.1"""
         over = {k: float(v) for k, v in (x.split(":") for x in hours.split(",") if x)}
-        for r in build_edge.starmap([(l, tag, set_tag, over.get(l, default_h), seed) for l in langs.split(",")]):
+        for r in build_edge.starmap([(l, tag, set_tag, over.get(l, default_h), seed, root) for l in langs.split(",")]):
             print(json.dumps({k: r[k] for k in ("lang", "kept_h", "counts", "modes", "edge_gap_s")}, ensure_ascii=False))
 
     @app.local_entrypoint()

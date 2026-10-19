@@ -20,7 +20,7 @@ VOL = "/vol"
 vol = modal.Volume.from_name("parakeet-spoken-form")
 image = T.image.add_local_python_source("en_win", "label_gpu", "labeller", "readings", "census_common", "ml_slav", "ml_balance",
                                         "compound_split", "realx1_core", "edge_a_probe", "edge_a", "edge_a_content",
-                                        "edge_a_words", "edge_a_frames")
+                                        "edge_a_words", "edge_a_frames", "win15")
 app = modal.App("parakeet-edge-a-ctc")
 
 
@@ -45,12 +45,13 @@ def _rows(p):
 
 
 @app.function(image=image, volumes={VOL: vol}, gpu="L4", cpu=4, memory=16384, timeout=4 * 3600, max_containers=4)
-def check(planned: str, lang: str, out: str, part: int, parts: int, write_all: bool = False) -> dict:
+def check(planned: str, lang: str, out: str, part: int, parts: int, write_all: bool = False, real: bool = False) -> dict:
     import numpy as np
     import soundfile as sf
 
     import edge_a as E
     import edge_a_probe as P
+    import win15
     import en_win as EW
     import ml_decide as D
     import ml_p3_core as C
@@ -90,7 +91,7 @@ def check(planned: str, lang: str, out: str, part: int, parts: int, write_all: b
     out_rows = []
     for r in rows:
         try:
-            x, _sr = sf.read(r["presynth"], dtype="float32")
+            x, _sr = sf.read(r.get("presynth") or r["audio_filepath"], dtype="float32")
             x = x.mean(1) if x.ndim > 1 else x
         except Exception:  # noqa: BLE001
             x = None
@@ -106,8 +107,10 @@ def check(planned: str, lang: str, out: str, part: int, parts: int, write_all: b
         cer = C.cer(EW.greedy_norm(T_) if lang == "en" else T_, g)
         gn = norm(g)
         fit, why = "exact", ""
-        if cer > T.CER_MAX:
+        if cer > (0.10 if real else T.CER_MAX):       # real speech: a tighter round trip (a clipped edge word is a wrong label)
             why = "cer"
+        elif real and not (win15.end_close(T_, g, "start") and win15.end_close(T_, g, "end")):
+            why = "edge_word"
         else:
             for a, b in r["num_chars"]:
                 rd = norm(T_[a:b])
@@ -149,6 +152,6 @@ def check(planned: str, lang: str, out: str, part: int, parts: int, write_all: b
 
 
 @app.local_entrypoint()
-def run(planned: str, lang: str, out: str, parts: int = 2, write_all: bool = False):
-    for res in check.starmap([(planned, lang, out, p, parts, write_all) for p in range(parts)], return_exceptions=True):
+def run(planned: str, lang: str, out: str, parts: int = 2, write_all: bool = False, real: bool = False):
+    for res in check.starmap([(planned, lang, out, p, parts, write_all, real) for p in range(parts)], return_exceptions=True):
         print(res)

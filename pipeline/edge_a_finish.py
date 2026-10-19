@@ -12,10 +12,30 @@ import json
 KEEP_FIELDS = ("audio_filepath", "duration", "text", "lang", "src", "id", "origin", "caption", "kind", "cls", "spans", "num_chars",
                "word_times", "cer_ctc", "fit", "edge_quiet", "split", "voice", "voice_license", "speed", "engine", "engine_src", "ckey",
                "register", "slots", "gclasses", "template", "edge", "edge_spans", "ambig", "construction", "constructions", "values", "half",
-               "family", "group", "accent", "locale", "side", "label_style")
+               "family", "group", "accent", "locale", "side", "label_style", "reader_weak")
 
 
-def finalize(rows: list, verdicts: dict, drop_constructions=(), drop_groups=(), set_tag: str = "ttsEC1") -> tuple:
+def reader_weak(r: dict, numkeys: set) -> bool:
+    """The strict probes failed ONLY because a word that is not a number word (a unit noun such as "puntos", "points") was not
+    heard by the character reader (word deletion did not lose). The caller accepts such a clip only when both blind
+    transcripts say the phrase. Any failed whole-phrase deletion, near-word swap or number-word deletion is never weak."""
+    import ml_decide as D
+
+    bad = [s for s in r.get("strict") or [] if not s["ok"]]
+    if not bad or not r.get("basic_ok"):
+        return False
+    for s in bad:
+        m = s.get("m") or {}
+        if s["why"] != "wdel" or (m.get("del") is not None and m["del"] < 6.0) or (m.get("wsub") is not None and m["wsub"] < 4.0):
+            return False
+        words = [w for kind, w, _ in s.get("low") or [] if kind == "wdel"]
+        if not words or any(D.key(str(w)) in numkeys for w in words):
+            return False
+    return True
+
+
+def finalize(rows: list, verdicts: dict, drop_constructions=(), drop_groups=(), set_tag: str = "ttsEC1", unanimous=(),
+             numkeys: set | None = None) -> tuple:
     """rows: edge_a_ctc output rows; verdicts: {id: {"a": bool|None, "b": bool|None}} (blind transcript A / B said the phrase).
     Returns (final rows, second-look rows, report)."""
     st = collections.Counter()
@@ -29,6 +49,12 @@ def finalize(rows: list, verdicts: dict, drop_constructions=(), drop_groups=(), 
         va, vb = v.get("a"), v.get("b")
         said_any = bool(va) or bool(vb)
         said_both = bool(va) and bool(vb)
+        weak = numkeys is not None and not r.get("ctc_ok") and said_both and reader_weak(r, numkeys)
+        if weak:
+            r = dict(r, ctc_ok=True, reader_weak=True)
+            st["reader_weak_accepted"] += 1
+        if r["construction"] in unanimous:      # a construction under the pilot bar keeps only clips all three judges accept
+            said_any = said_both and bool(r.get("ctc_ok"))
         if r.get("ctc_ok") and said_any:
             x = {k: r[k] for k in KEEP_FIELDS if k in r}
             x.update(origin=f"{set_tag}/{r.get('voice')}", src="tts", blind=[bool(va), bool(vb)])
