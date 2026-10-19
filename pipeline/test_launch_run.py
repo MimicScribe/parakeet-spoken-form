@@ -30,7 +30,7 @@ if [ "$1 $2" = "volume ls" ]; then
   out=$(grep "^$4/" "$d/exists.txt") || { echo "path \"/$4\" does not exist" >&2; exit 1; }
   echo "$out"; exit 0
 fi
-if [ "$1 $2" = "run --detach" ]; then echo "View run at https://modal.com/apps/ws/main/ap-FAKE123abc"; exit 0; fi
+if [ "$1 $2" = "run --detach" ]; then [ -f "$d/slow.txt" ] && sleep "$(cat "$d/slow.txt")"; echo "View run at https://modal.com/apps/ws/main/ap-FAKE123abc"; exit 0; fi
 exit 0
 '''
 
@@ -261,6 +261,50 @@ def test_the_orchestrator_reads_the_launch_manifest_the_launcher_writes(world):
     got = trigger.parse_manifest(str(log / "launch_manifest.txt"))
     assert got == dict(sha=world["sha"], app="ap-FAKE123abc", mix_dir="mix4final10", part_weights="a/b=2,c/d=1",
                        extra_parts="p/q:tag:3")
+
+
+def test_two_launches_seconds_apart_start_only_one(world):
+    """2026-10-18: two launches of one run 8 s apart both passed lock 2 (exp/<run> appears only once the container trains)
+    and both started. Now the second refuses while the first is in flight (exit 10). Red on base."""
+    (world["fake"] / "slow.txt").write_text("3")  # `modal run` takes 3 s to print the app id: the first launch is in flight
+    log = world["tmp"] / "log"
+    cmd = ["bash", SCRIPT, "--run", "R10_run1", "--arm", "R10-main", "--sha", world["sha"], "--max-steps", "500",
+           "--mix-dir", "m", "--repo", str(world["repo"]), "--approvals", str(world["appr"]), "--log-dir", str(log),
+           "--no-watch"]
+    env = dict(os.environ, PATH=f"{world['fake']}:{os.environ['PATH']}")
+    ps = [subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(2)]
+    outs = [(p.wait(timeout=120), p.stderr.read()) for p in ps]
+    assert sorted(rc for rc, _ in outs) == [0, 10], outs
+    assert "a launch is in flight" in [err for rc, err in outs if rc == 10][0]
+    assert calls(world).count("run --detach") == 1
+    assert (log / "launch_manifest.txt").read_text().count("run R10_run1\n") == 1
+    assert not (log / ".launch.lock").exists()  # released once the app id is logged
+
+
+def test_a_run_launched_from_a_log_dir_is_not_launched_again_from_it(world):
+    """After the first launch has released the lock, exp/<run> may still be absent (the container is staging): the log
+    dir's manifest refuses a second launch of the same run; --resume, or another run name, still goes through."""
+    first, log = world["launch"]()
+    assert first.returncode == 0, first.stderr
+    again, _ = world["launch"](log=log)
+    assert again.returncode == 4 and "already launched" in again.stderr
+    assert calls(world).count("run --detach") == 1
+    other, _ = world["launch"](run="other_run", log=log)
+    assert other.returncode == 0, other.stderr
+    (world["fake"] / "exists.txt").write_text("exp/R10_run1\n")
+    resumed, _ = world["launch"]("--resume", log=log)
+    assert resumed.returncode == 0, resumed.stderr
+
+
+def test_a_stale_lock_refuses_and_a_refusal_releases_the_lock(world):
+    log = world["tmp"] / "log"
+    (log / ".launch.lock").mkdir(parents=True)
+    r, _ = world["launch"](log=log)
+    assert r.returncode == 10 and ".launch.lock" in r.stderr and "run --detach" not in calls(world)
+    assert (log / ".launch.lock").exists()  # someone else's lock is never removed
+    (log / ".launch.lock").rmdir()
+    r, _ = world["launch"](arm="R10-nope", log=log)  # refused after the lock was taken (lock 3): the lock goes with it
+    assert r.returncode == 2 and "not defined" in r.stderr and not (log / ".launch.lock").exists()
 
 
 def test_dry_run_checks_everything_and_launches_nothing(world):

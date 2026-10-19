@@ -11,6 +11,10 @@
 #   2. exp/<run> must not exist on the volume (exit 4); with --resume it must exist, and the commit must be the one the
 #      first launch logged in --log-dir (exit 5). The check reads the volume's exp/ listing: a failed listing (network,
 #      CLI) refuses the launch (exit 8); it is never read as "absent";
+#   2b. one launch per run and log dir: a launch holds <log-dir>/.launch.lock (an atomic mkdir) from here until its app id
+#      is logged, so a second launch seconds later refuses (exit 10) instead of passing lock 2 before exp/<run> exists
+#      (2026-10-18: two launches 8 s apart both started and wrote over each other's logs); and a run name the log dir's
+#      launch_manifest.txt already names refuses without --resume (exit 4). A stale lock (a killed launcher) is removed by hand;
 #   3. the arm must exist in the commit, max-steps must be a multiple of the checkpoint interval (250), the run name
 #      must be a plain name (exit 2).
 #   4. --init-from (default ultra = a stock start): a branch arm (R10-br*, R10-encF) needs --init-from <other run>@<step> whose
@@ -57,6 +61,15 @@ die() { echo "REFUSED: $2" >&2; [ -z "$EXPORT" ] || rm -rf "$EXPORT"; exit "$1";
 
 # lock 1: an explicit approval for THIS run name (one exact line)
 [ -f "$APPROVALS" ] && grep -qxF -- "$RUN" "$APPROVALS" || die 3 "run '$RUN' has no approval line in $APPROVALS"
+
+# lock 2b: no other launch of this log dir in flight, and not launched from it before (see the header)
+mkdir -p "$LOG" || die 2 "cannot create $LOG"
+LOCK="$LOG/.launch.lock"
+mkdir "$LOCK" 2>/dev/null || die 10 "another launch holds $LOCK (a launch is in flight); if none is running, remove that directory"
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+if [ $RESUME -eq 0 ] && grep -qxF -- "run $RUN" "$LOG/launch_manifest.txt" 2>/dev/null; then
+  die 4 "run '$RUN' was already launched from $LOG (its launch_manifest.txt); use a new run name, or --resume on purpose"
+fi
 
 # lock 2: a new run name (or, with --resume, the same run and the same commit)
 FULL=$(git -C "$REPO" rev-parse --verify --quiet "$SHA^{commit}") || die 2 "commit $SHA not found in $REPO"
