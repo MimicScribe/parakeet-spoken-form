@@ -19,6 +19,7 @@ import torch.utils.checkpoint
 from omegaconf import OmegaConf, open_dict
 
 from common import number_span
+import exposure
 
 
 class KeepEncoderFrozen(pl.Callback):
@@ -1368,6 +1369,39 @@ MERGED_KL = True  # one joint pass for all KL terms (2026-10-13 speed fix)
 KL_EQ_CHECK = os.environ.get("KL_EQ_CHECK") == "1"  # first 3 batches: also run the separate passes and print both
 
 
+class SeenRows(pl.Callback):
+    """Measured exposure: appends the rows every optimizer step's micro-batches actually contained to
+    `<exp>/seen_rows.jsonl` (exposure.py has the format and the reader, exposure_report.py the report). Purely additive:
+    no RNG, no model or batch change, and a failing write only prints a warning."""
+
+    def __init__(self, exp: str, sha12: str):
+        self.exp, self.sha12, self.log = exp, sha12, None
+
+    def _guard(self, fn, *a):
+        try:
+            return fn(*a)
+        except Exception as e:  # never let the bookkeeping stop a run
+            print(f"SEEN ROWS LOG FAILED ({type(e).__name__}: {e}); exposure for later steps is not recorded", flush=True)
+
+    def on_train_start(self, trainer, m):
+        self.log = self._guard(exposure.SeenLog, self.exp, self.sha12, trainer.global_step)
+
+    def on_train_batch_start(self, trainer, m, batch, idx):
+        if self.log is not None:
+            self._guard(self.log.add, trainer.global_step, batch)
+
+    def on_train_batch_end(self, trainer, m, outputs, batch, idx):
+        if self.log is not None:
+            self._guard(self.log.end_batch, trainer.global_step)
+
+    def on_train_end(self, trainer, m):
+        if self.log is not None:
+            self._guard(self.log.flush)
+
+    def on_exception(self, trainer, m, exception):
+        self.on_train_end(trainer, m)
+
+
 class StepLog(pl.Callback):
     def __init__(self, mem: bool = False):
         self.t0 = time.time()
@@ -1396,11 +1430,13 @@ class StepLog(pl.Callback):
 
 
 def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_texts=None,
-              kl_exempt: str = "", tagged: dict | None = None, stage_dir: str = "") -> float:
+              kl_exempt: str = "", tagged: dict | None = None, stage_dir: str = "", meta_out: list | None = None) -> float:
     """Concatenate manifests, taking `hours` from each (all if hours <= 0). Labels of rows from
-    `replay/` manifests are added to `replay_texts` when given."""
+    `replay/` manifests are added to `replay_texts` when given. `meta_out` (a list) receives one exposure.row_meta
+    (part, tag, language, number kinds) per written row, in manifest order; it changes nothing else."""
     r = random.Random(seed)
     rows, exempt = [], set()
+    part_of = {}
     for part in parts:
         path, hours = part[0], part[1]
         tag = part[2] if len(part) > 2 else None
@@ -1452,6 +1488,8 @@ def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_text
             else:
                 replay_texts.update(x["text"] for x in src)
         rows += src
+        if meta_out is not None:
+            part_of.update({id(x): (path, tag) for x in src})
     if replay_texts is not None and kl_exempt == "numwords":
         # Real speech that says numbers is where spoken form is learned on real audio: no anchor there,
         # whichever manifest the row came from (LSPC also holds number-word rows).
@@ -1461,6 +1499,8 @@ def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_text
         replay_texts.difference_update(exempt)
         print(f"KL-exempt labels ({kl_exempt}): {len(exempt)}, anchored: {len(replay_texts)}")
     r.shuffle(rows)
+    if meta_out is not None:
+        meta_out.extend(exposure.row_meta(x, *part_of[id(x)]) for x in rows)
     if stage_dir:
         # Copy the selected audio to the container's local disk: ~60k small files read from the network volume made
         # each step ~3x slower than v12y's (dress rehearsal 2026-10-13).
@@ -1852,8 +1892,9 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     manifest = f"{stage_dir}/train_manifest.jsonl" if stage_dir else f"{exp}/train_manifest.jsonl"
     if stage_dir:
         os.makedirs(stage_dir, exist_ok=True)
+    row_meta = []
     hours = write_mix(vol, manifest, mix, seed=seed, replay_texts=replay_texts,
-                      kl_exempt=kl_exempt, tagged=tagged, stage_dir=stage_dir)
+                      kl_exempt=kl_exempt, tagged=tagged, stage_dir=stage_dir, meta_out=row_meta)
     if stage_dir:
         import shutil
 
@@ -1871,6 +1912,12 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
     print(f"train mix: {hours:.2f} h")
 
     m = nemo_asr.models.ASRModel.restore_from(ultra, map_location="cpu")
+    manifest_sha12 = manifest_sha256(manifest)[:12]
+    try:  # measured exposure (exposure.py): what each manifest line is, so the seen-rows log can be read back
+        exposure.write_row_index(exp, manifest_sha12, [json.loads(l) for l in open(manifest, encoding="utf-8")],
+                                 row_meta, lambda t: m.tokenizer.text_to_ids(t))
+    except Exception as e:
+        print(f"row index NOT written ({type(e).__name__}: {e}); exposure_report will not work for this run", flush=True)
     # A fresh train_ds: the checkpoint's own carries its original corpus settings (tarred inputs,
     # bucket bins, a null max_tps) that do not apply here.
     with open_dict(m.cfg):
@@ -2028,7 +2075,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
                          use_distributed_sampler=False, gradient_clip_val=clip_val, logger=False,
                          accumulate_grad_batches=accumulate,
                          enable_checkpointing=False, enable_progress_bar=False,
-                         callbacks=[KeepEncoderFrozen(), StepLog(mem=bool(unfreeze_top))] + extra + extra_cb
+                         callbacks=[KeepEncoderFrozen(), StepLog(mem=bool(unfreeze_top)), SeenRows(exp, manifest_sha12)] + extra + extra_cb
                          + ([ParamGroupLog()] if enc_lr_scale != 1.0 or enc_lr_peak else [])
                          + branch_cb
                          + ([SaveEvery(exp, save_every, on_save, last)] if save_every else []))
