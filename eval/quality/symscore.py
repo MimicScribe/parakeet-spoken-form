@@ -266,7 +266,9 @@ def unit_sub(rec) -> tuple:
     lw = {SH._nw(w) for w in rec["lab_words"]}
     uw = SH._unit_words(rec["cands"], lang) & lw
     if cls == "cur":
-        uw |= {w for w in lw if w in N._CUR or w in N._MINOR}
+        # a word that is also a number word ("cent" = 100 in fr) inside the amount is no unit: the unit must not match a
+        # number morpheme of the span's own reading
+        uw |= {w for w in lw if (w in N._CUR or w in N._MINOR) and N.parse_value(w, lang) is None}
     if not uw:
         return False, False
     hyp_norm = [SH._nw(w) for w in words]

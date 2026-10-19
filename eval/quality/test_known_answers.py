@@ -154,13 +154,21 @@ class C_Corruptions(unittest.TestCase):
 
     def test_a_dropped_unit_word_is_a_unit_miss_not_a_value_error(self):
         for r, x in self.each("drop_unit"):
-            if r["id"] == "ka_fr_21":  # SCORER BUG, see test_french_hundred_is_not_the_euro_cent
-                continue
             with self.subTest(r["id"]):
                 self.assertTrue(x["value_ok"])
                 self.assertEqual(x["sform"], "words")
                 self.assertTrue(x["unit_spoken"] and not x["unit_present"])
                 self.assertFalse(x["clean"])
+
+    def test_french_hundred_is_not_the_euro_cent(self):
+        # "cent" (100) inside "deux cent cinquante" is a number morpheme, not the euro-cent unit: dropping "euros" is a miss
+        r = next(r for r in ROWS if r["id"] == "ka_fr_21")
+        x = rec(r, "drop_unit")
+        self.assertTrue(x["unit_spoken"] and not x["unit_present"])
+        # the legacy table has the same test
+        lab = r["seg"].split()
+        self.assertEqual(CR.unit_flags("cur", type("S", (), {"cands": []}), lab, "deux cent cinquante".split(),
+                                       "deux cent cinquante".split(), "fr"), (True, True))
 
     def test_a_dropped_decimal_word_is_a_decimal_miss(self):
         for r, x in self.each("drop_dec"):
@@ -198,7 +206,7 @@ class C_Corruptions(unittest.TestCase):
                 self.assertEqual(100 * c["V"] / c["n"], v)
                 if w is not None:
                     self.assertEqual(100 * c["W"] / c["n"], w)
-        recs = {(r["id"], r["caption"], 0): rec(r, "drop_unit") for r in with_hyp("drop_unit") if r["id"] != "ka_fr_21"}
+        recs = {(r["id"], r["caption"], 0): rec(r, "drop_unit") for r in with_hyp("drop_unit")}
         c = CR.sym_counts(recs)["ALL"]
         self.assertEqual((c["Uw"][0], c["Uw"][1]), (c["n"], c["n"]))  # every dropped unit is a miss: U_w = 100%
         self.assertEqual(c["V"], c["n"])
@@ -206,14 +214,6 @@ class C_Corruptions(unittest.TestCase):
 
 class D_ScorerBugs(unittest.TestCase):
     """Right answers the current scorer does not give. expectedFailure: see the module docstring."""
-
-    @unittest.expectedFailure
-    def test_french_hundred_is_not_the_euro_cent(self):
-        # SCORER BUG (symscore.unit_sub): "cent" (hundred) is in the label's words and counts as the euro-cent unit, so
-        # "deux cent cinquante" for "deux cent cinquante euros" has its unit "present" and the miss is not counted.
-        r = next(r for r in ROWS if r["id"] == "ka_fr_21")
-        x = rec(r, "drop_unit")
-        self.assertTrue(x["unit_spoken"] and not x["unit_present"])
 
     @unittest.expectedFailure
     def test_legacy_four_outcome_does_not_credit_fused_or_garbled_number_words(self):

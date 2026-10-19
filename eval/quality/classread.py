@@ -107,7 +107,9 @@ def unit_flags(cls: str, sp, lab_words: list, hyp_words: list, hyp_norm: list, l
     lw = {SH._nw(w) for w in lab_words}
     uw = SH._unit_words(sp.cands, lang) & lw
     if cls == "cur":  # "5 euros": the labeller kind is int, the unit word is outside the span's readings
-        uw |= {w for w in lw if w in N._CUR or w in N._MINOR}
+        # a word that is also a number word ("cent" = 100 in fr) inside the amount is no unit: the unit must not match a
+        # number morpheme of the span's own reading
+        uw |= {w for w in lw if (w in N._CUR or w in N._MINOR) and N.parse_value(w, lang) is None}
     if not uw:
         return False, False
     present = any(h == u or (len(h) >= 4 and (h.startswith(u) or u.startswith(h))) for h in hyp_norm for u in uw)
