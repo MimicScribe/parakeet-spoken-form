@@ -39,7 +39,7 @@ nemo_image = (
     .env({"HF_HOME": f"{VOL}/hf", "HF_HUB_ENABLE_HF_TRANSFER": "1"})
     .add_local_python_source("common", "data_e22", "data_replay", "data_fleurs", "ft_train", "ft_eval", "rescore", "preflight",
                               "labeller", "readings", "label_gpu", "harvest", "beds", "veto",
-                              "mix_build", "census_common", "recrop", "score_retrain", "yearflip", "exposure")
+                              "mix_build", "census_common", "recrop", "score_retrain", "yearflip", "exposure", "stage_shards")
 )
 
 tts_image = (
@@ -1972,6 +1972,24 @@ R3_ARMS.update({
     # schedule over the 4,000 steps (warmup 50, peak 2e-5, cosine to 2e-6).
     "R10-encF": dict(_BRANCH_ENC, enc_lr_steps=MAIN_RUN_STEPS - BRANCH_STEP),
 })
+# Matched encoder/decoder branch set (2026-10-19; launch only through the run launcher, --init-from <main run>@1000). Five 500-step
+# branches off the same checkpoint, the same sampler seed (4242), mix, restart and decoder lr; each differs from its parent by the
+# keys named here and no others (test_branch_set.py asserts it). Parents: X0 = R10-brC, X1 = R10-brE (both on the fixed L2-SP engine
+# of d337d0a, which is the point of re-running them), X2 / X2b / X3 = X1, X5 = X0.
+#   X0  decoder only (the control)
+#   X1  top-2 encoder blocks, encoder lr peak 2e-5 -> floor 2e-6 (warmup 50, cosine over the 500 steps)
+#   X2  X1 at 3x the encoder lr (peak 6e-5, floor 6e-6): the same warmup / decay shape, 3x the summed lr
+#   X2b X1's encoder lr total on a flatter schedule (peak 1.5e-5, floor 7.5e-6): 58% (X1: 73%) of it falls in the first 250 steps
+#   X3  top-4 encoder blocks (layers 20-23) at X1's encoder lr
+#   X5  decoder only with the number-word output rows of the joint exempt from the L2-SP pull (l2sp_exempt_num)
+R3_ARMS.update({
+    "R10-brX0": dict(R3_ARMS["R10-brC"]),
+    "R10-brX1": dict(R3_ARMS["R10-brE"]),
+    "R10-brX2": dict(R3_ARMS["R10-brE"], enc_lr_peak=6e-5, enc_lr_floor=6e-6),
+    "R10-brX2b": dict(R3_ARMS["R10-brE"], enc_lr_peak=1.5e-5, enc_lr_floor=7.5e-6),
+    "R10-brX3": dict(R3_ARMS["R10-brE"], unfreeze_top=4),
+    "R10-brX5": dict(R3_ARMS["R10-brC"], l2sp_exempt_num=True),
+})
 # R10-anc1 = the anchor-weight test (2026-10-18): R10-main on the same mix, run for 500 steps on the lr schedule of the 5,000-step
 # main (lr_total, offset 0 = the plain schedule), so main@500 is its matched control. Only the --extra-parts weights differ
 # (the ancRH2 parts at x1); the arm itself is R10-main's settings.
@@ -2477,3 +2495,55 @@ def decode_mix(run: str = "v10pt", step: int = 1500, parts: str = "mix/d1.jsonl,
         print(p, len(rows))
     json.dump(res, open(f"{VOL}/{out}", "w"))
     vol.commit()
+
+
+# Tar-shard staging (stage_shards.py): the audio of one training manifest in a few large tar files on the volume, keyed
+# by the manifest sha. The training function reads them when they are there and copies file by file when not.
+shard_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .add_local_python_source("common", "stage_shards")
+)
+
+
+@app.function(image=shard_image, volumes={VOL: vol}, cpu=4, memory=8192, timeout=3 * 3600)
+def pack_mix_shards(mix_dir: str, manifest_sha: str, stage_dir: str = "/tmp/stage") -> dict:
+    """Pack every audio file the training manifest with sha `manifest_sha` (first 12+ hex digits; a run's
+    exp/<run>/train_manifest.jsonl) names into tar shards at stage_shards/<sha12>/ on the volume, plus index.json.
+    mix_dir (the mix directory the manifest was built from) must exist on the volume and is recorded in the index.
+    Idempotent: skips when the shards exist with a matching index. New paths only: nothing existing is touched."""
+    import stage_shards
+
+    vol.reload()
+    assert os.path.isdir(f"{VOL}/{mix_dir}"), f"mix dir {mix_dir!r} is not on the volume"
+    _, rows = stage_shards.find_manifest(VOL, manifest_sha, stage_dir)
+    out = stage_shards.shard_dir(VOL, manifest_sha)
+    idx = stage_shards.pack(stage_shards.unique_paths(rows), out, manifest_sha, mix_dir=mix_dir)
+    vol.commit()
+    return {k: idx[k] for k in ("manifest_sha", "mix_dir", "n_files", "payload_bytes")} | {
+        "shards": len(idx["shards"]), "shard_bytes": sum(s["bytes"] for s in idx["shards"])}
+
+
+@app.function(image=shard_image, volumes={VOL: vol}, cpu=4, memory=8192, timeout=3600)
+def time_shard_staging(manifest_sha: str, stage_dir: str = "/tmp/stage") -> dict:
+    """Stage the shards of `manifest_sha` onto this fresh container's disk with the training code path and report the
+    time and rate (the staged copy is thrown away with the container)."""
+    import time
+
+    import stage_shards
+
+    vol.reload()
+    _, rows = stage_shards.find_manifest(VOL, manifest_sha, stage_dir)
+    t0 = time.time()
+    n = stage_shards.stage_from_shards(rows, stage_dir, VOL, manifest_sha)
+    dt = time.time() - t0
+    size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(stage_dir) for f in fs)
+    return {"files": n, "seconds": round(dt, 1), "files_per_s": round(n / dt), "gb": round(size / 1e9, 1),
+            "mb_per_s": round(size / 1e6 / dt)}
+
+
+@app.local_entrypoint()
+def pack_and_time(mix_dir: str, manifest_sha: str, time_read: bool = True):
+    """One app run: pack the shards, then time reading them from a second, fresh container."""
+    print("PACK", pack_mix_shards.remote(mix_dir, manifest_sha))
+    if time_read:
+        print("STAGE-READ", time_shard_staging.remote(manifest_sha))

@@ -1550,10 +1550,14 @@ def write_mix(vol: str, out: str, parts: list[tuple], seed: int = 1, replay_text
     if stage_dir:
         # Copy the selected audio to the container's local disk: ~60k small files read from the network volume made
         # each step ~3x slower than v12y's (dress rehearsal 2026-10-13).
+        # Large tar shards of this exact manifest (stage_shards, keyed by its sha) are read when the volume has them;
+        # without them, or if they do not match, the files are copied one by one as before.
+        import stage_shards
         from common import stage_files
 
         t0 = time.time()
-        rows = stage_files(rows, stage_dir)
+        sha = stage_shards.manifest_sha([{**x, "audio_filepath": stage_dir + x["audio_filepath"]} for x in rows])
+        rows = stage_shards.stage_rows(rows, stage_dir, vol, sha, stage_files)
         print(f"staged {len(rows)} files to {stage_dir} in {time.time() - t0:.0f}s", flush=True)
     with open(out, "w") as f:
         for x in rows:
