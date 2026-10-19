@@ -107,20 +107,54 @@ def priority(r: dict, lang: str, w: dict, vc: collections.Counter) -> float:
     return s / (max(r["duration"], 1.0) ** 0.5)
 
 
-def select(cands: list, mix: list, lang: str, hours: float, seed: int = 7) -> tuple:
+NEW_SESSION_ROWS = 4  # a session / video the mix holds fewer rows of than this is speaker and topic variety
+
+
+def useful(r: dict, lang: str, w: dict, vc: collections.Counter, seen: dict, ng: collections.Counter) -> bool:
+    """Does the row add something the mix is short of: a span in a class under twice its bar, a reading of >= 4 words, a
+    value under twice its fill floor, a value (class, value) the mix has not got, or a session the mix hardly has."""
+    g = CC.group_id(r)
+    if not g.startswith("id:") and ng[g] < NEW_SESSION_ROWS:
+        return True
+    for sp in r["spans"]:
+        if "text" not in sp:
+            continue
+        c, v = CC.gate_class_value(r, sp, lang)
+        if w.get(c, 0.1) >= 0.1 or len((sp.get("reading") or "").split()) >= 4 or v not in seen.get(c, ()):
+            return True
+    return any(vc[v] < 2 * fill_floor(v) for v in span_values(r, lang))
+
+
+SATURATED_SHARE = 0.4  # of the added hours: rows that add no thin class, long reading, new value or new session
+
+
+def select(cands: list, mix: list, lang: str, hours: float, seed: int = 7, sat_share: float = SATURATED_SHARE) -> tuple:
     """(rows, skipped by reason): greedy by priority under the session / template / top-year caps counted against the mix,
-    until `hours` of audio."""
+    until `hours` of audio. Rows that add nothing the mix is short of (useful()) come after the others and make up at most
+    sat_share of the added hours."""
     rng = random.Random(f"{seed}-{lang}")
     w = class_weights(lang, mix)
     vc = collections.Counter(v for r in mix for v in span_values(r, lang))
+    seen = collections.defaultdict(set)
+    for r in mix:
+        for sp in r["spans"]:
+            if "text" in sp:
+                c, v = CC.gate_class_value(r, sp, lang)
+                seen[c].add(v)
     ng = collections.Counter(CC.group_id(r) for r in mix if r.get("spans"))
     nt = collections.Counter(CC.template_key(r) for r in mix if r.get("spans"))
     yc = collections.Counter(y for r in mix for sp in r["spans"] for y in [CC.year_of(r, sp, lang)] if y)
     ytot = sum(yc.values())
-    out, acc, skip = [], 0.0, collections.Counter()
-    for r in sorted(cands, key=lambda r: (-priority(r, lang, w, vc), rng.random())):
+    out, acc, sat_acc, skip = [], 0.0, 0.0, collections.Counter()
+    order = sorted(cands, key=lambda r: (-priority(r, lang, w, vc), rng.random()))
+    flags = {r["id"]: useful(r, lang, w, vc, seen, ng) for r in order}  # against the mix, before any row joins it
+    for r in [r for r in order if flags[r["id"]]] + [r for r in order if not flags[r["id"]]]:
         if acc >= hours * 3600:
             break
+        sat = not flags[r["id"]]
+        if sat and sat_acc + r["duration"] > sat_share * (acc - sat_acc + r["duration"]) / (1 - sat_share):
+            skip["saturated_budget"] += 1
+            continue
         g, t = CC.group_id(r), CC.template_key(r)
         if not g.startswith("id:") and ng[g] + 1 > CC.group_cap(lang, g):
             skip["session_cap"] += 1
@@ -139,6 +173,7 @@ def select(cands: list, mix: list, lang: str, hours: float, seed: int = 7) -> tu
         vc.update(span_values(r, lang))
         out.append(r)
         acc += r["duration"]
+        sat_acc += r["duration"] if sat else 0.0
     return out, dict(skip)
 
 
