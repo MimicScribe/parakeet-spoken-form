@@ -610,6 +610,22 @@ def test_a_role_mix_overrides_the_config_mix_in_the_templates(world):
     assert t.out_dir("cap", 1000).endswith("CAP@1000__mixCAP")
 
 
+def test_runs_launched_by_hand_that_never_appear_do_not_keep_the_orchestrator_alive(world):
+    w = world
+    cfg = json.loads(json.dumps(w["cfg"]))
+    cfg["runs"]["cap"] = dict(run="CAP", arm="R10-main")
+    cfg["runs"]["anc1"] = dict(run="A1", arm="R10-anc1")
+    cfg["score_plan"] = dict(main=[1000], cap=[2500])
+    cfg["early_stop"] = {}
+    cfg["compare"] = [dict(name="c", a="cap@2500", b="main@1000", cmd=["CMP"]), dict(name="d", a="anc1@500", b="main@500", cmd=["CMP"])]
+    start_branches(w, steps=(250, 500))
+    w["vol"].put("M", 500, 1000)
+    gate_says(w, 0, 0, 0)
+    t = w["make"](cfg)
+    settle(w, t, 12)
+    assert t.finished()  # nothing waits for CAP or A1: they were never launched
+
+
 def test_without_the_anchor_test_nothing_waits_for_it(world):
     w = world
     t = w["make"]()

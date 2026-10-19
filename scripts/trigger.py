@@ -46,6 +46,7 @@ MARK = re.compile(r"step(\d+)\.pt\.done$")
 RETRY_S = 300  # a refused / transiently failed launch is tried again no sooner than this
 MAX_ATTEMPTS = 3  # for a launcher refusal that retrying cannot fix (bad arguments, wrong commit)
 SWITCHES = ("--anchor-init", "--detach")  # flags of the launcher's training command that take no value
+HAND_LAUNCHED = ("anc1", "cap", "enfree2")  # runs started by hand: scored when they exist, not waited for otherwise
 GATE_KEYS = ("250", "500", "250,500")  # the step sets the interim gate is read over
 ROLES = ("main", "lr05", "cap", "enfree2", "brC", "brCs2", "brE", "brEr", "encF", "anc1")  # brCs2: brC again on another sampler seed; anc1: launched by hand
 
@@ -731,7 +732,7 @@ class Trigger:
         for _, role, step in self.plan():
             if role in ("brEr", "brCs2") and not self.settled(role):
                 continue  # only scored when launched
-            if role == "anc1" and not self.exists.get(self.runs["anc1"]["run"]):
+            if role in HAND_LAUNCHED and not self.exists.get(self.runs[role]["run"]):
                 continue  # launched by hand, or not at all
             if role == "encF" and self.state["encF"] != "go":
                 continue
@@ -741,7 +742,7 @@ class Trigger:
                 return False
         for cmp_ in self.cfg.get("compare", []):
             ra, rb = (x.split("@")[0] for x in (cmp_["a"], cmp_["b"]))
-            if ra == "anc1" and not self.exists.get(self.runs["anc1"]["run"]):
+            if any(r in HAND_LAUNCHED and not self.exists.get(self.runs[r]["run"]) for r in (ra, rb)):
                 continue
             if self.state.get("compares", {}).get(cmp_["name"], {}).get("status") not in ("done", "failed"):
                 return False
