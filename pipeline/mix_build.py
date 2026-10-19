@@ -2035,6 +2035,22 @@ def vb_violations(rows: list, vb) -> list:
     return out
 
 
+def trim_num_punct(x: dict) -> int:
+    """Cut trailing punctuation off the end of every number span of a row's text ("zwanzig." -> "zwanzig"): the spoken number
+    does not contain the sentence's period or comma. Returns the number of spans changed (text and spans otherwise untouched;
+    punctuation INSIDE a span still stops the build)."""
+    out, n = [], 0
+    for a, b in x.get("num_chars") or []:
+        e = b
+        while e > a and x["text"][e - 1] in ",.;:!?":
+            e -= 1
+        n += e != b
+        out.append([a, e])
+    if n:
+        x["num_chars"] = out
+    return n
+
+
 def keep_syn_pairs(rows: list, bad: set, cap_out: set, took_ids: set) -> tuple[list, dict]:
     """Whole synthetic seam pairs whose every parent is a synthetic row this build trains on (took_ids: the chosen
     synthetic rows; the rule synthetic windows follow), none held out / rejected / ext (bad) or capped out (cap_out).
@@ -2287,6 +2303,8 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
         # dedupe count it), not the utterance: every row of a held-out video / day stays out too
         held_u |= {held_unit(i) for i in held} - {None}
         held |= {x["id"] for x in rows if held_unit(x["id"]) in held_u}
+        n_trim = sum(trim_num_punct(x) for x in rows)  # a sentence period / comma a pass left on the end of a number span
+        stats.setdefault("num_punct_trimmed", {})[lang] = n_trim
         for x in rows:
             assert "num_chars" in x, f"{lang}: P3 row without num_chars: {x['id']}"
             assert not WF_LABEL.search(x["text"]), f"{lang}: symbol in label: {x['text'][:80]}"

@@ -4,6 +4,7 @@ English windows from several win15 dirs, the English drop list of the balance co
 English parts the main run lists with extra_parts."""
 import json
 import os
+import re
 import tempfile
 
 import mix_build as MB
@@ -119,3 +120,12 @@ lst = MA.retrain3_mix_v4(("de",), win_repeat=2, mix_dir="mix4x")
 assert any(p == MB.en_rl_path("d1/en4_ok/win_en.jsonl", "mix4x") for p, _, _ in lst) and not any(p == "d1/en4_ok/win_en.jsonl" for p, _, _ in lst)
 assert MB.number_share_of(MB.en_rl_path("d1/en4_ok/win_en.jsonl", "mix4x")) == MB.NUMBER_PART["d1/en4_ok/win_en.jsonl"]
 print("test_m10_build: English relabels ok")
+
+# ---- a sentence period left on the end of a number span is trimmed at the build (the build used to stop on it)
+x_ = {"text": "ab zwanzig. Dann", "num_chars": [[3, 11]]}
+assert MB.trim_num_punct(x_) == 1 and x_["text"][slice(*x_["num_chars"][0])] == "zwanzig", x_
+y_ = {"text": "drei, vier", "num_chars": [[0, 5], [6, 10]]}
+assert MB.trim_num_punct(y_) == 1 and y_["num_chars"] == [[0, 4], [6, 10]], y_
+z_ = {"text": "ein.hundert", "num_chars": [[0, 11]]}
+assert MB.trim_num_punct(z_) == 0 and "." in z_["text"][0:11]  # inside: left for the assert
+print("test_m10_build: trailing punctuation of number spans ok")
