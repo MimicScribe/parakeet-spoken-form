@@ -8,6 +8,9 @@
   R6  stray symbols the caption kept: "-one point four" -> "minus one point four"; a row with a multiplication sign, a
       "=" / "==" markup run or a minus glued to a letter ("f-one") has no spoken form that is known -> dropped.
   R7  hyphenated fractions: "one-third" -> "one third" (other hyphenated words stay).
+  R8  the number of a letter code written as the homophone "to": "B to B" / "B to C" / "D to C" / "P to P" -> "B two B" /
+      "B two C" / "D two C" / "P two P" (letter+digit policy: the letters as written, the number as the spoken word
+      "two"). Only a closed list of codes, so "from A to B" / "X to Y" / "E to P" stay.
 
     python en_relabel.py build --part <name>=<manifest.jsonl> [--part ...] --out relabel.jsonl --drops drops.jsonl
 
@@ -29,6 +32,18 @@ PER_CENT = re.compile(r"\b(per) (cent)\b", re.I)
 FRAC = re.compile(r"\b((?:one|two|three|four|five|six|seven|eight|nine|ten|a))-((?:third|thirds|half|halves|quarter|quarters|"
                   r"fourth|fourths|fifth|fifths|sixth|sixths|seventh|sevenths|eighth|eighths|ninth|ninths|tenth|tenths))\b", re.I)
 MINUS_LEAD = re.compile(r"(?<![\w−-])−(?=[a-z])")
+# R8: letter-to-letter codes (B2B, B2C, B2P, B2G, B2E, D2C, P2P, C2C, G2G, O2O, M2M). Capital letters take the whole list; a
+# lower-case text (a caption without capitals) only the two business codes, where "b to b" cannot be a range of letters.
+CODE_PAIRS_UPPER = {"BB", "BC", "BP", "BG", "BE", "DC", "PP", "CC", "GG", "OO", "MM"}
+CODE_PAIRS_LOWER = {"BB", "BC"}
+NAME_TO = re.compile(r"(?<![\w'])([A-Za-z]) (to|too|tu)(?= [A-Za-z](?![\w']))( )([A-Za-z])(?![\w'])")
+
+
+def _name_to(m) -> str:
+    a, b = m.group(1), m.group(4)
+    pair = (a + b).upper()
+    ok = pair in (CODE_PAIRS_UPPER if a.isupper() and b.isupper() else CODE_PAIRS_LOWER if a.islower() and b.islower() else ())
+    return f"{a} two {b}" if ok else m.group(0)
 
 
 def fix_text(text: str, joined: bool = False) -> tuple:
@@ -52,6 +67,9 @@ def fix_text(text: str, joined: bool = False) -> tuple:
     t2 = FRAC.sub(lambda m: m.group(1) + " " + m.group(2), t)
     if t2 != t:
         t, rules = t2, rules + ["R7"]
+    t2 = NAME_TO.sub(_name_to, t)
+    if t2 != t:
+        t, rules = t2, rules + ["R8"]
     if joined:
         toks = t.split(" ")
         for i in range(1, len(toks)):

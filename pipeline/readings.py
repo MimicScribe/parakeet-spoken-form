@@ -402,7 +402,7 @@ def k_identifier(r):
                      "A one hundred", "GPT five", "Series B", "Phase three", "Section two thirty",
                      "Title nine", "Route sixty six", "Highway one oh one", "Room four oh two",
                      "Gate B twelve", "Flight two eighteen", "Interstate five", "Chapter eleven",
-                     "five G", "four G", "four K", "ten K", "ten Q", "eight K", "B to B", "B to C", "D to C", "MP three",
+                     "five G", "four G", "four K", "ten K", "ten Q", "eight K", "B two B", "B two C", "D two C", "MP three",
                      "PD one", "W two", "four oh one K", "Tele two", "Web three", "Mark two", "Gen Z",
                      "three D", "USB C", "WiFi six", "H two O", "CO two", "Formula one", "Catch twenty two"])
 
@@ -590,8 +590,8 @@ def k_disfluent(r):
 
 
 def k_biz_code(r):
-    return _pick(r, [(0.3, "COVID nineteen"), (0.15, "Form ten K"), (0.1, "Form ten Q"), (0.1, "B to B"),
-                     (0.08, "D to C"), (0.07, "B to C"), (0.06, "ten K"), (0.05, "ten Q"), (0.05, "eight K"),
+    return _pick(r, [(0.3, "COVID nineteen"), (0.15, "Form ten K"), (0.1, "Form ten Q"), (0.1, "B two B"),
+                     (0.08, "D two C"), (0.07, "B two C"), (0.06, "ten K"), (0.05, "ten Q"), (0.05, "eight K"),
                      (0.04, "four oh one K")])
 
 

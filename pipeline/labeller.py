@@ -530,8 +530,8 @@ def spans(text: str) -> list[Span]:
         n = int(num)
         nums = _uniq(([cardinal(n)] if n < 100 or n % 100 == 0 else [pair(n) if n >= 1000 else cardinal(n)])
                      + [digits(num), digits(num, oh=True)] + int_readings(n, num, allow_year=False)[:2])
-        if num == "2" and post:
-            nums = _uniq(nums + ["to"])  # "B2B", "D2C": said "B to B" (retrain-3 review)
+        # "B2B", "D2C" are said "B to B" but labelled "B two B": the letter+digit policy writes the number as its number word,
+        # never the homophone "to" (2026-10-19: a "to" candidate taught the model "b to b"; test_labeller_rare.py)
         pre_w = pre.upper() if pre.isupper() or len(pre) <= 2 else pre
         post_w = (" " + post.upper()) if post else ""
         add(mt.start(), mt.end(), _uniq([f"{pre_w} {x}{post_w}" for x in nums]), "code")
