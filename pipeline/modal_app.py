@@ -1132,7 +1132,8 @@ WAVE1 = ("de", "es", "fr", "it", "nl", "pt")
 # parts with non-English audio (wave-1 rows/windows/synthetic, multilingual D2 and FLEURS): left out of the English
 # number share (fleurs_train_multi is non-English too, so it leaves the denominator as well)
 _NON_EN_PARTS = ("mix4/p3_", "mix4/win_", "mix4/tts_", "mix4/d2", "mix3/fleurs", "mix4/fleurs", "mix3/d2p", "mix4/seam_",
-                 "mix4/plain_", "mix4/win15_")  # (mix4/en_win15 is English)
+                 "mix4/plain_", "mix4/win15_",  # (mix4/en_win15 is English)
+                 "ml/anchor/")  # rehearsal anchors listed with extra_parts (anchor_rows.py): other languages, number-free
 
 
 OTHER18 = ("bg", "hr", "cs", "da", "et", "fi", "el", "hu", "lv", "lt", "mt", "pl", "ro", "sk", "sl", "sv", "ru", "uk")

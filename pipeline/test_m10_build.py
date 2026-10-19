@@ -47,3 +47,8 @@ print("test_m10_build: en_balance drop list ok")
 for p in ("d1/en4_ok/ttsSYM1_en_train_v2.jsonl", "d1/en4_ok/ttsSYM1en2_en_train.jsonl", "d1/en4_ok/yodas_en5_train_ycap.jsonl"):
     assert 0.9 < MB.number_share_of(p) <= 1.0, p
 print("test_m10_build: number shares ok")
+
+# ---- extra parts of other languages (rehearsal anchors) stay out of the English number share
+mix = [("replay/lspc_train.jsonl", 10.0, "anchor"), ("ml/anchor/ancRH2/ru/plain.jsonl", 0, "nonen")]
+assert any(m[0].startswith(MA._NON_EN_PARTS) for m in mix[1:]) and not mix[0][0].startswith(MA._NON_EN_PARTS)
+print("test_m10_build: anchors outside the English share ok")
