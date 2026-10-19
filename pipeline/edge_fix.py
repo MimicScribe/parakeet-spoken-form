@@ -240,12 +240,17 @@ if modal is not None:
     def _rows(p):
         return [json.loads(l) for l in open(p, encoding="utf-8") if l.strip()] if os.path.exists(p) else []
 
-    def _sources(lang: str, mix_dir: str) -> list:
+    def _sources(lang: str, mix_dir: str, src_rows: str = "") -> list:
         """The real rows of <mix_dir>/p3_<lang> as labelled on disk BEFORE the build's compound split (win15._sources:
-        the ml/p3v2 pass whose letters match the built label)."""
+        the ml/p3v2 pass whose letters match the built label). src_rows ("ml/x/{lang}/rows.jsonl"): check exactly the
+        rows of that judged pass file instead (a pass that is not in the mix yet); the record's sha is the file's label."""
         import glob
 
         import win15 as W
+
+        if src_rows:
+            return [dict(r, _built_sha=sha(r["text"])) for r in _rows(f"{VOL}/{src_rows.format(lang=lang)}")
+                    if not (r.get("synthetic") or r.get("src") == "tts")]
 
         built = _rows(f"{VOL}/{mix_dir}/p3_{lang}.jsonl")
         orig = {}
@@ -264,7 +269,7 @@ if modal is not None:
 
     @app.function(image=image, volumes={VOL: vol}, gpu="L4", timeout=3 * 3600, max_containers=8)
     def check_lang(lang: str, mix_dir: str, tag: str, shard: int = 0, n_shards: int = 1, limit: int = 0,
-                   resume: bool = False) -> dict:
+                   resume: bool = False, src_rows: str = "") -> dict:
         from collections import Counter
         from concurrent.futures import ThreadPoolExecutor
 
@@ -278,7 +283,7 @@ if modal is not None:
         assert not os.path.exists(fpath), f"{fpath} exists: use a new tag"
         done = {f["id"] for f in _rows(f"{out}/fixes_{shard}.jsonl")} if resume else set()
         os.makedirs(f"{out}/wav", exist_ok=True)
-        rows = _sources(lang, mix_dir)[shard::n_shards]
+        rows = _sources(lang, mix_dir, src_rows)[shard::n_shards]
         rows = rows[:limit] if limit else rows  # a smoke run
         rows = [r for r in rows if r["id"] not in done]
         ctc = D.LangCTC(lang)
@@ -359,12 +364,13 @@ if modal is not None:
 
     @app.local_entrypoint()
     def main(langs: str = "de,es,fr,it,nl,pt", mix_dir: str = "mix4final8", tag: str = "1", shards: int = 2, limit: int = 0,
-             resume: str = ""):
-        """resume "de:0,es:1": rerun those crashed shards on their remaining rows (fixes_<shard>r.jsonl)."""
+             resume: str = "", src_rows: str = ""):
+        """resume "de:0,es:1": rerun those crashed shards on their remaining rows (fixes_<shard>r.jsonl).
+        src_rows "ml/<dir>/{lang}/rows_<pass>.jsonl": check a judged pass file instead of a mix's p3 part."""
         if resume:
-            jobs = [(l, mix_dir, tag, int(s), shards, limit, True) for l, s in (x.split(":") for x in resume.split(","))]
+            jobs = [(l, mix_dir, tag, int(s), shards, limit, True, src_rows) for l, s in (x.split(":") for x in resume.split(","))]
         else:
-            jobs = [(l, mix_dir, tag, s, shards, limit) for l in langs.split(",") for s in range(shards)]
+            jobs = [(l, mix_dir, tag, s, shards, limit, False, src_rows) for l in langs.split(",") for s in range(shards)]
         res = list(check_lang.starmap(jobs, return_exceptions=True))  # one failing shard keeps the others
         res = [r if isinstance(r, dict) else {"error": repr(r)[:300]} for r in res]
         print(json.dumps(res, indent=1))
