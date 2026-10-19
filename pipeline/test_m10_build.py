@@ -52,3 +52,11 @@ print("test_m10_build: number shares ok")
 mix = [("replay/lspc_train.jsonl", 10.0, "anchor"), ("ml/anchor/ancRH2/ru/plain.jsonl", 0, "nonen")]
 assert any(m[0].startswith(MA._NON_EN_PARTS) for m in mix[1:]) and not mix[0][0].startswith(MA._NON_EN_PARTS)
 print("test_m10_build: anchors outside the English share ok")
+
+# ---- build4 leaves out a pass named in exclude_passes (an unjudged pass in ml/p3v2 stops the build otherwise)
+import inspect
+assert "exclude_passes" in inspect.signature(MB.build4).parameters
+src = inspect.getsource(MB.build4)
+assert "not in exclude_passes" in src
+assert 'exclude_passes: str = ""' in open(MA.__file__).read()
+print("test_m10_build: exclude_passes wired ok")

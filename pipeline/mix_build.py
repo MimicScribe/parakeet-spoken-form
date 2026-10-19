@@ -2011,7 +2011,8 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
            plain_glob: str = "ml/plain/{lang}/plain*.jsonl", protected_globs: tuple = (), balance: bool = False,
            seam_files: tuple = SEAM_FILES, mix_dir: str = "mix4", seam_long_h: float = 0.0,
            split_langs: tuple = (), win15_share: float = 0.0, win15_dir: str = "ml/win15b", edge_fix_dir: str = "",
-           extra_passes: tuple = (), relabel_rows: str = "", relabel_parts_dir: str = "", relabel_tts: bool = False) -> dict:
+           extra_passes: tuple = (), relabel_rows: str = "", relabel_parts_dir: str = "", relabel_tts: bool = False,
+           exclude_passes: tuple = ()) -> dict:
     """mix4/ manifests for the wave-1 run (all CPU, idempotent):
     - mix4/d2.jsonl: mix3/d2 (Greek restore applied) WITHOUT wave-1 languages: their digit rows were relabelled by P3
       (origin d2) and would otherwise teach digits through the stock token KL;
@@ -2062,6 +2063,8 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
       before any selection, so the caps, fills and share checks count the fixed labels (a reading masked at an edge
       is a span the fill can replace); win15 parents are checked against the unfixed labels they were cut from;
       consistency pairs skip fixed rows.
+    - exclude_passes (2026-10-18): names ("rows_nlreal1a") of ml/p3v2/<lang>/rows*.jsonl passes the build leaves out (a pass
+      still being labelled has no judged marker and would stop the build; its judged copy can come in with extra_passes).
     - extra_passes (2026-10-18): more labelling passes outside ml/p3v2 ("ml/l1conv/{lang}/rows_l1conv.jsonl"), read
       with the language's passes (_one_per_id) and judged like them (judged_<name>.json beside the file).
     - relabel_rows / relabel_parts_dir / relabel_tts (2026-10-18, letter+digit policy, alnum_relabel.py): relabel_rows
@@ -2171,7 +2174,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
             assert allow_no_judge or os.path.exists(f"{base}/judged_{name}.json"), f"{lang}: {name} was never judged"
         held |= {x["id"] for x in val}
         # every pass must have been judged (marker written by the judge step)
-        passes = sorted(glob.glob(f"{base}/rows*.jsonl"))
+        passes = [p_ for p_ in sorted(glob.glob(f"{base}/rows*.jsonl")) if os.path.basename(p_)[:-6] not in exclude_passes]
         extra = [f"{vol}/{p_.format(lang=lang)}" for p_ in extra_passes if os.path.exists(f"{vol}/{p_.format(lang=lang)}")]
         for pth in passes + extra:
             name = os.path.basename(pth)[:-6]
