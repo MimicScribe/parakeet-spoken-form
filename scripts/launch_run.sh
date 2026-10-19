@@ -38,7 +38,7 @@ for v in RUN ARM SHA STEPS MIXDIR REPO APPROVALS LOG; do [ -n "${!v}" ] || die 2
 EXPORT=""
 die() { echo "REFUSED: $2" >&2; [ -z "$EXPORT" ] || rm -rf "$EXPORT"; exit "$1"; }
 
-# lock 1: the owner's approval for THIS run name (one exact line)
+# lock 1: an explicit approval for THIS run name (one exact line)
 [ -f "$APPROVALS" ] && grep -qxF -- "$RUN" "$APPROVALS" || die 3 "run '$RUN' has no approval line in $APPROVALS"
 
 # lock 2: a new run name (or, with --resume, the same run and the same commit)
