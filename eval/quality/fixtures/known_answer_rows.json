@@ -1,0 +1,2839 @@
+[
+{
+"lang": "de",
+"id": "ka_de_00",
+"kind": "int",
+"caption": "Laut dem Bericht liegt der Wert im Moment bei 7 und steigt weiter.",
+"label": "laut dem Bericht liegt der Wert im Moment bei sieben und steigt weiter",
+"seg": "sieben",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "laut dem Bericht liegt der Wert im Moment bei acht und steigt weiter",
+"en_words": "laut dem Bericht liegt der Wert im Moment bei seven und steigt weiter",
+"misplit": "laut dem Bericht liegt der Wert im Moment bei sie ben und steigt weiter"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_01",
+"kind": "int",
+"caption": "Am Montag nannte die Firma 13 als Ziel.",
+"label": "am Montag nannte die Firma dreizehn als Ziel",
+"seg": "dreizehn",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "am Montag nannte die Firma dreiundzwanzig als Ziel",
+"en_words": "am Montag nannte die Firma thirteen als Ziel"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_02",
+"kind": "int",
+"caption": "Im Archiv steht 21 neben dem alten Eintrag.",
+"label": "im Archiv steht einundzwanzig neben dem alten Eintrag",
+"seg": "einundzwanzig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "im Archiv steht einunddreißig neben dem alten Eintrag",
+"en_words": "im Archiv steht twenty-one neben dem alten Eintrag",
+"respace": "im Archiv steht ein und zwanzig neben dem alten Eintrag"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_03",
+"kind": "int",
+"caption": "Die Schule meldete 28 für das kommende Jahr.",
+"label": "die Schule meldete achtundzwanzig für das kommende Jahr",
+"seg": "achtundzwanzig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "die Schule meldete achtunddreißig für das kommende Jahr",
+"en_words": "die Schule meldete twenty-eight für das kommende Jahr",
+"respace": "die Schule meldete acht und zwanzig für das kommende Jahr"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_04",
+"kind": "int",
+"caption": "Der Vertrag sieht 45 vor, sagte der Anwalt.",
+"label": "der Vertrag sieht fünfundvierzig vor sagte der Anwalt",
+"seg": "fünfundvierzig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "der Vertrag sieht fünfundfünfzig vor sagte der Anwalt",
+"en_words": "der Vertrag sieht forty-five vor sagte der Anwalt",
+"respace": "der Vertrag sieht fünf und vierzig vor sagte der Anwalt"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_05",
+"kind": "int",
+"caption": "Laut dem Bericht liegt der Wert im Moment bei 96 und steigt weiter.",
+"label": "laut dem Bericht liegt der Wert im Moment bei sechsundneunzig und steigt weiter",
+"seg": "sechsundneunzig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "laut dem Bericht liegt der Wert im Moment bei sechsundachtzig und steigt weiter",
+"en_words": "laut dem Bericht liegt der Wert im Moment bei ninety-six und steigt weiter",
+"respace": "laut dem Bericht liegt der Wert im Moment bei sechs und neunzig und steigt weiter",
+"misplit": "laut dem Bericht liegt der Wert im Moment bei sechsun dneunzig und steigt weiter"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_06",
+"kind": "int",
+"caption": "Am Montag nannte die Firma 99 als Ziel.",
+"label": "am Montag nannte die Firma neunundneunzig als Ziel",
+"seg": "neunundneunzig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "am Montag nannte die Firma neunundachtzig als Ziel",
+"en_words": "am Montag nannte die Firma ninety-nine als Ziel",
+"respace": "am Montag nannte die Firma neun und neunzig als Ziel"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_07",
+"kind": "int",
+"caption": "Im Archiv steht 250 neben dem alten Eintrag.",
+"label": "im Archiv steht zweihundertfünfzig neben dem alten Eintrag",
+"seg": "zweihundertfünfzig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "im Archiv steht dreihundertfünfzig neben dem alten Eintrag",
+"en_words": "im Archiv steht two hundred and fifty neben dem alten Eintrag",
+"respace": "im Archiv steht zweihundert fünfzig neben dem alten Eintrag",
+"misplit": "im Archiv steht zweihunde rtfünfzig neben dem alten Eintrag"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_08",
+"kind": "int",
+"caption": "Die Schule meldete 4500 für das kommende Jahr.",
+"label": "die Schule meldete viertausendfünfhundert für das kommende Jahr",
+"seg": "viertausendfünfhundert",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "die Schule meldete fünftausendfünfhundert für das kommende Jahr",
+"en_words": "die Schule meldete four thousand five hundred für das kommende Jahr",
+"respace": "die Schule meldete viertausend fünfhundert für das kommende Jahr"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_09",
+"kind": "int",
+"caption": "Der Vertrag sieht 12.000 vor, sagte der Anwalt.",
+"label": "der Vertrag sieht zwölftausend vor sagte der Anwalt",
+"seg": "zwölftausend",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "der Vertrag sieht zweiundzwanzigtausend vor sagte der Anwalt",
+"en_words": "der Vertrag sieht twelve thousand vor sagte der Anwalt",
+"trunc": "der Vertrag sieht zwölf vor sagte der Anwalt"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_10",
+"kind": "int",
+"caption": "Laut dem Bericht liegt der Wert im Moment bei 25.000 und steigt weiter.",
+"label": "laut dem Bericht liegt der Wert im Moment bei fünfundzwanzigtausend und steigt weiter",
+"seg": "fünfundzwanzigtausend",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "laut dem Bericht liegt der Wert im Moment bei fünfunddreißigtausend und steigt weiter",
+"en_words": "laut dem Bericht liegt der Wert im Moment bei twenty-five thousand und steigt weiter",
+"trunc": "laut dem Bericht liegt der Wert im Moment bei fünfundzwanzig und steigt weiter",
+"misplit": "laut dem Bericht liegt der Wert im Moment bei fünfundzwa nzigtausend und steigt weiter"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_11",
+"kind": "int",
+"caption": "Am Montag nannte die Firma 400.000 als Ziel.",
+"label": "am Montag nannte die Firma vierhunderttausend als Ziel",
+"seg": "vierhunderttausend",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "am Montag nannte die Firma fünfhunderttausend als Ziel",
+"en_words": "am Montag nannte die Firma four hundred thousand als Ziel",
+"trunc": "am Montag nannte die Firma vierhundert als Ziel",
+"respace": "am Montag nannte die Firma vierhundert tausend als Ziel",
+"misplit": "am Montag nannte die Firma vierhunde rttausend als Ziel"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_12",
+"kind": "int",
+"caption": "Im Archiv steht 600.000 neben dem alten Eintrag.",
+"label": "im Archiv steht sechshunderttausend neben dem alten Eintrag",
+"seg": "sechshunderttausend",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "im Archiv steht siebenhunderttausend neben dem alten Eintrag",
+"en_words": "im Archiv steht six hundred thousand neben dem alten Eintrag",
+"trunc": "im Archiv steht sechshundert neben dem alten Eintrag",
+"respace": "im Archiv steht sechshundert tausend neben dem alten Eintrag",
+"misplit": "im Archiv steht sechshund erttausend neben dem alten Eintrag"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_13",
+"kind": "year",
+"caption": "Die Schule meldete 1998 für das kommende Jahr.",
+"label": "die Schule meldete neunzehnhundertachtundneunzig für das kommende Jahr",
+"seg": "neunzehnhundertachtundneunzig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "die Schule meldete neunzehnhundertachtundachtzig für das kommende Jahr",
+"en_words": "die Schule meldete nineteen ninety-eight für das kommende Jahr",
+"respace": "die Schule meldete neunzehnhundert acht und neunzig für das kommende Jahr",
+"misplit": "die Schule meldete neunzehnhunder tachtundneunzig für das kommende Jahr"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_14",
+"kind": "year",
+"caption": "Der Vertrag sieht 2005 vor, sagte der Anwalt.",
+"label": "der Vertrag sieht zweitausendfünf vor sagte der Anwalt",
+"seg": "zweitausendfünf",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "der Vertrag sieht zweitausendfünfzehn vor sagte der Anwalt",
+"en_words": "der Vertrag sieht two thousand and five vor sagte der Anwalt",
+"respace": "der Vertrag sieht zweitausend fünf vor sagte der Anwalt",
+"misplit": "der Vertrag sieht zweitau sendfünf vor sagte der Anwalt"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_15",
+"kind": "year",
+"caption": "Laut dem Bericht liegt der Wert im Moment bei 2018 und steigt weiter.",
+"label": "laut dem Bericht liegt der Wert im Moment bei zweitausendachtzehn und steigt weiter",
+"seg": "zweitausendachtzehn",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "laut dem Bericht liegt der Wert im Moment bei zweitausendacht und steigt weiter",
+"en_words": "laut dem Bericht liegt der Wert im Moment bei twenty eighteen und steigt weiter",
+"respace": "laut dem Bericht liegt der Wert im Moment bei zweitausend achtzehn und steigt weiter",
+"misplit": "laut dem Bericht liegt der Wert im Moment bei zweitause ndachtzehn und steigt weiter"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_16",
+"kind": "year",
+"caption": "Am Montag nannte die Firma 2024 als Ziel.",
+"label": "am Montag nannte die Firma zweitausendvierundzwanzig als Ziel",
+"seg": "zweitausendvierundzwanzig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "am Montag nannte die Firma zweitausendvierzehn als Ziel",
+"en_words": "am Montag nannte die Firma twenty twenty-four als Ziel",
+"respace": "am Montag nannte die Firma zweitausend vier und zwanzig als Ziel",
+"misplit": "am Montag nannte die Firma zweitausendv ierundzwanzig als Ziel"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_17",
+"kind": "pct",
+"caption": "Im Archiv steht 28 % neben dem alten Eintrag.",
+"label": "im Archiv steht achtundzwanzig Prozent neben dem alten Eintrag",
+"seg": "achtundzwanzig Prozent",
+"unit": "Prozent",
+"dec": "",
+"hyps": {
+"swap": "im Archiv steht achtunddreißig Prozent neben dem alten Eintrag",
+"en_words": "im Archiv steht twenty-eight Prozent neben dem alten Eintrag",
+"drop_unit": "im Archiv steht achtundzwanzig neben dem alten Eintrag",
+"respace": "im Archiv steht acht und zwanzig Prozent neben dem alten Eintrag"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_18",
+"kind": "pct",
+"caption": "Die Schule meldete 5 % für das kommende Jahr.",
+"label": "die Schule meldete fünf Prozent für das kommende Jahr",
+"seg": "fünf Prozent",
+"unit": "Prozent",
+"dec": "",
+"hyps": {
+"swap": "die Schule meldete sechs Prozent für das kommende Jahr",
+"en_words": "die Schule meldete five Prozent für das kommende Jahr",
+"drop_unit": "die Schule meldete fünf für das kommende Jahr",
+"misplit": "die Schule meldete fü nf Prozent für das kommende Jahr"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_19",
+"kind": "pct",
+"caption": "Der Vertrag sieht 40 % vor, sagte der Anwalt.",
+"label": "der Vertrag sieht vierzig Prozent vor sagte der Anwalt",
+"seg": "vierzig Prozent",
+"unit": "Prozent",
+"dec": "",
+"hyps": {
+"swap": "der Vertrag sieht fünfzig Prozent vor sagte der Anwalt",
+"en_words": "der Vertrag sieht forty Prozent vor sagte der Anwalt",
+"drop_unit": "der Vertrag sieht vierzig vor sagte der Anwalt",
+"misplit": "der Vertrag sieht vie rzig Prozent vor sagte der Anwalt"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_20",
+"kind": "pct",
+"caption": "Laut dem Bericht liegt der Wert im Moment bei 12 % und steigt weiter.",
+"label": "laut dem Bericht liegt der Wert im Moment bei zwölf Prozent und steigt weiter",
+"seg": "zwölf Prozent",
+"unit": "Prozent",
+"dec": "",
+"hyps": {
+"swap": "laut dem Bericht liegt der Wert im Moment bei zweiundzwanzig Prozent und steigt weiter",
+"en_words": "laut dem Bericht liegt der Wert im Moment bei twelve Prozent und steigt weiter",
+"drop_unit": "laut dem Bericht liegt der Wert im Moment bei zwölf und steigt weiter",
+"misplit": "laut dem Bericht liegt der Wert im Moment bei zw ölf Prozent und steigt weiter"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_21",
+"kind": "eur",
+"caption": "Am Montag nannte die Firma 250 € als Ziel.",
+"label": "am Montag nannte die Firma zweihundertfünfzig Euro als Ziel",
+"seg": "zweihundertfünfzig Euro",
+"unit": "Euro",
+"dec": "",
+"hyps": {
+"swap": "am Montag nannte die Firma dreihundertfünfzig Euro als Ziel",
+"en_words": "am Montag nannte die Firma two hundred and fifty Euro als Ziel",
+"drop_unit": "am Montag nannte die Firma zweihundertfünfzig als Ziel",
+"respace": "am Montag nannte die Firma zweihundert fünfzig Euro als Ziel",
+"misplit": "am Montag nannte die Firma zweihunde rtfünfzig Euro als Ziel"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_22",
+"kind": "eur",
+"caption": "Im Archiv steht 40 € neben dem alten Eintrag.",
+"label": "im Archiv steht vierzig Euro neben dem alten Eintrag",
+"seg": "vierzig Euro",
+"unit": "Euro",
+"dec": "",
+"hyps": {
+"swap": "im Archiv steht fünfzig Euro neben dem alten Eintrag",
+"en_words": "im Archiv steht forty Euro neben dem alten Eintrag",
+"drop_unit": "im Archiv steht vierzig neben dem alten Eintrag",
+"misplit": "im Archiv steht vie rzig Euro neben dem alten Eintrag"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_23",
+"kind": "price",
+"caption": "Die Schule meldete 2,80 € für das kommende Jahr.",
+"label": "die Schule meldete zwei Euro achtzig für das kommende Jahr",
+"seg": "zwei Euro achtzig",
+"unit": "Euro",
+"dec": "",
+"hyps": {
+"swap": "die Schule meldete zwei Euro neunzig für das kommende Jahr",
+"en_words": "die Schule meldete two Euro eighty für das kommende Jahr",
+"drop_unit": "die Schule meldete zwei achtzig für das kommende Jahr"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_24",
+"kind": "km",
+"caption": "Der Vertrag sieht 30 km vor, sagte der Anwalt.",
+"label": "der Vertrag sieht dreißig Kilometer vor sagte der Anwalt",
+"seg": "dreißig Kilometer",
+"unit": "Kilometer",
+"dec": "",
+"hyps": {
+"swap": "der Vertrag sieht vierzig Kilometer vor sagte der Anwalt",
+"en_words": "der Vertrag sieht thirty Kilometer vor sagte der Anwalt",
+"drop_unit": "der Vertrag sieht dreißig vor sagte der Anwalt",
+"misplit": "der Vertrag sieht dre ißig Kilometer vor sagte der Anwalt"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_25",
+"kind": "kg",
+"caption": "Laut dem Bericht liegt der Wert im Moment bei 5 kg und steigt weiter.",
+"label": "laut dem Bericht liegt der Wert im Moment bei fünf Kilogramm und steigt weiter",
+"seg": "fünf Kilogramm",
+"unit": "Kilogramm",
+"dec": "",
+"hyps": {
+"swap": "laut dem Bericht liegt der Wert im Moment bei sechs Kilogramm und steigt weiter",
+"en_words": "laut dem Bericht liegt der Wert im Moment bei five Kilogramm und steigt weiter",
+"drop_unit": "laut dem Bericht liegt der Wert im Moment bei fünf und steigt weiter",
+"misplit": "laut dem Bericht liegt der Wert im Moment bei fü nf Kilogramm und steigt weiter"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_26",
+"kind": "km",
+"caption": "Am Montag nannte die Firma 12 km als Ziel.",
+"label": "am Montag nannte die Firma zwölf Kilometer als Ziel",
+"seg": "zwölf Kilometer",
+"unit": "Kilometer",
+"dec": "",
+"hyps": {
+"swap": "am Montag nannte die Firma zweiundzwanzig Kilometer als Ziel",
+"en_words": "am Montag nannte die Firma twelve Kilometer als Ziel",
+"drop_unit": "am Montag nannte die Firma zwölf als Ziel",
+"misplit": "am Montag nannte die Firma zw ölf Kilometer als Ziel"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_27",
+"kind": "dec",
+"caption": "Im Archiv steht 3,5 neben dem alten Eintrag.",
+"label": "im Archiv steht drei Komma fünf neben dem alten Eintrag",
+"seg": "drei Komma fünf",
+"unit": "",
+"dec": "Komma",
+"hyps": {
+"swap": "im Archiv steht drei Komma sechs neben dem alten Eintrag",
+"en_words": "im Archiv steht three point five neben dem alten Eintrag",
+"drop_dec": "im Archiv steht drei fünf neben dem alten Eintrag"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_28",
+"kind": "dec",
+"caption": "Die Schule meldete 2,5 für das kommende Jahr.",
+"label": "die Schule meldete zwei Komma fünf für das kommende Jahr",
+"seg": "zwei Komma fünf",
+"unit": "",
+"dec": "Komma",
+"hyps": {
+"swap": "die Schule meldete zwei Komma sechs für das kommende Jahr",
+"en_words": "die Schule meldete two point five für das kommende Jahr",
+"drop_dec": "die Schule meldete zwei fünf für das kommende Jahr"
+}
+},
+{
+"lang": "de",
+"id": "ka_de_29",
+"kind": "dec",
+"caption": "Der Vertrag sieht 12,5 vor, sagte der Anwalt.",
+"label": "der Vertrag sieht zwölf Komma fünf vor sagte der Anwalt",
+"seg": "zwölf Komma fünf",
+"unit": "",
+"dec": "Komma",
+"hyps": {
+"swap": "der Vertrag sieht zwölf Komma sechs vor sagte der Anwalt",
+"en_words": "der Vertrag sieht twelve point five vor sagte der Anwalt",
+"drop_dec": "der Vertrag sieht zwölf fünf vor sagte der Anwalt"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_00",
+"kind": "int",
+"caption": "Según el informe, el valor actual es 7 y sigue subiendo.",
+"label": "según el informe el valor actual es siete y sigue subiendo",
+"seg": "siete",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "según el informe el valor actual es ocho y sigue subiendo",
+"en_words": "según el informe el valor actual es seven y sigue subiendo",
+"misplit": "según el informe el valor actual es si ete y sigue subiendo"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_01",
+"kind": "int",
+"caption": "El lunes la empresa dio 13 como objetivo.",
+"label": "el lunes la empresa dio trece como objetivo",
+"seg": "trece",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "el lunes la empresa dio veintitrés como objetivo",
+"en_words": "el lunes la empresa dio thirteen como objetivo",
+"misplit": "el lunes la empresa dio tr ece como objetivo"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_02",
+"kind": "int",
+"caption": "En el archivo figura 21 junto a la entrada antigua.",
+"label": "en el archivo figura veintiuno junto a la entrada antigua",
+"seg": "veintiuno",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "en el archivo figura treinta y uno junto a la entrada antigua",
+"en_words": "en el archivo figura twenty-one junto a la entrada antigua",
+"misplit": "en el archivo figura vein tiuno junto a la entrada antigua"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_03",
+"kind": "int",
+"caption": "La escuela anunció 28 para el próximo año.",
+"label": "la escuela anunció veintiocho para el próximo año",
+"seg": "veintiocho",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "la escuela anunció treinta y ocho para el próximo año",
+"en_words": "la escuela anunció twenty-eight para el próximo año",
+"misplit": "la escuela anunció veint iocho para el próximo año"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_04",
+"kind": "int",
+"caption": "El contrato prevé 45, dijo el abogado.",
+"label": "el contrato prevé cuarenta y cinco dijo el abogado",
+"seg": "cuarenta y cinco",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "el contrato prevé cincuenta y cinco dijo el abogado",
+"en_words": "el contrato prevé forty-five dijo el abogado",
+"fuse": "el contrato prevé cuarentaycinco dijo el abogado",
+"misplit": "el contrato prevé cuarenta y ci nco dijo el abogado"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_05",
+"kind": "int",
+"caption": "Según el informe, el valor actual es 96 y sigue subiendo.",
+"label": "según el informe el valor actual es noventa y seis y sigue subiendo",
+"seg": "noventa y seis",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "según el informe el valor actual es ochenta y seis y sigue subiendo",
+"en_words": "según el informe el valor actual es ninety-six y sigue subiendo",
+"fuse": "según el informe el valor actual es noventayseis y sigue subiendo",
+"misplit": "según el informe el valor actual es noventa y se is y sigue subiendo"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_06",
+"kind": "int",
+"caption": "El lunes la empresa dio 99 como objetivo.",
+"label": "el lunes la empresa dio noventa y nueve como objetivo",
+"seg": "noventa y nueve",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "el lunes la empresa dio ochenta y nueve como objetivo",
+"en_words": "el lunes la empresa dio ninety-nine como objetivo",
+"fuse": "el lunes la empresa dio noventaynueve como objetivo",
+"misplit": "el lunes la empresa dio noventa y nu eve como objetivo"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_07",
+"kind": "int",
+"caption": "En el archivo figura 250 junto a la entrada antigua.",
+"label": "en el archivo figura doscientos cincuenta junto a la entrada antigua",
+"seg": "doscientos cincuenta",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "en el archivo figura trescientos cincuenta junto a la entrada antigua",
+"en_words": "en el archivo figura two hundred and fifty junto a la entrada antigua",
+"fuse": "en el archivo figura doscientoscincuenta junto a la entrada antigua",
+"misplit": "en el archivo figura doscientos cinc uenta junto a la entrada antigua"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_08",
+"kind": "int",
+"caption": "La escuela anunció 4500 para el próximo año.",
+"label": "la escuela anunció cuatro mil quinientos para el próximo año",
+"seg": "cuatro mil quinientos",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "la escuela anunció cinco mil quinientos para el próximo año",
+"en_words": "la escuela anunció four thousand five hundred para el próximo año",
+"fuse": "la escuela anunció cuatromilquinientos para el próximo año",
+"misplit": "la escuela anunció cuatro mil quini entos para el próximo año"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_09",
+"kind": "int",
+"caption": "El contrato prevé 12.000, dijo el abogado.",
+"label": "el contrato prevé doce mil dijo el abogado",
+"seg": "doce mil",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "el contrato prevé veintidós mil dijo el abogado",
+"en_words": "el contrato prevé twelve thousand dijo el abogado",
+"trunc": "el contrato prevé doce dijo el abogado",
+"fuse": "el contrato prevé docemil dijo el abogado"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_10",
+"kind": "int",
+"caption": "Según el informe, el valor actual es 25.000 y sigue subiendo.",
+"label": "según el informe el valor actual es veinticinco mil y sigue subiendo",
+"seg": "veinticinco mil",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "según el informe el valor actual es treinta y cinco mil y sigue subiendo",
+"en_words": "según el informe el valor actual es twenty-five thousand y sigue subiendo",
+"trunc": "según el informe el valor actual es veinticinco y sigue subiendo",
+"fuse": "según el informe el valor actual es veinticincomil y sigue subiendo"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_11",
+"kind": "int",
+"caption": "El lunes la empresa dio 400.000 como objetivo.",
+"label": "el lunes la empresa dio cuatrocientos mil como objetivo",
+"seg": "cuatrocientos mil",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "el lunes la empresa dio quinientos mil como objetivo",
+"en_words": "el lunes la empresa dio four hundred thousand como objetivo",
+"trunc": "el lunes la empresa dio cuatrocientos como objetivo",
+"fuse": "el lunes la empresa dio cuatrocientosmil como objetivo"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_12",
+"kind": "int",
+"caption": "En el archivo figura 600.000 junto a la entrada antigua.",
+"label": "en el archivo figura seiscientos mil junto a la entrada antigua",
+"seg": "seiscientos mil",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "en el archivo figura setecientos mil junto a la entrada antigua",
+"en_words": "en el archivo figura six hundred thousand junto a la entrada antigua",
+"trunc": "en el archivo figura seiscientos junto a la entrada antigua",
+"fuse": "en el archivo figura seiscientosmil junto a la entrada antigua"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_13",
+"kind": "year",
+"caption": "La escuela anunció 1998 para el próximo año.",
+"label": "la escuela anunció mil novecientos noventa y ocho para el próximo año",
+"seg": "mil novecientos noventa y ocho",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "la escuela anunció mil novecientos ochenta y ocho para el próximo año",
+"en_words": "la escuela anunció nineteen ninety-eight para el próximo año",
+"fuse": "la escuela anunció milnovecientosnoventayocho para el próximo año",
+"misplit": "la escuela anunció mil novecientos noventa y oc ho para el próximo año"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_14",
+"kind": "year",
+"caption": "El contrato prevé 2005, dijo el abogado.",
+"label": "el contrato prevé dos mil cinco dijo el abogado",
+"seg": "dos mil cinco",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "el contrato prevé dos mil quince dijo el abogado",
+"en_words": "el contrato prevé two thousand and five dijo el abogado",
+"fuse": "el contrato prevé dosmilcinco dijo el abogado",
+"misplit": "el contrato prevé dos mil ci nco dijo el abogado"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_15",
+"kind": "year",
+"caption": "Según el informe, el valor actual es 2018 y sigue subiendo.",
+"label": "según el informe el valor actual es dos mil dieciocho y sigue subiendo",
+"seg": "dos mil dieciocho",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "según el informe el valor actual es dos mil ocho y sigue subiendo",
+"en_words": "según el informe el valor actual es twenty eighteen y sigue subiendo",
+"fuse": "según el informe el valor actual es dosmildieciocho y sigue subiendo",
+"misplit": "según el informe el valor actual es dos mil diec iocho y sigue subiendo"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_16",
+"kind": "year",
+"caption": "El lunes la empresa dio 2024 como objetivo.",
+"label": "el lunes la empresa dio dos mil veinticuatro como objetivo",
+"seg": "dos mil veinticuatro",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "el lunes la empresa dio dos mil catorce como objetivo",
+"en_words": "el lunes la empresa dio twenty twenty-four como objetivo",
+"fuse": "el lunes la empresa dio dosmilveinticuatro como objetivo"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_17",
+"kind": "pct",
+"caption": "En el archivo figura 28 % junto a la entrada antigua.",
+"label": "en el archivo figura veintiocho por ciento junto a la entrada antigua",
+"seg": "veintiocho por ciento",
+"unit": "por ciento",
+"dec": "",
+"hyps": {
+"swap": "en el archivo figura treinta y ocho por ciento junto a la entrada antigua",
+"en_words": "en el archivo figura twenty-eight por ciento junto a la entrada antigua",
+"drop_unit": "en el archivo figura veintiocho junto a la entrada antigua",
+"misplit": "en el archivo figura veint iocho por ciento junto a la entrada antigua"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_18",
+"kind": "pct",
+"caption": "La escuela anunció 5 % para el próximo año.",
+"label": "la escuela anunció cinco por ciento para el próximo año",
+"seg": "cinco por ciento",
+"unit": "por ciento",
+"dec": "",
+"hyps": {
+"swap": "la escuela anunció seis por ciento para el próximo año",
+"en_words": "la escuela anunció five por ciento para el próximo año",
+"drop_unit": "la escuela anunció cinco para el próximo año",
+"misplit": "la escuela anunció ci nco por ciento para el próximo año"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_19",
+"kind": "pct",
+"caption": "El contrato prevé 40 %, dijo el abogado.",
+"label": "el contrato prevé cuarenta por ciento dijo el abogado",
+"seg": "cuarenta por ciento",
+"unit": "por ciento",
+"dec": "",
+"hyps": {
+"swap": "el contrato prevé cincuenta por ciento dijo el abogado",
+"en_words": "el contrato prevé forty por ciento dijo el abogado",
+"drop_unit": "el contrato prevé cuarenta dijo el abogado",
+"misplit": "el contrato prevé cuar enta por ciento dijo el abogado"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_20",
+"kind": "pct",
+"caption": "Según el informe, el valor actual es 12 % y sigue subiendo.",
+"label": "según el informe el valor actual es doce por ciento y sigue subiendo",
+"seg": "doce por ciento",
+"unit": "por ciento",
+"dec": "",
+"hyps": {
+"swap": "según el informe el valor actual es veintidós por ciento y sigue subiendo",
+"en_words": "según el informe el valor actual es twelve por ciento y sigue subiendo",
+"drop_unit": "según el informe el valor actual es doce y sigue subiendo",
+"misplit": "según el informe el valor actual es do ce por ciento y sigue subiendo"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_21",
+"kind": "eur",
+"caption": "El lunes la empresa dio 250 € como objetivo.",
+"label": "el lunes la empresa dio doscientos cincuenta euros como objetivo",
+"seg": "doscientos cincuenta euros",
+"unit": "euros",
+"dec": "",
+"hyps": {
+"swap": "el lunes la empresa dio trescientos cincuenta euros como objetivo",
+"en_words": "el lunes la empresa dio two hundred and fifty euros como objetivo",
+"drop_unit": "el lunes la empresa dio doscientos cincuenta como objetivo",
+"fuse": "el lunes la empresa dio doscientoscincuenta euros como objetivo",
+"misplit": "el lunes la empresa dio doscientos cinc uenta euros como objetivo"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_22",
+"kind": "eur",
+"caption": "En el archivo figura 40 € junto a la entrada antigua.",
+"label": "en el archivo figura cuarenta euros junto a la entrada antigua",
+"seg": "cuarenta euros",
+"unit": "euros",
+"dec": "",
+"hyps": {
+"swap": "en el archivo figura cincuenta euros junto a la entrada antigua",
+"en_words": "en el archivo figura forty euros junto a la entrada antigua",
+"drop_unit": "en el archivo figura cuarenta junto a la entrada antigua",
+"misplit": "en el archivo figura cuar enta euros junto a la entrada antigua"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_23",
+"kind": "price",
+"caption": "La escuela anunció 2,80 € para el próximo año.",
+"label": "la escuela anunció dos euros con ochenta para el próximo año",
+"seg": "dos euros con ochenta",
+"unit": "euros",
+"dec": "",
+"hyps": {
+"swap": "la escuela anunció dos euros con noventa para el próximo año",
+"en_words": "la escuela anunció two euros con eighty para el próximo año",
+"drop_unit": "la escuela anunció dos con ochenta para el próximo año"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_24",
+"kind": "km",
+"caption": "El contrato prevé 30 km, dijo el abogado.",
+"label": "el contrato prevé treinta kilómetros dijo el abogado",
+"seg": "treinta kilómetros",
+"unit": "kilómetros",
+"dec": "",
+"hyps": {
+"swap": "el contrato prevé cuarenta kilómetros dijo el abogado",
+"en_words": "el contrato prevé thirty kilómetros dijo el abogado",
+"drop_unit": "el contrato prevé treinta dijo el abogado",
+"misplit": "el contrato prevé tre inta kilómetros dijo el abogado"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_25",
+"kind": "kg",
+"caption": "Según el informe, el valor actual es 5 kg y sigue subiendo.",
+"label": "según el informe el valor actual es cinco kilogramos y sigue subiendo",
+"seg": "cinco kilogramos",
+"unit": "kilogramos",
+"dec": "",
+"hyps": {
+"swap": "según el informe el valor actual es seis kilogramos y sigue subiendo",
+"en_words": "según el informe el valor actual es five kilogramos y sigue subiendo",
+"drop_unit": "según el informe el valor actual es cinco y sigue subiendo",
+"misplit": "según el informe el valor actual es ci nco kilogramos y sigue subiendo"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_26",
+"kind": "km",
+"caption": "El lunes la empresa dio 12 km como objetivo.",
+"label": "el lunes la empresa dio doce kilómetros como objetivo",
+"seg": "doce kilómetros",
+"unit": "kilómetros",
+"dec": "",
+"hyps": {
+"swap": "el lunes la empresa dio veintidós kilómetros como objetivo",
+"en_words": "el lunes la empresa dio twelve kilómetros como objetivo",
+"drop_unit": "el lunes la empresa dio doce como objetivo",
+"misplit": "el lunes la empresa dio do ce kilómetros como objetivo"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_27",
+"kind": "dec",
+"caption": "En el archivo figura 3,5 junto a la entrada antigua.",
+"label": "en el archivo figura tres coma cinco junto a la entrada antigua",
+"seg": "tres coma cinco",
+"unit": "",
+"dec": "coma",
+"hyps": {
+"swap": "en el archivo figura tres coma seis junto a la entrada antigua",
+"en_words": "en el archivo figura three point five junto a la entrada antigua",
+"drop_dec": "en el archivo figura tres cinco junto a la entrada antigua"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_28",
+"kind": "dec",
+"caption": "La escuela anunció 2,5 para el próximo año.",
+"label": "la escuela anunció dos coma cinco para el próximo año",
+"seg": "dos coma cinco",
+"unit": "",
+"dec": "coma",
+"hyps": {
+"swap": "la escuela anunció dos coma seis para el próximo año",
+"en_words": "la escuela anunció two point five para el próximo año",
+"drop_dec": "la escuela anunció dos cinco para el próximo año"
+}
+},
+{
+"lang": "es",
+"id": "ka_es_29",
+"kind": "dec",
+"caption": "El contrato prevé 12,5, dijo el abogado.",
+"label": "el contrato prevé doce coma cinco dijo el abogado",
+"seg": "doce coma cinco",
+"unit": "",
+"dec": "coma",
+"hyps": {
+"swap": "el contrato prevé doce coma seis dijo el abogado",
+"en_words": "el contrato prevé twelve point five dijo el abogado",
+"drop_dec": "el contrato prevé doce cinco dijo el abogado"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_00",
+"kind": "int",
+"caption": "Selon le rapport, la valeur actuelle est de 7 et continue de monter.",
+"label": "selon le rapport la valeur actuelle est de sept et continue de monter",
+"seg": "sept",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "selon le rapport la valeur actuelle est de huit et continue de monter",
+"en_words": "selon le rapport la valeur actuelle est de seven et continue de monter",
+"misplit": "selon le rapport la valeur actuelle est de se pt et continue de monter"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_01",
+"kind": "int",
+"caption": "Lundi, l'entreprise a donné 13 comme objectif.",
+"label": "lundi l'entreprise a donné treize comme objectif",
+"seg": "treize",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "lundi l'entreprise a donné vingt-trois comme objectif",
+"en_words": "lundi l'entreprise a donné thirteen comme objectif",
+"misplit": "lundi l'entreprise a donné tre ize comme objectif"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_02",
+"kind": "int",
+"caption": "Dans les archives, on trouve 21 à côté de l'ancienne entrée.",
+"label": "dans les archives on trouve vingt et un à côté de l'ancienne entrée",
+"seg": "vingt et un",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "dans les archives on trouve trente et un à côté de l'ancienne entrée",
+"en_words": "dans les archives on trouve twenty-one à côté de l'ancienne entrée",
+"fuse": "dans les archives on trouve vingtetun à côté de l'ancienne entrée"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_03",
+"kind": "int",
+"caption": "L'école a annoncé 28 pour l'année prochaine.",
+"label": "l'école a annoncé vingt-huit pour l'année prochaine",
+"seg": "vingt-huit",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "l'école a annoncé trente-huit pour l'année prochaine",
+"en_words": "l'école a annoncé twenty-eight pour l'année prochaine",
+"fuse": "l'école a annoncé vingthuit pour l'année prochaine",
+"misplit": "l'école a annoncé vingt-hu it pour l'année prochaine",
+"respace": "l'école a annoncé vingt huit pour l'année prochaine"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_04",
+"kind": "int",
+"caption": "Le contrat prévoit 45, a dit l'avocat.",
+"label": "le contrat prévoit quarante-cinq a dit l'avocat",
+"seg": "quarante-cinq",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "le contrat prévoit cinquante-cinq a dit l'avocat",
+"en_words": "le contrat prévoit forty-five a dit l'avocat",
+"fuse": "le contrat prévoit quarantecinq a dit l'avocat",
+"misplit": "le contrat prévoit quarante-ci nq a dit l'avocat",
+"respace": "le contrat prévoit quarante cinq a dit l'avocat"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_05",
+"kind": "int",
+"caption": "Selon le rapport, la valeur actuelle est de 96 et continue de monter.",
+"label": "selon le rapport la valeur actuelle est de quatre-vingt-seize et continue de monter",
+"seg": "quatre-vingt-seize",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "selon le rapport la valeur actuelle est de quatre-vingt-six et continue de monter",
+"en_words": "selon le rapport la valeur actuelle est de ninety-six et continue de monter",
+"fuse": "selon le rapport la valeur actuelle est de quatrevingtseize et continue de monter",
+"misplit": "selon le rapport la valeur actuelle est de quatre-vingt-se ize et continue de monter",
+"respace": "selon le rapport la valeur actuelle est de quatre vingt seize et continue de monter"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_06",
+"kind": "int",
+"caption": "Lundi, l'entreprise a donné 99 comme objectif.",
+"label": "lundi l'entreprise a donné quatre-vingt-dix-neuf comme objectif",
+"seg": "quatre-vingt-dix-neuf",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "lundi l'entreprise a donné quatre-vingt-neuf comme objectif",
+"en_words": "lundi l'entreprise a donné ninety-nine comme objectif",
+"fuse": "lundi l'entreprise a donné quatrevingtdixneuf comme objectif",
+"misplit": "lundi l'entreprise a donné quatre-vingt-dix-ne uf comme objectif",
+"respace": "lundi l'entreprise a donné quatre vingt dix neuf comme objectif"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_07",
+"kind": "int",
+"caption": "Dans les archives, on trouve 250 à côté de l'ancienne entrée.",
+"label": "dans les archives on trouve deux cent cinquante à côté de l'ancienne entrée",
+"seg": "deux cent cinquante",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "dans les archives on trouve trois cent cinquante à côté de l'ancienne entrée",
+"en_words": "dans les archives on trouve two hundred and fifty à côté de l'ancienne entrée",
+"fuse": "dans les archives on trouve deuxcentcinquante à côté de l'ancienne entrée"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_08",
+"kind": "int",
+"caption": "L'école a annoncé 4500 pour l'année prochaine.",
+"label": "l'école a annoncé quatre mille cinq cents pour l'année prochaine",
+"seg": "quatre mille cinq cents",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "l'école a annoncé cinq mille cinq cents pour l'année prochaine",
+"en_words": "l'école a annoncé four thousand five hundred pour l'année prochaine",
+"fuse": "l'école a annoncé quatremillecinqcents pour l'année prochaine",
+"misplit": "l'école a annoncé quatre mille cinq ce nts pour l'année prochaine"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_09",
+"kind": "int",
+"caption": "Le contrat prévoit 12 000, a dit l'avocat.",
+"label": "le contrat prévoit douze mille a dit l'avocat",
+"seg": "douze mille",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "le contrat prévoit vingt-deux mille a dit l'avocat",
+"en_words": "le contrat prévoit twelve thousand a dit l'avocat",
+"trunc": "le contrat prévoit douze a dit l'avocat",
+"fuse": "le contrat prévoit douzemille a dit l'avocat",
+"misplit": "le contrat prévoit douze mi lle a dit l'avocat"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_10",
+"kind": "int",
+"caption": "Selon le rapport, la valeur actuelle est de 25 000 et continue de monter.",
+"label": "selon le rapport la valeur actuelle est de vingt-cinq mille et continue de monter",
+"seg": "vingt-cinq mille",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "selon le rapport la valeur actuelle est de trente-cinq mille et continue de monter",
+"en_words": "selon le rapport la valeur actuelle est de twenty-five thousand et continue de monter",
+"trunc": "selon le rapport la valeur actuelle est de vingt-cinq et continue de monter",
+"fuse": "selon le rapport la valeur actuelle est de vingtcinqmille et continue de monter",
+"misplit": "selon le rapport la valeur actuelle est de vingt-cinq mi lle et continue de monter",
+"respace": "selon le rapport la valeur actuelle est de vingt cinq mille et continue de monter"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_11",
+"kind": "int",
+"caption": "Lundi, l'entreprise a donné 400 000 comme objectif.",
+"label": "lundi l'entreprise a donné quatre cent mille comme objectif",
+"seg": "quatre cent mille",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "lundi l'entreprise a donné cinq cent mille comme objectif",
+"en_words": "lundi l'entreprise a donné four hundred thousand comme objectif",
+"trunc": "lundi l'entreprise a donné quatre cent comme objectif",
+"fuse": "lundi l'entreprise a donné quatrecentmille comme objectif",
+"misplit": "lundi l'entreprise a donné quatre cent mi lle comme objectif"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_12",
+"kind": "int",
+"caption": "Dans les archives, on trouve 600 000 à côté de l'ancienne entrée.",
+"label": "dans les archives on trouve six cent mille à côté de l'ancienne entrée",
+"seg": "six cent mille",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "dans les archives on trouve sept cent mille à côté de l'ancienne entrée",
+"en_words": "dans les archives on trouve six hundred thousand à côté de l'ancienne entrée",
+"trunc": "dans les archives on trouve six cent à côté de l'ancienne entrée",
+"fuse": "dans les archives on trouve sixcentmille à côté de l'ancienne entrée",
+"misplit": "dans les archives on trouve six cent mi lle à côté de l'ancienne entrée"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_13",
+"kind": "year",
+"caption": "L'école a annoncé 1998 pour l'année prochaine.",
+"label": "l'école a annoncé mille neuf cent quatre-vingt-dix-huit pour l'année prochaine",
+"seg": "mille neuf cent quatre-vingt-dix-huit",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "l'école a annoncé mille neuf cent quatre-vingt-huit pour l'année prochaine",
+"en_words": "l'école a annoncé nineteen ninety-eight pour l'année prochaine",
+"fuse": "l'école a annoncé milleneufcentquatrevingtdixhuit pour l'année prochaine",
+"misplit": "l'école a annoncé mille neuf cent quatre-vingt-dix-hu it pour l'année prochaine",
+"respace": "l'école a annoncé mille neuf cent quatre vingt dix huit pour l'année prochaine"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_14",
+"kind": "year",
+"caption": "Le contrat prévoit 2005, a dit l'avocat.",
+"label": "le contrat prévoit deux mille cinq a dit l'avocat",
+"seg": "deux mille cinq",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "le contrat prévoit deux mille quinze a dit l'avocat",
+"en_words": "le contrat prévoit two thousand and five a dit l'avocat",
+"fuse": "le contrat prévoit deuxmillecinq a dit l'avocat",
+"misplit": "le contrat prévoit deux mille ci nq a dit l'avocat"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_15",
+"kind": "year",
+"caption": "Selon le rapport, la valeur actuelle est de 2018 et continue de monter.",
+"label": "selon le rapport la valeur actuelle est de deux mille dix-huit et continue de monter",
+"seg": "deux mille dix-huit",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "selon le rapport la valeur actuelle est de deux mille huit et continue de monter",
+"en_words": "selon le rapport la valeur actuelle est de twenty eighteen et continue de monter",
+"fuse": "selon le rapport la valeur actuelle est de deuxmilledixhuit et continue de monter",
+"misplit": "selon le rapport la valeur actuelle est de deux mille dix-hu it et continue de monter",
+"respace": "selon le rapport la valeur actuelle est de deux mille dix huit et continue de monter"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_16",
+"kind": "year",
+"caption": "Lundi, l'entreprise a donné 2024 comme objectif.",
+"label": "lundi l'entreprise a donné deux mille vingt-quatre comme objectif",
+"seg": "deux mille vingt-quatre",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "lundi l'entreprise a donné deux mille quatorze comme objectif",
+"en_words": "lundi l'entreprise a donné twenty twenty-four comme objectif",
+"fuse": "lundi l'entreprise a donné deuxmillevingtquatre comme objectif",
+"misplit": "lundi l'entreprise a donné deux mille vingt-qua tre comme objectif",
+"respace": "lundi l'entreprise a donné deux mille vingt quatre comme objectif"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_17",
+"kind": "pct",
+"caption": "Dans les archives, on trouve 28 % à côté de l'ancienne entrée.",
+"label": "dans les archives on trouve vingt-huit pour cent à côté de l'ancienne entrée",
+"seg": "vingt-huit pour cent",
+"unit": "pour cent",
+"dec": "",
+"hyps": {
+"swap": "dans les archives on trouve trente-huit pour cent à côté de l'ancienne entrée",
+"en_words": "dans les archives on trouve twenty-eight pour cent à côté de l'ancienne entrée",
+"drop_unit": "dans les archives on trouve vingt-huit à côté de l'ancienne entrée",
+"fuse": "dans les archives on trouve vingthuit pour cent à côté de l'ancienne entrée",
+"misplit": "dans les archives on trouve vingt-hu it pour cent à côté de l'ancienne entrée",
+"respace": "dans les archives on trouve vingt huit pour cent à côté de l'ancienne entrée"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_18",
+"kind": "pct",
+"caption": "L'école a annoncé 5 % pour l'année prochaine.",
+"label": "l'école a annoncé cinq pour cent pour l'année prochaine",
+"seg": "cinq pour cent",
+"unit": "pour cent",
+"dec": "",
+"hyps": {
+"swap": "l'école a annoncé six pour cent pour l'année prochaine",
+"en_words": "l'école a annoncé five pour cent pour l'année prochaine",
+"drop_unit": "l'école a annoncé cinq pour l'année prochaine",
+"misplit": "l'école a annoncé ci nq pour cent pour l'année prochaine"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_19",
+"kind": "pct",
+"caption": "Le contrat prévoit 40 %, a dit l'avocat.",
+"label": "le contrat prévoit quarante pour cent a dit l'avocat",
+"seg": "quarante pour cent",
+"unit": "pour cent",
+"dec": "",
+"hyps": {
+"swap": "le contrat prévoit cinquante pour cent a dit l'avocat",
+"en_words": "le contrat prévoit forty pour cent a dit l'avocat",
+"drop_unit": "le contrat prévoit quarante a dit l'avocat",
+"misplit": "le contrat prévoit quar ante pour cent a dit l'avocat"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_20",
+"kind": "pct",
+"caption": "Selon le rapport, la valeur actuelle est de 12 % et continue de monter.",
+"label": "selon le rapport la valeur actuelle est de douze pour cent et continue de monter",
+"seg": "douze pour cent",
+"unit": "pour cent",
+"dec": "",
+"hyps": {
+"swap": "selon le rapport la valeur actuelle est de vingt-deux pour cent et continue de monter",
+"en_words": "selon le rapport la valeur actuelle est de twelve pour cent et continue de monter",
+"drop_unit": "selon le rapport la valeur actuelle est de douze et continue de monter",
+"misplit": "selon le rapport la valeur actuelle est de do uze pour cent et continue de monter"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_21",
+"kind": "eur",
+"caption": "Lundi, l'entreprise a donné 250 € comme objectif.",
+"label": "lundi l'entreprise a donné deux cent cinquante euros comme objectif",
+"seg": "deux cent cinquante euros",
+"unit": "euros",
+"dec": "",
+"hyps": {
+"swap": "lundi l'entreprise a donné trois cent cinquante euros comme objectif",
+"en_words": "lundi l'entreprise a donné two hundred and fifty euros comme objectif",
+"drop_unit": "lundi l'entreprise a donné deux cent cinquante comme objectif",
+"fuse": "lundi l'entreprise a donné deuxcentcinquante euros comme objectif"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_22",
+"kind": "eur",
+"caption": "Dans les archives, on trouve 40 € à côté de l'ancienne entrée.",
+"label": "dans les archives on trouve quarante euros à côté de l'ancienne entrée",
+"seg": "quarante euros",
+"unit": "euros",
+"dec": "",
+"hyps": {
+"swap": "dans les archives on trouve cinquante euros à côté de l'ancienne entrée",
+"en_words": "dans les archives on trouve forty euros à côté de l'ancienne entrée",
+"drop_unit": "dans les archives on trouve quarante à côté de l'ancienne entrée",
+"misplit": "dans les archives on trouve quar ante euros à côté de l'ancienne entrée"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_23",
+"kind": "price",
+"caption": "L'école a annoncé 2,80 € pour l'année prochaine.",
+"label": "l'école a annoncé deux euros quatre-vingts pour l'année prochaine",
+"seg": "deux euros quatre-vingts",
+"unit": "euros",
+"dec": "",
+"hyps": {
+"swap": "l'école a annoncé deux euros quatre-vingt-dix pour l'année prochaine",
+"en_words": "l'école a annoncé two euros eighty pour l'année prochaine",
+"drop_unit": "l'école a annoncé deux quatre-vingts pour l'année prochaine",
+"respace": "l'école a annoncé deux euros quatre vingts pour l'année prochaine"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_24",
+"kind": "km",
+"caption": "Le contrat prévoit 30 km, a dit l'avocat.",
+"label": "le contrat prévoit trente kilomètres a dit l'avocat",
+"seg": "trente kilomètres",
+"unit": "kilomètres",
+"dec": "",
+"hyps": {
+"swap": "le contrat prévoit quarante kilomètres a dit l'avocat",
+"en_words": "le contrat prévoit thirty kilomètres a dit l'avocat",
+"drop_unit": "le contrat prévoit trente a dit l'avocat",
+"misplit": "le contrat prévoit tre nte kilomètres a dit l'avocat"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_25",
+"kind": "kg",
+"caption": "Selon le rapport, la valeur actuelle est de 5 kg et continue de monter.",
+"label": "selon le rapport la valeur actuelle est de cinq kilogrammes et continue de monter",
+"seg": "cinq kilogrammes",
+"unit": "kilogrammes",
+"dec": "",
+"hyps": {
+"swap": "selon le rapport la valeur actuelle est de six kilogrammes et continue de monter",
+"en_words": "selon le rapport la valeur actuelle est de five kilogrammes et continue de monter",
+"drop_unit": "selon le rapport la valeur actuelle est de cinq et continue de monter",
+"misplit": "selon le rapport la valeur actuelle est de ci nq kilogrammes et continue de monter"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_26",
+"kind": "km",
+"caption": "Lundi, l'entreprise a donné 12 km comme objectif.",
+"label": "lundi l'entreprise a donné douze kilomètres comme objectif",
+"seg": "douze kilomètres",
+"unit": "kilomètres",
+"dec": "",
+"hyps": {
+"swap": "lundi l'entreprise a donné vingt-deux kilomètres comme objectif",
+"en_words": "lundi l'entreprise a donné twelve kilomètres comme objectif",
+"drop_unit": "lundi l'entreprise a donné douze comme objectif",
+"misplit": "lundi l'entreprise a donné do uze kilomètres comme objectif"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_27",
+"kind": "dec",
+"caption": "Dans les archives, on trouve 3,5 à côté de l'ancienne entrée.",
+"label": "dans les archives on trouve trois virgule cinq à côté de l'ancienne entrée",
+"seg": "trois virgule cinq",
+"unit": "",
+"dec": "virgule",
+"hyps": {
+"swap": "dans les archives on trouve trois virgule six à côté de l'ancienne entrée",
+"en_words": "dans les archives on trouve three point five à côté de l'ancienne entrée",
+"drop_dec": "dans les archives on trouve trois cinq à côté de l'ancienne entrée"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_28",
+"kind": "dec",
+"caption": "L'école a annoncé 2,5 pour l'année prochaine.",
+"label": "l'école a annoncé deux virgule cinq pour l'année prochaine",
+"seg": "deux virgule cinq",
+"unit": "",
+"dec": "virgule",
+"hyps": {
+"swap": "l'école a annoncé deux virgule six pour l'année prochaine",
+"en_words": "l'école a annoncé two point five pour l'année prochaine",
+"drop_dec": "l'école a annoncé deux cinq pour l'année prochaine"
+}
+},
+{
+"lang": "fr",
+"id": "ka_fr_29",
+"kind": "dec",
+"caption": "Le contrat prévoit 12,5, a dit l'avocat.",
+"label": "le contrat prévoit douze virgule cinq a dit l'avocat",
+"seg": "douze virgule cinq",
+"unit": "",
+"dec": "virgule",
+"hyps": {
+"swap": "le contrat prévoit douze virgule six a dit l'avocat",
+"en_words": "le contrat prévoit twelve point five a dit l'avocat",
+"drop_dec": "le contrat prévoit douze cinq a dit l'avocat"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_00",
+"kind": "int",
+"caption": "Secondo il rapporto, il valore attuale è 7 e continua a salire.",
+"label": "secondo il rapporto il valore attuale è sette e continua a salire",
+"seg": "sette",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "secondo il rapporto il valore attuale è otto e continua a salire",
+"en_words": "secondo il rapporto il valore attuale è seven e continua a salire",
+"misplit": "secondo il rapporto il valore attuale è se tte e continua a salire"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_01",
+"kind": "int",
+"caption": "Lunedì l'azienda ha indicato 13 come obiettivo.",
+"label": "lunedì l'azienda ha indicato tredici come obiettivo",
+"seg": "tredici",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "lunedì l'azienda ha indicato ventitré come obiettivo",
+"en_words": "lunedì l'azienda ha indicato thirteen come obiettivo"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_02",
+"kind": "int",
+"caption": "Nell'archivio compare 21 accanto alla vecchia voce.",
+"label": "nell'archivio compare ventuno accanto alla vecchia voce",
+"seg": "ventuno",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "nell'archivio compare trentuno accanto alla vecchia voce",
+"en_words": "nell'archivio compare twenty-one accanto alla vecchia voce",
+"misplit": "nell'archivio compare ven tuno accanto alla vecchia voce"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_03",
+"kind": "int",
+"caption": "La scuola ha annunciato 28 per il prossimo anno.",
+"label": "la scuola ha annunciato ventotto per il prossimo anno",
+"seg": "ventotto",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "la scuola ha annunciato trentotto per il prossimo anno",
+"en_words": "la scuola ha annunciato twenty-eight per il prossimo anno"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_04",
+"kind": "int",
+"caption": "Il contratto prevede 45, ha detto l'avvocato.",
+"label": "il contratto prevede quarantacinque ha detto l'avvocato",
+"seg": "quarantacinque",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "il contratto prevede cinquantacinque ha detto l'avvocato",
+"en_words": "il contratto prevede forty-five ha detto l'avvocato"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_05",
+"kind": "int",
+"caption": "Secondo il rapporto, il valore attuale è 96 e continua a salire.",
+"label": "secondo il rapporto il valore attuale è novantasei e continua a salire",
+"seg": "novantasei",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "secondo il rapporto il valore attuale è ottantasei e continua a salire",
+"en_words": "secondo il rapporto il valore attuale è ninety-six e continua a salire",
+"misplit": "secondo il rapporto il valore attuale è novan tasei e continua a salire"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_06",
+"kind": "int",
+"caption": "Lunedì l'azienda ha indicato 99 come obiettivo.",
+"label": "lunedì l'azienda ha indicato novantanove come obiettivo",
+"seg": "novantanove",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "lunedì l'azienda ha indicato ottantanove come obiettivo",
+"en_words": "lunedì l'azienda ha indicato ninety-nine come obiettivo",
+"misplit": "lunedì l'azienda ha indicato novan tanove come obiettivo"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_07",
+"kind": "int",
+"caption": "Nell'archivio compare 250 accanto alla vecchia voce.",
+"label": "nell'archivio compare duecentocinquanta accanto alla vecchia voce",
+"seg": "duecentocinquanta",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "nell'archivio compare trecentocinquanta accanto alla vecchia voce",
+"en_words": "nell'archivio compare two hundred and fifty accanto alla vecchia voce",
+"respace": "nell'archivio compare duecento cinquanta accanto alla vecchia voce"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_08",
+"kind": "int",
+"caption": "La scuola ha annunciato 4500 per il prossimo anno.",
+"label": "la scuola ha annunciato quattromilacinquecento per il prossimo anno",
+"seg": "quattromilacinquecento",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "la scuola ha annunciato cinquemilacinquecento per il prossimo anno",
+"en_words": "la scuola ha annunciato four thousand five hundred per il prossimo anno",
+"respace": "la scuola ha annunciato quattromila cinquecento per il prossimo anno"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_09",
+"kind": "int",
+"caption": "Il contratto prevede 12.000, ha detto l'avvocato.",
+"label": "il contratto prevede dodicimila ha detto l'avvocato",
+"seg": "dodicimila",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "il contratto prevede ventiduemila ha detto l'avvocato",
+"en_words": "il contratto prevede twelve thousand ha detto l'avvocato",
+"trunc": "il contratto prevede dodici ha detto l'avvocato",
+"misplit": "il contratto prevede dodic imila ha detto l'avvocato"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_10",
+"kind": "int",
+"caption": "Secondo il rapporto, il valore attuale è 25.000 e continua a salire.",
+"label": "secondo il rapporto il valore attuale è venticinquemila e continua a salire",
+"seg": "venticinquemila",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "secondo il rapporto il valore attuale è trentacinquemila e continua a salire",
+"en_words": "secondo il rapporto il valore attuale è twenty-five thousand e continua a salire",
+"trunc": "secondo il rapporto il valore attuale è venticinque e continua a salire",
+"misplit": "secondo il rapporto il valore attuale è ventici nquemila e continua a salire"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_11",
+"kind": "int",
+"caption": "Lunedì l'azienda ha indicato 400.000 come obiettivo.",
+"label": "lunedì l'azienda ha indicato quattrocentomila come obiettivo",
+"seg": "quattrocentomila",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "lunedì l'azienda ha indicato cinquecentomila come obiettivo",
+"en_words": "lunedì l'azienda ha indicato four hundred thousand come obiettivo",
+"trunc": "lunedì l'azienda ha indicato quattrocento come obiettivo",
+"respace": "lunedì l'azienda ha indicato quattrocento mila come obiettivo",
+"misplit": "lunedì l'azienda ha indicato quattroc entomila come obiettivo"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_12",
+"kind": "int",
+"caption": "Nell'archivio compare 600.000 accanto alla vecchia voce.",
+"label": "nell'archivio compare seicentomila accanto alla vecchia voce",
+"seg": "seicentomila",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "nell'archivio compare settecentomila accanto alla vecchia voce",
+"en_words": "nell'archivio compare six hundred thousand accanto alla vecchia voce",
+"trunc": "nell'archivio compare seicento accanto alla vecchia voce",
+"respace": "nell'archivio compare seicento mila accanto alla vecchia voce",
+"misplit": "nell'archivio compare seicen tomila accanto alla vecchia voce"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_13",
+"kind": "year",
+"caption": "La scuola ha annunciato 1998 per il prossimo anno.",
+"label": "la scuola ha annunciato millenovecentonovantotto per il prossimo anno",
+"seg": "millenovecentonovantotto",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "la scuola ha annunciato millenovecentottantotto per il prossimo anno",
+"en_words": "la scuola ha annunciato nineteen ninety-eight per il prossimo anno",
+"respace": "la scuola ha annunciato millenovecento novantotto per il prossimo anno",
+"misplit": "la scuola ha annunciato millenovecen tonovantotto per il prossimo anno"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_14",
+"kind": "year",
+"caption": "Il contratto prevede 2005, ha detto l'avvocato.",
+"label": "il contratto prevede duemilacinque ha detto l'avvocato",
+"seg": "duemilacinque",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "il contratto prevede duemilaquindici ha detto l'avvocato",
+"en_words": "il contratto prevede two thousand and five ha detto l'avvocato",
+"respace": "il contratto prevede duemila cinque ha detto l'avvocato",
+"misplit": "il contratto prevede duemil acinque ha detto l'avvocato"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_15",
+"kind": "year",
+"caption": "Secondo il rapporto, il valore attuale è 2018 e continua a salire.",
+"label": "secondo il rapporto il valore attuale è duemiladiciotto e continua a salire",
+"seg": "duemiladiciotto",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "secondo il rapporto il valore attuale è duemilaotto e continua a salire",
+"en_words": "secondo il rapporto il valore attuale è twenty eighteen e continua a salire",
+"respace": "secondo il rapporto il valore attuale è duemila diciotto e continua a salire"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_16",
+"kind": "year",
+"caption": "Lunedì l'azienda ha indicato 2024 come obiettivo.",
+"label": "lunedì l'azienda ha indicato duemilaventiquattro come obiettivo",
+"seg": "duemilaventiquattro",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "lunedì l'azienda ha indicato duemilaquattordici come obiettivo",
+"en_words": "lunedì l'azienda ha indicato twenty twenty-four come obiettivo",
+"respace": "lunedì l'azienda ha indicato duemila ventiquattro come obiettivo",
+"misplit": "lunedì l'azienda ha indicato duemilave ntiquattro come obiettivo"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_17",
+"kind": "pct",
+"caption": "Nell'archivio compare 28 % accanto alla vecchia voce.",
+"label": "nell'archivio compare ventotto per cento accanto alla vecchia voce",
+"seg": "ventotto per cento",
+"unit": "per cento",
+"dec": "",
+"hyps": {
+"swap": "nell'archivio compare trentotto per cento accanto alla vecchia voce",
+"en_words": "nell'archivio compare twenty-eight per cento accanto alla vecchia voce",
+"drop_unit": "nell'archivio compare ventotto accanto alla vecchia voce"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_18",
+"kind": "pct",
+"caption": "La scuola ha annunciato 5 % per il prossimo anno.",
+"label": "la scuola ha annunciato cinque per cento per il prossimo anno",
+"seg": "cinque per cento",
+"unit": "per cento",
+"dec": "",
+"hyps": {
+"swap": "la scuola ha annunciato sei per cento per il prossimo anno",
+"en_words": "la scuola ha annunciato five per cento per il prossimo anno",
+"drop_unit": "la scuola ha annunciato cinque per il prossimo anno",
+"misplit": "la scuola ha annunciato cin que per cento per il prossimo anno"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_19",
+"kind": "pct",
+"caption": "Il contratto prevede 40 %, ha detto l'avvocato.",
+"label": "il contratto prevede quaranta per cento ha detto l'avvocato",
+"seg": "quaranta per cento",
+"unit": "per cento",
+"dec": "",
+"hyps": {
+"swap": "il contratto prevede cinquanta per cento ha detto l'avvocato",
+"en_words": "il contratto prevede forty per cento ha detto l'avvocato",
+"drop_unit": "il contratto prevede quaranta ha detto l'avvocato",
+"misplit": "il contratto prevede quar anta per cento ha detto l'avvocato"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_20",
+"kind": "pct",
+"caption": "Secondo il rapporto, il valore attuale è 12 % e continua a salire.",
+"label": "secondo il rapporto il valore attuale è dodici per cento e continua a salire",
+"seg": "dodici per cento",
+"unit": "per cento",
+"dec": "",
+"hyps": {
+"swap": "secondo il rapporto il valore attuale è ventidue per cento e continua a salire",
+"en_words": "secondo il rapporto il valore attuale è twelve per cento e continua a salire",
+"drop_unit": "secondo il rapporto il valore attuale è dodici e continua a salire",
+"misplit": "secondo il rapporto il valore attuale è dod ici per cento e continua a salire"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_21",
+"kind": "eur",
+"caption": "Lunedì l'azienda ha indicato 250 € come obiettivo.",
+"label": "lunedì l'azienda ha indicato duecentocinquanta euro come obiettivo",
+"seg": "duecentocinquanta euro",
+"unit": "euro",
+"dec": "",
+"hyps": {
+"swap": "lunedì l'azienda ha indicato trecentocinquanta euro come obiettivo",
+"en_words": "lunedì l'azienda ha indicato two hundred and fifty euro come obiettivo",
+"drop_unit": "lunedì l'azienda ha indicato duecentocinquanta come obiettivo",
+"respace": "lunedì l'azienda ha indicato duecento cinquanta euro come obiettivo"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_22",
+"kind": "eur",
+"caption": "Nell'archivio compare 40 € accanto alla vecchia voce.",
+"label": "nell'archivio compare quaranta euro accanto alla vecchia voce",
+"seg": "quaranta euro",
+"unit": "euro",
+"dec": "",
+"hyps": {
+"swap": "nell'archivio compare cinquanta euro accanto alla vecchia voce",
+"en_words": "nell'archivio compare forty euro accanto alla vecchia voce",
+"drop_unit": "nell'archivio compare quaranta accanto alla vecchia voce",
+"misplit": "nell'archivio compare quar anta euro accanto alla vecchia voce"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_23",
+"kind": "price",
+"caption": "La scuola ha annunciato 2,80 € per il prossimo anno.",
+"label": "la scuola ha annunciato due euro e ottanta per il prossimo anno",
+"seg": "due euro e ottanta",
+"unit": "euro",
+"dec": "",
+"hyps": {
+"swap": "la scuola ha annunciato due euro e novanta per il prossimo anno",
+"en_words": "la scuola ha annunciato two euro e eighty per il prossimo anno",
+"drop_unit": "la scuola ha annunciato due e ottanta per il prossimo anno"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_24",
+"kind": "km",
+"caption": "Il contratto prevede 30 km, ha detto l'avvocato.",
+"label": "il contratto prevede trenta chilometri ha detto l'avvocato",
+"seg": "trenta chilometri",
+"unit": "chilometri",
+"dec": "",
+"hyps": {
+"swap": "il contratto prevede quaranta chilometri ha detto l'avvocato",
+"en_words": "il contratto prevede thirty chilometri ha detto l'avvocato",
+"drop_unit": "il contratto prevede trenta ha detto l'avvocato"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_25",
+"kind": "kg",
+"caption": "Secondo il rapporto, il valore attuale è 5 kg e continua a salire.",
+"label": "secondo il rapporto il valore attuale è cinque chilogrammi e continua a salire",
+"seg": "cinque chilogrammi",
+"unit": "chilogrammi",
+"dec": "",
+"hyps": {
+"swap": "secondo il rapporto il valore attuale è sei chilogrammi e continua a salire",
+"en_words": "secondo il rapporto il valore attuale è five chilogrammi e continua a salire",
+"drop_unit": "secondo il rapporto il valore attuale è cinque e continua a salire",
+"misplit": "secondo il rapporto il valore attuale è cin que chilogrammi e continua a salire"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_26",
+"kind": "km",
+"caption": "Lunedì l'azienda ha indicato 12 km come obiettivo.",
+"label": "lunedì l'azienda ha indicato dodici chilometri come obiettivo",
+"seg": "dodici chilometri",
+"unit": "chilometri",
+"dec": "",
+"hyps": {
+"swap": "lunedì l'azienda ha indicato ventidue chilometri come obiettivo",
+"en_words": "lunedì l'azienda ha indicato twelve chilometri come obiettivo",
+"drop_unit": "lunedì l'azienda ha indicato dodici come obiettivo",
+"misplit": "lunedì l'azienda ha indicato dod ici chilometri come obiettivo"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_27",
+"kind": "dec",
+"caption": "Nell'archivio compare 3,5 accanto alla vecchia voce.",
+"label": "nell'archivio compare tre virgola cinque accanto alla vecchia voce",
+"seg": "tre virgola cinque",
+"unit": "",
+"dec": "virgola",
+"hyps": {
+"swap": "nell'archivio compare tre virgola sei accanto alla vecchia voce",
+"en_words": "nell'archivio compare three point five accanto alla vecchia voce",
+"drop_dec": "nell'archivio compare tre cinque accanto alla vecchia voce"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_28",
+"kind": "dec",
+"caption": "La scuola ha annunciato 2,5 per il prossimo anno.",
+"label": "la scuola ha annunciato due virgola cinque per il prossimo anno",
+"seg": "due virgola cinque",
+"unit": "",
+"dec": "virgola",
+"hyps": {
+"swap": "la scuola ha annunciato due virgola sei per il prossimo anno",
+"en_words": "la scuola ha annunciato two point five per il prossimo anno",
+"drop_dec": "la scuola ha annunciato due cinque per il prossimo anno"
+}
+},
+{
+"lang": "it",
+"id": "ka_it_29",
+"kind": "dec",
+"caption": "Il contratto prevede 12,5, ha detto l'avvocato.",
+"label": "il contratto prevede dodici virgola cinque ha detto l'avvocato",
+"seg": "dodici virgola cinque",
+"unit": "",
+"dec": "virgola",
+"hyps": {
+"swap": "il contratto prevede dodici virgola sei ha detto l'avvocato",
+"en_words": "il contratto prevede twelve point five ha detto l'avvocato",
+"drop_dec": "il contratto prevede dodici cinque ha detto l'avvocato"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_00",
+"kind": "int",
+"caption": "Volgens het rapport ligt de huidige waarde op 7 en dat blijft stijgen.",
+"label": "volgens het rapport ligt de huidige waarde op zeven en dat blijft stijgen",
+"seg": "zeven",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "volgens het rapport ligt de huidige waarde op acht en dat blijft stijgen",
+"en_words": "volgens het rapport ligt de huidige waarde op seven en dat blijft stijgen",
+"misplit": "volgens het rapport ligt de huidige waarde op ze ven en dat blijft stijgen"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_01",
+"kind": "int",
+"caption": "Maandag noemde het bedrijf 13 als doel.",
+"label": "maandag noemde het bedrijf dertien als doel",
+"seg": "dertien",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "maandag noemde het bedrijf drieëntwintig als doel",
+"en_words": "maandag noemde het bedrijf thirteen als doel"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_02",
+"kind": "int",
+"caption": "In het archief staat 21 naast de oude vermelding.",
+"label": "in het archief staat eenentwintig naast de oude vermelding",
+"seg": "eenentwintig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "in het archief staat eenendertig naast de oude vermelding",
+"en_words": "in het archief staat twenty-one naast de oude vermelding",
+"respace": "in het archief staat een en twintig naast de oude vermelding",
+"misplit": "in het archief staat eenent wintig naast de oude vermelding"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_03",
+"kind": "int",
+"caption": "De school meldde 28 voor volgend jaar.",
+"label": "de school meldde achtentwintig voor volgend jaar",
+"seg": "achtentwintig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "de school meldde achtendertig voor volgend jaar",
+"en_words": "de school meldde twenty-eight voor volgend jaar",
+"respace": "de school meldde acht en twintig voor volgend jaar"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_04",
+"kind": "int",
+"caption": "Het contract voorziet in 45, zei de advocaat.",
+"label": "het contract voorziet in vijfenveertig zei de advocaat",
+"seg": "vijfenveertig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "het contract voorziet in vijfenvijftig zei de advocaat",
+"en_words": "het contract voorziet in forty-five zei de advocaat",
+"respace": "het contract voorziet in vijf en veertig zei de advocaat"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_05",
+"kind": "int",
+"caption": "Volgens het rapport ligt de huidige waarde op 96 en dat blijft stijgen.",
+"label": "volgens het rapport ligt de huidige waarde op zesennegentig en dat blijft stijgen",
+"seg": "zesennegentig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "volgens het rapport ligt de huidige waarde op zesentachtig en dat blijft stijgen",
+"en_words": "volgens het rapport ligt de huidige waarde op ninety-six en dat blijft stijgen",
+"respace": "volgens het rapport ligt de huidige waarde op zes en negentig en dat blijft stijgen",
+"misplit": "volgens het rapport ligt de huidige waarde op zesenn egentig en dat blijft stijgen"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_06",
+"kind": "int",
+"caption": "Maandag noemde het bedrijf 99 als doel.",
+"label": "maandag noemde het bedrijf negenennegentig als doel",
+"seg": "negenennegentig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "maandag noemde het bedrijf negenentachtig als doel",
+"en_words": "maandag noemde het bedrijf ninety-nine als doel",
+"respace": "maandag noemde het bedrijf negen en negentig als doel"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_07",
+"kind": "int",
+"caption": "In het archief staat 250 naast de oude vermelding.",
+"label": "in het archief staat tweehonderdvijftig naast de oude vermelding",
+"seg": "tweehonderdvijftig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "in het archief staat driehonderdvijftig naast de oude vermelding",
+"en_words": "in het archief staat two hundred and fifty naast de oude vermelding",
+"respace": "in het archief staat tweehonderd vijftig naast de oude vermelding",
+"misplit": "in het archief staat tweehonde rdvijftig naast de oude vermelding"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_08",
+"kind": "int",
+"caption": "De school meldde 4500 voor volgend jaar.",
+"label": "de school meldde vierduizendvijfhonderd voor volgend jaar",
+"seg": "vierduizendvijfhonderd",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "de school meldde vijfduizendvijfhonderd voor volgend jaar",
+"en_words": "de school meldde four thousand five hundred voor volgend jaar",
+"respace": "de school meldde vierduizend vijfhonderd voor volgend jaar"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_09",
+"kind": "int",
+"caption": "Het contract voorziet in 12.000, zei de advocaat.",
+"label": "het contract voorziet in twaalfduizend zei de advocaat",
+"seg": "twaalfduizend",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "het contract voorziet in tweeëntwintigduizend zei de advocaat",
+"en_words": "het contract voorziet in twelve thousand zei de advocaat",
+"trunc": "het contract voorziet in twaalf zei de advocaat"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_10",
+"kind": "int",
+"caption": "Volgens het rapport ligt de huidige waarde op 25.000 en dat blijft stijgen.",
+"label": "volgens het rapport ligt de huidige waarde op vijfentwintigduizend en dat blijft stijgen",
+"seg": "vijfentwintigduizend",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "volgens het rapport ligt de huidige waarde op vijfendertigduizend en dat blijft stijgen",
+"en_words": "volgens het rapport ligt de huidige waarde op twenty-five thousand en dat blijft stijgen",
+"trunc": "volgens het rapport ligt de huidige waarde op vijfentwintig en dat blijft stijgen",
+"misplit": "volgens het rapport ligt de huidige waarde op vijfentwin tigduizend en dat blijft stijgen"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_11",
+"kind": "int",
+"caption": "Maandag noemde het bedrijf 400.000 als doel.",
+"label": "maandag noemde het bedrijf vierhonderdduizend als doel",
+"seg": "vierhonderdduizend",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "maandag noemde het bedrijf vijfhonderdduizend als doel",
+"en_words": "maandag noemde het bedrijf four hundred thousand als doel",
+"trunc": "maandag noemde het bedrijf vierhonderd als doel",
+"respace": "maandag noemde het bedrijf vierhonderd duizend als doel",
+"misplit": "maandag noemde het bedrijf vierhonde rdduizend als doel"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_12",
+"kind": "int",
+"caption": "In het archief staat 600.000 naast de oude vermelding.",
+"label": "in het archief staat zeshonderdduizend naast de oude vermelding",
+"seg": "zeshonderdduizend",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "in het archief staat zevenhonderdduizend naast de oude vermelding",
+"en_words": "in het archief staat six hundred thousand naast de oude vermelding",
+"trunc": "in het archief staat zeshonderd naast de oude vermelding",
+"respace": "in het archief staat zeshonderd duizend naast de oude vermelding",
+"misplit": "in het archief staat zeshonde rdduizend naast de oude vermelding"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_13",
+"kind": "year",
+"caption": "De school meldde 1998 voor volgend jaar.",
+"label": "de school meldde negentien honderd achtennegentig voor volgend jaar",
+"seg": "negentien honderd achtennegentig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "de school meldde negentien honderd achtentachtig voor volgend jaar",
+"en_words": "de school meldde nineteen ninety-eight voor volgend jaar",
+"respace": "de school meldde negentien honderd acht en negentig voor volgend jaar",
+"misplit": "de school meldde negentien honderd achtenn egentig voor volgend jaar"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_14",
+"kind": "year",
+"caption": "Het contract voorziet in 2005, zei de advocaat.",
+"label": "het contract voorziet in tweeduizendvijf zei de advocaat",
+"seg": "tweeduizendvijf",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "het contract voorziet in tweeduizendvijftien zei de advocaat",
+"en_words": "het contract voorziet in two thousand and five zei de advocaat",
+"respace": "het contract voorziet in tweeduizend vijf zei de advocaat",
+"misplit": "het contract voorziet in tweedui zendvijf zei de advocaat"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_15",
+"kind": "year",
+"caption": "Volgens het rapport ligt de huidige waarde op 2018 en dat blijft stijgen.",
+"label": "volgens het rapport ligt de huidige waarde op tweeduizendachttien en dat blijft stijgen",
+"seg": "tweeduizendachttien",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "volgens het rapport ligt de huidige waarde op tweeduizendacht en dat blijft stijgen",
+"en_words": "volgens het rapport ligt de huidige waarde op twenty eighteen en dat blijft stijgen",
+"respace": "volgens het rapport ligt de huidige waarde op tweeduizend achttien en dat blijft stijgen",
+"misplit": "volgens het rapport ligt de huidige waarde op tweeduize ndachttien en dat blijft stijgen"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_16",
+"kind": "year",
+"caption": "Maandag noemde het bedrijf 2024 als doel.",
+"label": "maandag noemde het bedrijf tweeduizendvierentwintig als doel",
+"seg": "tweeduizendvierentwintig",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "maandag noemde het bedrijf tweeduizendveertien als doel",
+"en_words": "maandag noemde het bedrijf twenty twenty-four als doel",
+"respace": "maandag noemde het bedrijf tweeduizend vier en twintig als doel",
+"misplit": "maandag noemde het bedrijf tweeduizendv ierentwintig als doel"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_17",
+"kind": "pct",
+"caption": "In het archief staat 28 % naast de oude vermelding.",
+"label": "in het archief staat achtentwintig procent naast de oude vermelding",
+"seg": "achtentwintig procent",
+"unit": "procent",
+"dec": "",
+"hyps": {
+"swap": "in het archief staat achtendertig procent naast de oude vermelding",
+"en_words": "in het archief staat twenty-eight procent naast de oude vermelding",
+"drop_unit": "in het archief staat achtentwintig naast de oude vermelding",
+"respace": "in het archief staat acht en twintig procent naast de oude vermelding"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_18",
+"kind": "pct",
+"caption": "De school meldde 5 % voor volgend jaar.",
+"label": "de school meldde vijf procent voor volgend jaar",
+"seg": "vijf procent",
+"unit": "procent",
+"dec": "",
+"hyps": {
+"swap": "de school meldde zes procent voor volgend jaar",
+"en_words": "de school meldde five procent voor volgend jaar",
+"drop_unit": "de school meldde vijf voor volgend jaar",
+"misplit": "de school meldde vi jf procent voor volgend jaar"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_19",
+"kind": "pct",
+"caption": "Het contract voorziet in 40 %, zei de advocaat.",
+"label": "het contract voorziet in veertig procent zei de advocaat",
+"seg": "veertig procent",
+"unit": "procent",
+"dec": "",
+"hyps": {
+"swap": "het contract voorziet in vijftig procent zei de advocaat",
+"en_words": "het contract voorziet in forty procent zei de advocaat",
+"drop_unit": "het contract voorziet in veertig zei de advocaat",
+"misplit": "het contract voorziet in vee rtig procent zei de advocaat"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_20",
+"kind": "pct",
+"caption": "Volgens het rapport ligt de huidige waarde op 12 % en dat blijft stijgen.",
+"label": "volgens het rapport ligt de huidige waarde op twaalf procent en dat blijft stijgen",
+"seg": "twaalf procent",
+"unit": "procent",
+"dec": "",
+"hyps": {
+"swap": "volgens het rapport ligt de huidige waarde op tweeëntwintig procent en dat blijft stijgen",
+"en_words": "volgens het rapport ligt de huidige waarde op twelve procent en dat blijft stijgen",
+"drop_unit": "volgens het rapport ligt de huidige waarde op twaalf en dat blijft stijgen",
+"misplit": "volgens het rapport ligt de huidige waarde op twa alf procent en dat blijft stijgen"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_21",
+"kind": "eur",
+"caption": "Maandag noemde het bedrijf 250 € als doel.",
+"label": "maandag noemde het bedrijf tweehonderdvijftig euro als doel",
+"seg": "tweehonderdvijftig euro",
+"unit": "euro",
+"dec": "",
+"hyps": {
+"swap": "maandag noemde het bedrijf driehonderdvijftig euro als doel",
+"en_words": "maandag noemde het bedrijf two hundred and fifty euro als doel",
+"drop_unit": "maandag noemde het bedrijf tweehonderdvijftig als doel",
+"respace": "maandag noemde het bedrijf tweehonderd vijftig euro als doel",
+"misplit": "maandag noemde het bedrijf tweehonde rdvijftig euro als doel"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_22",
+"kind": "eur",
+"caption": "In het archief staat 40 € naast de oude vermelding.",
+"label": "in het archief staat veertig euro naast de oude vermelding",
+"seg": "veertig euro",
+"unit": "euro",
+"dec": "",
+"hyps": {
+"swap": "in het archief staat vijftig euro naast de oude vermelding",
+"en_words": "in het archief staat forty euro naast de oude vermelding",
+"drop_unit": "in het archief staat veertig naast de oude vermelding",
+"misplit": "in het archief staat vee rtig euro naast de oude vermelding"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_23",
+"kind": "price",
+"caption": "De school meldde 2,80 € voor volgend jaar.",
+"label": "de school meldde twee euro tachtig voor volgend jaar",
+"seg": "twee euro tachtig",
+"unit": "euro",
+"dec": "",
+"hyps": {
+"swap": "de school meldde twee euro negentig voor volgend jaar",
+"en_words": "de school meldde two euro eighty voor volgend jaar",
+"drop_unit": "de school meldde twee tachtig voor volgend jaar"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_24",
+"kind": "km",
+"caption": "Het contract voorziet in 30 km, zei de advocaat.",
+"label": "het contract voorziet in dertig kilometer zei de advocaat",
+"seg": "dertig kilometer",
+"unit": "kilometer",
+"dec": "",
+"hyps": {
+"swap": "het contract voorziet in veertig kilometer zei de advocaat",
+"en_words": "het contract voorziet in thirty kilometer zei de advocaat",
+"drop_unit": "het contract voorziet in dertig zei de advocaat",
+"misplit": "het contract voorziet in der tig kilometer zei de advocaat"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_25",
+"kind": "kg",
+"caption": "Volgens het rapport ligt de huidige waarde op 5 kg en dat blijft stijgen.",
+"label": "volgens het rapport ligt de huidige waarde op vijf kilogram en dat blijft stijgen",
+"seg": "vijf kilogram",
+"unit": "kilogram",
+"dec": "",
+"hyps": {
+"swap": "volgens het rapport ligt de huidige waarde op zes kilogram en dat blijft stijgen",
+"en_words": "volgens het rapport ligt de huidige waarde op five kilogram en dat blijft stijgen",
+"drop_unit": "volgens het rapport ligt de huidige waarde op vijf en dat blijft stijgen",
+"misplit": "volgens het rapport ligt de huidige waarde op vi jf kilogram en dat blijft stijgen"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_26",
+"kind": "km",
+"caption": "Maandag noemde het bedrijf 12 km als doel.",
+"label": "maandag noemde het bedrijf twaalf kilometer als doel",
+"seg": "twaalf kilometer",
+"unit": "kilometer",
+"dec": "",
+"hyps": {
+"swap": "maandag noemde het bedrijf tweeëntwintig kilometer als doel",
+"en_words": "maandag noemde het bedrijf twelve kilometer als doel",
+"drop_unit": "maandag noemde het bedrijf twaalf als doel",
+"misplit": "maandag noemde het bedrijf twa alf kilometer als doel"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_27",
+"kind": "dec",
+"caption": "In het archief staat 3,5 naast de oude vermelding.",
+"label": "in het archief staat drie komma vijf naast de oude vermelding",
+"seg": "drie komma vijf",
+"unit": "",
+"dec": "komma",
+"hyps": {
+"swap": "in het archief staat drie komma zes naast de oude vermelding",
+"en_words": "in het archief staat three point five naast de oude vermelding",
+"drop_dec": "in het archief staat drie vijf naast de oude vermelding"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_28",
+"kind": "dec",
+"caption": "De school meldde 2,5 voor volgend jaar.",
+"label": "de school meldde twee komma vijf voor volgend jaar",
+"seg": "twee komma vijf",
+"unit": "",
+"dec": "komma",
+"hyps": {
+"swap": "de school meldde twee komma zes voor volgend jaar",
+"en_words": "de school meldde two point five voor volgend jaar",
+"drop_dec": "de school meldde twee vijf voor volgend jaar"
+}
+},
+{
+"lang": "nl",
+"id": "ka_nl_29",
+"kind": "dec",
+"caption": "Het contract voorziet in 12,5, zei de advocaat.",
+"label": "het contract voorziet in twaalf komma vijf zei de advocaat",
+"seg": "twaalf komma vijf",
+"unit": "",
+"dec": "komma",
+"hyps": {
+"swap": "het contract voorziet in twaalf komma zes zei de advocaat",
+"en_words": "het contract voorziet in twelve point five zei de advocaat",
+"drop_dec": "het contract voorziet in twaalf vijf zei de advocaat"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_00",
+"kind": "int",
+"caption": "Segundo o relatório, o valor atual é 7 e continua a subir.",
+"label": "segundo o relatório o valor atual é sete e continua a subir",
+"seg": "sete",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "segundo o relatório o valor atual é oito e continua a subir",
+"en_words": "segundo o relatório o valor atual é seven e continua a subir",
+"misplit": "segundo o relatório o valor atual é se te e continua a subir"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_01",
+"kind": "int",
+"caption": "Na segunda-feira a empresa indicou 13 como objetivo.",
+"label": "na segunda-feira a empresa indicou treze como objetivo",
+"seg": "treze",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "na segunda-feira a empresa indicou vinte e três como objetivo",
+"en_words": "na segunda-feira a empresa indicou thirteen como objetivo",
+"misplit": "na segunda-feira a empresa indicou tr eze como objetivo"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_02",
+"kind": "int",
+"caption": "No arquivo consta 21 ao lado da entrada antiga.",
+"label": "no arquivo consta vinte e um ao lado da entrada antiga",
+"seg": "vinte e um",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "no arquivo consta trinta e um ao lado da entrada antiga",
+"en_words": "no arquivo consta twenty-one ao lado da entrada antiga",
+"fuse": "no arquivo consta vinteeum ao lado da entrada antiga"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_03",
+"kind": "int",
+"caption": "A escola anunciou 28 para o próximo ano.",
+"label": "a escola anunciou vinte e oito para o próximo ano",
+"seg": "vinte e oito",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "a escola anunciou trinta e oito para o próximo ano",
+"en_words": "a escola anunciou twenty-eight para o próximo ano",
+"fuse": "a escola anunciou vinteeoito para o próximo ano",
+"misplit": "a escola anunciou vinte e oi to para o próximo ano"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_04",
+"kind": "int",
+"caption": "O contrato prevê 45, disse o advogado.",
+"label": "o contrato prevê quarenta e cinco disse o advogado",
+"seg": "quarenta e cinco",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "o contrato prevê cinquenta e cinco disse o advogado",
+"en_words": "o contrato prevê forty-five disse o advogado",
+"fuse": "o contrato prevê quarentaecinco disse o advogado",
+"misplit": "o contrato prevê quarenta e ci nco disse o advogado"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_05",
+"kind": "int",
+"caption": "Segundo o relatório, o valor atual é 96 e continua a subir.",
+"label": "segundo o relatório o valor atual é noventa e seis e continua a subir",
+"seg": "noventa e seis",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "segundo o relatório o valor atual é oitenta e seis e continua a subir",
+"en_words": "segundo o relatório o valor atual é ninety-six e continua a subir",
+"fuse": "segundo o relatório o valor atual é noventaeseis e continua a subir",
+"misplit": "segundo o relatório o valor atual é noventa e se is e continua a subir"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_06",
+"kind": "int",
+"caption": "Na segunda-feira a empresa indicou 99 como objetivo.",
+"label": "na segunda-feira a empresa indicou noventa e nove como objetivo",
+"seg": "noventa e nove",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "na segunda-feira a empresa indicou oitenta e nove como objetivo",
+"en_words": "na segunda-feira a empresa indicou ninety-nine como objetivo",
+"fuse": "na segunda-feira a empresa indicou noventaenove como objetivo",
+"misplit": "na segunda-feira a empresa indicou noventa e no ve como objetivo"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_07",
+"kind": "int",
+"caption": "No arquivo consta 250 ao lado da entrada antiga.",
+"label": "no arquivo consta duzentos e cinquenta ao lado da entrada antiga",
+"seg": "duzentos e cinquenta",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "no arquivo consta trezentos e cinquenta ao lado da entrada antiga",
+"en_words": "no arquivo consta two hundred and fifty ao lado da entrada antiga",
+"fuse": "no arquivo consta duzentosecinquenta ao lado da entrada antiga",
+"misplit": "no arquivo consta duzentos e cinq uenta ao lado da entrada antiga"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_08",
+"kind": "int",
+"caption": "A escola anunciou 4500 para o próximo ano.",
+"label": "a escola anunciou quatro mil e quinhentos para o próximo ano",
+"seg": "quatro mil e quinhentos",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "a escola anunciou cinco mil e quinhentos para o próximo ano",
+"en_words": "a escola anunciou four thousand five hundred para o próximo ano",
+"fuse": "a escola anunciou quatromilequinhentos para o próximo ano",
+"misplit": "a escola anunciou quatro mil e quinh entos para o próximo ano"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_09",
+"kind": "int",
+"caption": "O contrato prevê 12.000, disse o advogado.",
+"label": "o contrato prevê doze mil disse o advogado",
+"seg": "doze mil",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "o contrato prevê vinte e dois mil disse o advogado",
+"en_words": "o contrato prevê twelve thousand disse o advogado",
+"trunc": "o contrato prevê doze disse o advogado",
+"fuse": "o contrato prevê dozemil disse o advogado"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_10",
+"kind": "int",
+"caption": "Segundo o relatório, o valor atual é 25.000 e continua a subir.",
+"label": "segundo o relatório o valor atual é vinte e cinco mil e continua a subir",
+"seg": "vinte e cinco mil",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "segundo o relatório o valor atual é trinta e cinco mil e continua a subir",
+"en_words": "segundo o relatório o valor atual é twenty-five thousand e continua a subir",
+"trunc": "segundo o relatório o valor atual é vinte e cinco e continua a subir",
+"fuse": "segundo o relatório o valor atual é vinteecincomil e continua a subir"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_11",
+"kind": "int",
+"caption": "Na segunda-feira a empresa indicou 400.000 como objetivo.",
+"label": "na segunda-feira a empresa indicou quatrocentos mil como objetivo",
+"seg": "quatrocentos mil",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "na segunda-feira a empresa indicou quinhentos mil como objetivo",
+"en_words": "na segunda-feira a empresa indicou four hundred thousand como objetivo",
+"trunc": "na segunda-feira a empresa indicou quatrocentos como objetivo",
+"fuse": "na segunda-feira a empresa indicou quatrocentosmil como objetivo"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_12",
+"kind": "int",
+"caption": "No arquivo consta 600.000 ao lado da entrada antiga.",
+"label": "no arquivo consta seiscentos mil ao lado da entrada antiga",
+"seg": "seiscentos mil",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "no arquivo consta setecentos mil ao lado da entrada antiga",
+"en_words": "no arquivo consta six hundred thousand ao lado da entrada antiga",
+"trunc": "no arquivo consta seiscentos ao lado da entrada antiga",
+"fuse": "no arquivo consta seiscentosmil ao lado da entrada antiga"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_13",
+"kind": "year",
+"caption": "A escola anunciou 1998 para o próximo ano.",
+"label": "a escola anunciou mil novecentos e noventa e oito para o próximo ano",
+"seg": "mil novecentos e noventa e oito",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "a escola anunciou mil novecentos e oitenta e oito para o próximo ano",
+"en_words": "a escola anunciou nineteen ninety-eight para o próximo ano",
+"fuse": "a escola anunciou milnovecentosenoventaeoito para o próximo ano",
+"misplit": "a escola anunciou mil novecentos e noventa e oi to para o próximo ano"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_14",
+"kind": "year",
+"caption": "O contrato prevê 2005, disse o advogado.",
+"label": "o contrato prevê dois mil e cinco disse o advogado",
+"seg": "dois mil e cinco",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "o contrato prevê dois mil e quinze disse o advogado",
+"en_words": "o contrato prevê two thousand and five disse o advogado",
+"fuse": "o contrato prevê doismilecinco disse o advogado",
+"misplit": "o contrato prevê dois mil e ci nco disse o advogado"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_15",
+"kind": "year",
+"caption": "Segundo o relatório, o valor atual é 2018 e continua a subir.",
+"label": "segundo o relatório o valor atual é dois mil e dezoito e continua a subir",
+"seg": "dois mil e dezoito",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "segundo o relatório o valor atual é dois mil e oito e continua a subir",
+"en_words": "segundo o relatório o valor atual é twenty eighteen e continua a subir",
+"fuse": "segundo o relatório o valor atual é doismiledezoito e continua a subir"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_16",
+"kind": "year",
+"caption": "Na segunda-feira a empresa indicou 2024 como objetivo.",
+"label": "na segunda-feira a empresa indicou dois mil e vinte e quatro como objetivo",
+"seg": "dois mil e vinte e quatro",
+"unit": "",
+"dec": "",
+"hyps": {
+"swap": "na segunda-feira a empresa indicou dois mil e catorze como objetivo",
+"en_words": "na segunda-feira a empresa indicou twenty twenty-four como objetivo",
+"fuse": "na segunda-feira a empresa indicou doismilevinteequatro como objetivo",
+"misplit": "na segunda-feira a empresa indicou dois mil e vinte e qua tro como objetivo"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_17",
+"kind": "pct",
+"caption": "No arquivo consta 28 % ao lado da entrada antiga.",
+"label": "no arquivo consta vinte e oito por cento ao lado da entrada antiga",
+"seg": "vinte e oito por cento",
+"unit": "por cento",
+"dec": "",
+"hyps": {
+"swap": "no arquivo consta trinta e oito por cento ao lado da entrada antiga",
+"en_words": "no arquivo consta twenty-eight por cento ao lado da entrada antiga",
+"drop_unit": "no arquivo consta vinte e oito ao lado da entrada antiga",
+"fuse": "no arquivo consta vinteeoito por cento ao lado da entrada antiga",
+"misplit": "no arquivo consta vinte e oi to por cento ao lado da entrada antiga"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_18",
+"kind": "pct",
+"caption": "A escola anunciou 5 % para o próximo ano.",
+"label": "a escola anunciou cinco por cento para o próximo ano",
+"seg": "cinco por cento",
+"unit": "por cento",
+"dec": "",
+"hyps": {
+"swap": "a escola anunciou seis por cento para o próximo ano",
+"en_words": "a escola anunciou five por cento para o próximo ano",
+"drop_unit": "a escola anunciou cinco para o próximo ano",
+"misplit": "a escola anunciou ci nco por cento para o próximo ano"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_19",
+"kind": "pct",
+"caption": "O contrato prevê 40 %, disse o advogado.",
+"label": "o contrato prevê quarenta por cento disse o advogado",
+"seg": "quarenta por cento",
+"unit": "por cento",
+"dec": "",
+"hyps": {
+"swap": "o contrato prevê cinquenta por cento disse o advogado",
+"en_words": "o contrato prevê forty por cento disse o advogado",
+"drop_unit": "o contrato prevê quarenta disse o advogado",
+"misplit": "o contrato prevê quar enta por cento disse o advogado"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_20",
+"kind": "pct",
+"caption": "Segundo o relatório, o valor atual é 12 % e continua a subir.",
+"label": "segundo o relatório o valor atual é doze por cento e continua a subir",
+"seg": "doze por cento",
+"unit": "por cento",
+"dec": "",
+"hyps": {
+"swap": "segundo o relatório o valor atual é vinte e dois por cento e continua a subir",
+"en_words": "segundo o relatório o valor atual é twelve por cento e continua a subir",
+"drop_unit": "segundo o relatório o valor atual é doze e continua a subir",
+"misplit": "segundo o relatório o valor atual é do ze por cento e continua a subir"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_21",
+"kind": "eur",
+"caption": "Na segunda-feira a empresa indicou 250 € como objetivo.",
+"label": "na segunda-feira a empresa indicou duzentos e cinquenta euros como objetivo",
+"seg": "duzentos e cinquenta euros",
+"unit": "euros",
+"dec": "",
+"hyps": {
+"swap": "na segunda-feira a empresa indicou trezentos e cinquenta euros como objetivo",
+"en_words": "na segunda-feira a empresa indicou two hundred and fifty euros como objetivo",
+"drop_unit": "na segunda-feira a empresa indicou duzentos e cinquenta como objetivo",
+"fuse": "na segunda-feira a empresa indicou duzentosecinquenta euros como objetivo",
+"misplit": "na segunda-feira a empresa indicou duzentos e cinq uenta euros como objetivo"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_22",
+"kind": "eur",
+"caption": "No arquivo consta 40 € ao lado da entrada antiga.",
+"label": "no arquivo consta quarenta euros ao lado da entrada antiga",
+"seg": "quarenta euros",
+"unit": "euros",
+"dec": "",
+"hyps": {
+"swap": "no arquivo consta cinquenta euros ao lado da entrada antiga",
+"en_words": "no arquivo consta forty euros ao lado da entrada antiga",
+"drop_unit": "no arquivo consta quarenta ao lado da entrada antiga",
+"misplit": "no arquivo consta quar enta euros ao lado da entrada antiga"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_23",
+"kind": "price",
+"caption": "A escola anunciou 2,80 € para o próximo ano.",
+"label": "a escola anunciou dois euros e oitenta para o próximo ano",
+"seg": "dois euros e oitenta",
+"unit": "euros",
+"dec": "",
+"hyps": {
+"swap": "a escola anunciou dois euros e noventa para o próximo ano",
+"en_words": "a escola anunciou two euros e eighty para o próximo ano",
+"drop_unit": "a escola anunciou dois e oitenta para o próximo ano"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_24",
+"kind": "km",
+"caption": "O contrato prevê 30 km, disse o advogado.",
+"label": "o contrato prevê trinta quilómetros disse o advogado",
+"seg": "trinta quilómetros",
+"unit": "quilómetros",
+"dec": "",
+"hyps": {
+"swap": "o contrato prevê quarenta quilómetros disse o advogado",
+"en_words": "o contrato prevê thirty quilómetros disse o advogado",
+"drop_unit": "o contrato prevê trinta disse o advogado",
+"misplit": "o contrato prevê tri nta quilómetros disse o advogado"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_25",
+"kind": "kg",
+"caption": "Segundo o relatório, o valor atual é 5 kg e continua a subir.",
+"label": "segundo o relatório o valor atual é cinco quilogramas e continua a subir",
+"seg": "cinco quilogramas",
+"unit": "quilogramas",
+"dec": "",
+"hyps": {
+"swap": "segundo o relatório o valor atual é seis quilogramas e continua a subir",
+"en_words": "segundo o relatório o valor atual é five quilogramas e continua a subir",
+"drop_unit": "segundo o relatório o valor atual é cinco e continua a subir",
+"misplit": "segundo o relatório o valor atual é ci nco quilogramas e continua a subir"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_26",
+"kind": "km",
+"caption": "Na segunda-feira a empresa indicou 12 km como objetivo.",
+"label": "na segunda-feira a empresa indicou doze quilómetros como objetivo",
+"seg": "doze quilómetros",
+"unit": "quilómetros",
+"dec": "",
+"hyps": {
+"swap": "na segunda-feira a empresa indicou vinte e dois quilómetros como objetivo",
+"en_words": "na segunda-feira a empresa indicou twelve quilómetros como objetivo",
+"drop_unit": "na segunda-feira a empresa indicou doze como objetivo",
+"misplit": "na segunda-feira a empresa indicou do ze quilómetros como objetivo"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_27",
+"kind": "dec",
+"caption": "No arquivo consta 3,5 ao lado da entrada antiga.",
+"label": "no arquivo consta três vírgula cinco ao lado da entrada antiga",
+"seg": "três vírgula cinco",
+"unit": "",
+"dec": "vírgula",
+"hyps": {
+"swap": "no arquivo consta três vírgula seis ao lado da entrada antiga",
+"en_words": "no arquivo consta three point five ao lado da entrada antiga",
+"drop_dec": "no arquivo consta três cinco ao lado da entrada antiga"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_28",
+"kind": "dec",
+"caption": "A escola anunciou 2,5 para o próximo ano.",
+"label": "a escola anunciou dois vírgula cinco para o próximo ano",
+"seg": "dois vírgula cinco",
+"unit": "",
+"dec": "vírgula",
+"hyps": {
+"swap": "a escola anunciou dois vírgula seis para o próximo ano",
+"en_words": "a escola anunciou two point five para o próximo ano",
+"drop_dec": "a escola anunciou dois cinco para o próximo ano"
+}
+},
+{
+"lang": "pt",
+"id": "ka_pt_29",
+"kind": "dec",
+"caption": "O contrato prevê 12,5, disse o advogado.",
+"label": "o contrato prevê doze vírgula cinco disse o advogado",
+"seg": "doze vírgula cinco",
+"unit": "",
+"dec": "vírgula",
+"hyps": {
+"swap": "o contrato prevê doze vírgula seis disse o advogado",
+"en_words": "o contrato prevê twelve point five disse o advogado",
+"drop_dec": "o contrato prevê doze cinco disse o advogado"
+}
+}
+]

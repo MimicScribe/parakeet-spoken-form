@@ -9,6 +9,7 @@ Data-quality and scoring tools. Python 3, stdlib only for the tests (the number-
 | `score_heldout.py` | four-outcome held-out scoring |
 | `classread.py` | per language x class readout of one or more arms with paired cluster-bootstrap differences. Default: the symmetric table W (written in words), V (value right in either form), U_w / U_d (spoken unit or decimal word missing, among spans written in words / digits); `--legacy` prints the old asymmetric table. Needs `numpy` |
 | `symscore.py` | the symmetric value / unit / decimal scorer behind `classread.py` and `score_heldout.py` (digits and words read by one reader and graded by one procedure; `score_heldout.py --legacy` leaves it out) |
+| `test_known_answers.py`, `make_known_answer_fixture.py`, `fixtures/known_answer_rows.json` | known-answer tests of the scorers: synthetic rows (180, de es fr it nl pt) scored with hyp = label, hyp = caption and one deliberate corruption each; cases the scorer gets wrong are `expectedFailure` ("SCORER BUG"). The fixture is rebuilt with `num2words` (only needed for that) |
 | `number_outcomes.py` | number reader and scorer (CORE block identical to `pipeline/score_retrain.py`) |
 | `judge_reject.py`, `judge_plro.py` | row judges against a second transcript |
 | `wordfix_ext.py` | interior word repair from agreeing sources |
