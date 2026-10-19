@@ -52,9 +52,19 @@ class Replacing(unittest.TestCase):
         self.assertEqual(st["synthetic_replaced"]["de"]["refused_restored"], 1)
 
     def test_italian_form_recorded(self):
-        for sl, want in ((("de", "it"), CS.IT_SPLIT_ELIDED), (("it+",), True), (("de", "it-"), False)):
-            st = MB.build4(self.vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True, split_langs=sl)
-            self.assertIs(st["italian_split_elided"], want, sl)
+        # the restored-vowel forms ("it", "it+") are refused until the num_chars offsets are fixed (compound_split
+        # .IT_OFFSETS_FIXED); the form recording itself is checked with the guard lifted
+        import unittest.mock as mock
+
+        for sl in (("de", "it"), ("it+",)):
+            with self.assertRaises(ValueError):
+                MB.build4(self.vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True, split_langs=sl)
+        with mock.patch.object(CS, "IT_OFFSETS_FIXED", True):
+            for sl, want in ((("de", "it"), CS.IT_SPLIT_ELIDED), (("it+",), True)):
+                st = MB.build4(self.vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True, split_langs=sl)
+                self.assertIs(st["italian_split_elided"], want, sl)
+        st = MB.build4(self.vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True, split_langs=("de", "it-"))
+        self.assertIs(st["italian_split_elided"], False)
         st = MB.build4(self.vol, ("de",), rows_h=99, win_h=1, allow_no_judge=True, split_langs=("de",))
         self.assertNotIn("italian_split_elided", st)
         self.assertTrue(CS.IT_SPLIT_ELIDED)  # default: always split
