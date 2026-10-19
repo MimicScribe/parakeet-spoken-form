@@ -63,7 +63,62 @@ def test_short_readings_ignored():
     assert W.plan_edge_windows(rows, W.stream_gaps(4, rng), lambda a, b: (a + b) / 2, rng) == []
 
 
+def _edge_stream():
+    """Six rows; each holds an edge phrase "n1 n2 n3 n4 basis points" whose number reading (num_chars) is only n1..n4, and a
+    two-word edge phrase "a billion two" that is its own reading's superset (edge_spans only)."""
+    rows = []
+    for i in range(6):
+        ws = [f"w{i}x{k}" for k in range(9)] + ["n1", "n2", "n3", "n4", "basis", "points"] + [f"t{i}"]
+        r = _row(i, ws, [(9, 12)])
+        text = r["text"]
+        a = text.index("n1")
+        r["edge_spans"] = [[a, text.index("points") + len("points")]]
+        rows.append(r)
+    return rows
+
+
+def _cuts_inside_edge(rows, seeds, guard):
+    """Windows over many seeds; the number of windows that hold only part of an edge phrase."""
+    bad = total = 0
+    old = W.guard_ids
+    W.guard_ids = guard
+    try:
+        for seed in range(seeds):
+            rng = random.Random(seed)
+            gaps = W.stream_gaps(len(rows), rng)
+            starts, words, _ = W.layout(rows, gaps)
+            for w in W.plan_edge_windows(rows, gaps, lambda a, b: (a + b) / 2, rng):
+                total += 1
+                for i in range(len(rows)):
+                    toks = [n for n, x in enumerate(words) if x[4] == i and x[0] in ("n1", "n2", "n3", "n4", "basis", "points")]
+                    inside = [n for n in toks if w["j0"] <= n < w["j1"]]
+                    bad += 0 < len(inside) < len(toks)
+    finally:
+        W.guard_ids = old
+    return bad, total
+
+
+def test_edge_phrase_never_cut():
+    rows = _edge_stream()
+    # red on the base: with only the number reading protected ("basis points" may be cut off) the cut happens
+    bad_base, total = _cuts_inside_edge(rows, 60, W.reading_ids)
+    assert total > 20 and bad_base > 0, (bad_base, total)
+    bad, total = _cuts_inside_edge(rows, 60, W.guard_ids)
+    assert total > 20 and bad == 0, (bad, total)
+    # a row without edge_spans is unchanged
+    r = _row(0, ["a", "b", "n1", "n2", "n3", "n4"], [(2, 5)])
+    assert W.guard_ids(r) == W.reading_ids(r)
+    # tokens of one edge phrase share one key; a reading outside every edge span keeps its index
+    r = dict(_edge_stream()[0], num_chars=[[0, 2]] + _edge_stream()[0]["num_chars"])
+    ids = W.guard_ids(r)
+    ph = [ids[n] for n, t in enumerate(r["text"].split()) if t in ("n1", "n2", "n3", "n4", "basis", "points")]
+    assert len(set(ph)) == 1 and ph[0][0] == "edge"
+
+
+
+
 if __name__ == "__main__":
     test_edges()
+    test_edge_phrase_never_cut()
     test_short_readings_ignored()
     print("ok")

@@ -110,6 +110,15 @@ assert E.en_ids("oh", voc, 99) == [voc["O"]]
 ra = dict(r, id="en000_1_abcdefghijk_12_1")
 rb = dict(r, id="en000_1_abcdefghijk_99_0")
 assert E.shard_of(ra, 7) == E.shard_of(rb, 7)
+# edge phrases (multi-word, edge-case rows) are groups too: "twenty five basis points" is never split, whatever the readings hold
+g = E.number_groups("the bank cut twenty five basis points today", [[13, 24]], [[13, 38]])
+assert frozenset({3, 4, 5, 6}) in g, g
+g = E.number_groups("revenue of a billion two for the year", [], [[11, 24]])
+assert frozenset({2, 3, 4}) in g and len(g) == 1, g
+assert E.number_groups("we had two hundred cars", [], None) == E.number_groups("we had two hundred cars", [])
+assert E.split_groups([{"text": "cut twenty five basis points", "num_chars": [[4, 15]], "edge_spans": [[4, 28]]}],
+                      {(0, 1), (0, 2)}, [0]) != [], "a window ending after 'five' splits the phrase"
+
 ws = [{"duration": 15.0, "edge_number": i % 3 == 0, "id": i} for i in range(30)]
 sel = E.select_windows(ws, 15.0 * 10 / 3600)
 assert len(sel) == 10 and all(w["edge_number"] for w in sel)  # 10 edge-number windows exist: they come first

@@ -264,7 +264,8 @@ def voice_group(r: dict) -> str:
     """The pilot / readout group of a row's voice: a clone's accent group, or a Chirp locale."""
     if r.get("engine_src") == "chirp3hd":
         return "chirp:" + (r.get("locale") or "?")
-    return "clone:" + (r.get("accent") or "untagged")
+    acc = r.get("accent")
+    return "clone:" + (acc if acc and acc != "None" else "untagged")
 
 
 def assign(rows: list, lang: str, refs: list, cloud: list | None, chirp_share: float, seed: int = 19) -> dict:
@@ -279,7 +280,7 @@ def assign(rows: list, lang: str, refs: list, cloud: list | None, chirp_share: f
     nc = int(round(len(rows) * chirp_share)) if cloud else 0
     ch = [rows[i] for i in order[:nc]]
     cl = [rows[i] for i in order[nc:]]
-    vt = "ttsEC1v"
+    vt = "edgeA"        # clips land under ml/edgeA/<lang>/presynth/ (a new volume path)
     if ch:
         S.assign_voices(ch, lang, vt, None, cloud, "chirp", 4, S.RATES_WIDE)
     if lang == "en":

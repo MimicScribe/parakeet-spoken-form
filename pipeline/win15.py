@@ -73,13 +73,31 @@ def reading_ids(row: dict) -> list:
     return out
 
 
+def guard_ids(row: dict) -> list:
+    """reading_ids plus the row's `edge_spans` (the whole edge phrase: "a billion two", "twenty five basis points",
+    "fifty uh sixty", "septante cinq"): every token of one edge phrase carries one key, so no head / middle / tail window and
+    no cut puts an edge inside a multi-word phrase. A token in a number reading but outside every edge span keeps its
+    reading index; rows without edge_spans are unchanged."""
+    ids = reading_ids(row)
+    text, pos = row["text"], 0
+    for tok_i, tok in enumerate(text.split()):
+        a = text.index(tok, pos)
+        b = a + len(tok)
+        pos = b
+        for j, (x, y) in enumerate(row.get("edge_spans") or []):
+            if x < b and a < y:
+                ids[tok_i] = ("edge", j)
+                break
+    return ids
+
+
 def layout(rows: list, gaps: list) -> tuple:
     """Rows end to end, row i+1 starting gaps[i] s after row i ends. Returns (starts, words, total); words =
     [(tok, t0, t1, reading key or None, row i, token k)] in stream seconds. Every row must carry word times."""
     starts, words, t = [], [], 0.0
     for i, r in enumerate(rows):
         starts.append(t)
-        rid = r.get("_reading_ids") or reading_ids(r)
+        rid = r.get("_reading_ids") or guard_ids(r)
         for k, (tok, tm) in enumerate(zip(r["text"].split(), r["word_times"])):
             words.append((tok, tm[0] + t, tm[1] + t, None if rid[k] is None else (i, rid[k]), i, k))
         t += r["duration"] + (gaps[i] if i < len(rows) - 1 else 0.0)
@@ -782,7 +800,7 @@ if modal is not None:
                         continue
                     r["word_times"] = [[round(a, 3), round(b, 3)] for a, b in tm]
                     # English: a cut never splits a labeller reading or an unmarked run of number words
-                    groups = E.number_groups(r["text"], r.get("num_chars"))
+                    groups = E.number_groups(r["text"], r.get("num_chars"), r.get("edge_spans"))
                     rid = [None] * len(r["text"].split())
                     for gi, g in enumerate(groups):
                         for k in g:

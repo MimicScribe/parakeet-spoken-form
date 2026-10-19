@@ -182,9 +182,10 @@ def _norm_tok(t: str) -> str:
     return re.sub(r"[^a-z'-]", "", t.lower())
 
 
-def number_groups(text: str, num_chars: list) -> list:
-    """Token-index groups of one row that must not be split: each labeller reading (tokens overlapping its characters)
-    and each run of >= 2 English number words (joined by and / point / oh / a) that no reading touches. A run ends at a
+def number_groups(text: str, num_chars: list, edge_spans: list | None = None) -> list:
+    """Token-index groups of one row that must not be split: each labeller reading (tokens overlapping its characters),
+    each edge phrase (edge_spans: "a billion two", "fifty uh sixty", the whole multi-word phrase of an edge-case row) and
+    each run of >= 2 English number words (joined by and / point / oh / a) that no reading touches. A run ends at a
     token carrying sentence or list punctuation."""
     toks = text.split(" ")
     starts, p = [], 0
@@ -192,7 +193,7 @@ def number_groups(text: str, num_chars: list) -> list:
         starts.append((p, p + len(t)))
         p += len(t) + 1
     groups, marked = [], set()
-    for a, b in num_chars or []:
+    for a, b in list(edge_spans or []) + list(num_chars or []):
         g = [k for k, (x, y) in enumerate(starts) if x < b and a < y]
         if g:
             groups.append(frozenset(g))
@@ -226,7 +227,7 @@ def split_groups(stream: list, labelled: set, rows_i: list, groups_of=None) -> l
     out = []
     for i in rows_i:
         r = stream[i]
-        gs = groups_of(i) if groups_of else number_groups(r["text"], r.get("num_chars"))
+        gs = groups_of(i) if groups_of else number_groups(r["text"], r.get("num_chars"), r.get("edge_spans"))
         for g in gs:
             n = sum((i, k) in labelled for k in g)
             if 0 < n < len(g):
