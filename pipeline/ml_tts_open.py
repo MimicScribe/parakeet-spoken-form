@@ -38,7 +38,7 @@ qw_img = (modal.Image.debian_slim(python_version="3.11").apt_install("ffmpeg", "
           .env({"HF_HOME": "/root/hf"}))
 
 VOX_LANGS = ["de", "nl", "it", "es", "fr"]
-QW_LANG = {"de": "German", "it": "Italian", "es": "Spanish", "fr": "French", "pt": "Portuguese"}
+QW_LANG = {"de": "German", "it": "Italian", "es": "Spanish", "fr": "French", "pt": "Portuguese", "en": "English"}
 QW_BATCH = 6
 
 
@@ -160,6 +160,134 @@ def refs(tag: str, lang: str, per_gender: int = 6, shards: int = 2, exclude: str
     return {"lang": lang, "picked": [(m["spk"], m["gender"], m["snr_db"]) for m in meta], "cands": len(best)}
 
 
+EN_ACCENTS = {  # Common Voice accent text -> tag
+    "United States English": "US", "England English": "GB", "Australian English": "AU", "Canadian English": "CA",
+    "India and South Asia (India, Pakistan, Sri Lanka)": "IN", "Irish English": "IE", "New Zealand English": "NZ",
+    "Southern African (South Africa, Zimbabwe, Namibia)": "ZA", "Scottish English": "GB-SCO"}
+
+
+@app.function(image=refs_img, volumes={VOL: vol}, cpu=4, memory=32768, timeout=3 * 3600)
+def refs_en(tag: str, cv_shards: int = 6, cv_per_accent: int = 3, vctk_n: int = 6, libri_n: int = 6,
+            min_snr: float = 30.0):
+    """English clone references: Common Voice 17 en TRAIN split (CC0-1.0; CV's train / dev / test speakers are
+    disjoint; one 6-13 s clip per client, accent from the speaker's own tag, cv_per_accent per accent tag, both
+    genders where the tags allow), VCTK (CC-BY-4.0; accent from the corpus speaker table) and LibriTTS-R train-clean-360
+    (CC-BY-4.0; US read speech, LibriSpeech dev / test speakers are not in train). None of these corpora is in the
+    project's English evaluation sets (Earnings-22, the YouTube / parliament held-out lists). -> ml/<tag>/refs/en/"""
+    import collections
+    import io
+    import json
+    import random
+
+    import pandas as pd
+    import soundfile as sf
+    from huggingface_hub import HfApi, hf_hub_download
+
+    vol.reload()
+    out = f"{VOL}/ml/{tag}/refs/en"
+    assert not os.path.exists(out), out
+    rng = random.Random(1018)
+    api = HfApi()
+    meta = []
+
+    def keep(x, sr, spk, gender, accent, text, src, lic, clip, corpus):
+        p = f"{out}/{corpus}_{spk}.wav"
+        sf.write(p, x, sr, subtype="PCM_16")
+        meta.append({"lang": "en", "spk": f"{corpus}_{spk}", "gender": gender, "accent": accent, "clip_id": clip,
+                     "dur": round(len(x) / sr, 2), "snr_db": round(_snr_db(x, sr), 1), "text": text, "wav": p,
+                     "source": src, "license": lic})
+
+    os.makedirs(out)
+    # Common Voice 17 (fixie-ai parquet mirror of the CC0 release), train split
+    files = sorted(f for f in api.list_repo_files("fixie-ai/common_voice_17_0", repo_type="dataset")
+                   if f.startswith("en/train-"))
+    rng.shuffle(files)
+    by = collections.defaultdict(dict)
+    for fn in files[:cv_shards]:
+        df = pd.read_parquet(hf_hub_download("fixie-ai/common_voice_17_0", fn, repo_type="dataset"))
+        for r in df.itertuples():
+            acc = EN_ACCENTS.get(str(getattr(r, "accent", "") or "").strip())
+            if not acc or r.client_id in by[acc] or int(getattr(r, "down_votes", 0) or 0) > 0:
+                continue
+            try:
+                x, sr = sf.read(io.BytesIO(r.audio["bytes"]), dtype="float32")
+            except Exception:  # noqa: BLE001
+                continue
+            if x.ndim > 1:
+                x = x.mean(1)
+            if not 6 <= len(x) / sr <= 13 or _snr_db(x, sr) < min_snr:
+                continue
+            by[acc][r.client_id] = (x, sr, str(r.gender or ""), r.sentence, r.path)
+    for acc, d in sorted(by.items()):
+        ks = sorted(d)
+        rng.shuffle(ks)
+        g_seen, picked = collections.Counter(), []
+        for k in sorted(ks, key=lambda k: g_seen[d[k][2]]):
+            if len(picked) >= cv_per_accent:
+                break
+            picked.append(k)
+            g_seen[d[k][2]] += 1
+        for k in picked:
+            x, sr, g, t, clip = d[k]
+            keep(x, sr, k[:12], g or None, acc, t, "Common Voice 17.0 en train (Mozilla; fixie-ai/common_voice_17_0)",
+                 "CC0-1.0", clip, "cv")
+    # VCTK (sanchit-gandhi/vctk parquet), one clip per speaker
+    files = sorted(f for f in api.list_repo_files("sanchit-gandhi/vctk", repo_type="dataset") if f.endswith(".parquet"))
+    df = pd.read_parquet(hf_hub_download("sanchit-gandhi/vctk", files[0], repo_type="dataset"))
+    cols = set(df.columns)
+    seen = {}
+    for r in df.sample(frac=1, random_state=1018).itertuples():
+        spk = str(r.speaker_id)
+        if spk in seen:
+            continue
+        x, sr = sf.read(io.BytesIO(r.audio["bytes"]), dtype="float32")
+        if x.ndim > 1:
+            x = x.mean(1)
+        if not 3 <= len(x) / sr <= 13:
+            continue
+        seen[spk] = (x, sr, str(getattr(r, "gender", "") or ""), str(getattr(r, "accent", "") or ""), r.text,
+                     str(getattr(r, "text_id", "") or ""))
+    acc_first = sorted(seen, key=lambda k: (seen[k][3] == "English", k))  # other accents first (Scottish, Irish, ...)
+    for k in acc_first[:vctk_n]:
+        x, sr, g, acc, t, clip = seen[k]
+        keep(x, sr, k, g or None, f"VCTK:{acc}", t, "VCTK 0.92 (CSTR Edinburgh; sanchit-gandhi/vctk)", "CC-BY-4.0",
+             clip, "vctk")
+    # LibriTTS-R train-clean-360
+    files = sorted(f for f in api.list_repo_files("mythicinfinity/libritts_r", repo_type="dataset")
+                   if "train.clean.360" in f)
+    df = pd.read_parquet(hf_hub_download("mythicinfinity/libritts_r", files[0], repo_type="dataset"))
+    seen = {}
+    for r in df.sample(frac=1, random_state=1018).itertuples():
+        spk = str(r.speaker_id)
+        if spk in seen:
+            continue
+        x, sr = sf.read(io.BytesIO(r.audio["bytes"]), dtype="float32")
+        if x.ndim > 1:
+            x = x.mean(1)
+        if not 6 <= len(x) / sr <= 13 or _snr_db(x, sr) < min_snr:
+            continue
+        seen[spk] = (x, sr, r.text_normalized, r.id)
+    for k in sorted(seen)[:libri_n]:
+        x, sr, t, clip = seen[k]
+        f0 = _f0(x, sr)
+        keep(x, sr, k, "female" if f0 >= 165 else "male" if 0 < f0 < 145 else None, "US", t,
+             "LibriTTS-R train-clean-360 (mythicinfinity/libritts_r)", "CC-BY-4.0", clip, "libritts")
+    with open(f"{out}/meta.json", "w") as f:
+        json.dump({"refs": meta, "cv_shards": files[:0], "vctk_columns": sorted(cols)}, f, ensure_ascii=False, indent=1)
+    vol.commit()
+    return {"n": len(meta), "by_accent": dict(collections.Counter(m["accent"] for m in meta))}
+
+
+@app.local_entrypoint()
+def run_refs_en(tag: str = "ttsSYM1r_en"):
+    print(refs_en.remote(tag))
+
+
+def _say(r):
+    """What the engine is given: the row's synthesiser text where it has one (English letter names), else the label."""
+    return r.get("synth_text") or r["text"]
+
+
 def _rows(path):
     import json
     return [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
@@ -218,9 +346,9 @@ def synth_qwen(planned: str, part: int, parts: int):
                 continue
             t1 = time.time()
             torch.manual_seed(k + len(refwav))
-            cap = max(160, int(2.0 * max(len(r["text"]) for r in b)))
+            cap = max(160, int(2.0 * max(len(_say(r)) for r in b)))
             try:
-                wavs, sr = m.generate_voice_clone(text=[r["text"] for r in b], language=[QW_LANG[r["lang"]] for r in b],
+                wavs, sr = m.generate_voice_clone(text=[_say(r) for r in b], language=[QW_LANG[r["lang"]] for r in b],
                                                   voice_clone_prompt=prompt, max_new_tokens=cap)
             except Exception as e:  # noqa: BLE001  (one bad batch must not end the part)
                 for r in b:
@@ -276,7 +404,7 @@ def synth_cb(planned: str, part: int, parts: int):
             if cur != r["ref_wav"]:
                 m.prepare_conditionals(r["ref_wav"], exaggeration=0.5)
                 cur = r["ref_wav"]
-            w = m.generate(r["text"], language_id=r["lang"]).squeeze(0).numpy()
+            w = m.generate(_say(r), language_id=r["lang"]).squeeze(0).numpy()
         except Exception as e:  # noqa: BLE001
             _done(r["presynth"], {"id": r["id"], "status": "error", "err": repr(e)[:200]}, log)
             continue
@@ -349,10 +477,14 @@ def en_verify(planned: str, out_tag: str, part: int, parts: int):
     bump = lambda k: st.__setitem__(k, st.get(k, 0) + 1)  # noqa: E731
     for r in rows:
         try:
-            x = syn(dict(r, text=r["synth_text"]))
+            if r.get("engine") == "presynth":  # cloned engines (synth_qwen / synth_cb wrote the clip)
+                x, _sr = sf.read(r["presynth"], dtype="float32")
+                x = x.mean(1) if x.ndim > 1 else x
+            else:
+                x = syn(dict(r, text=r["synth_text"]))
         except Exception:  # noqa: BLE001
             x = None
-        if x is None:
+        if x is None or len(x) < 1600:
             bump("synth_error")
             continue
         x = x / (np.abs(x).max() + 1e-9) * 10 ** (-3 / 20) * 10 ** (rng.uniform(-12, 0) / 20)
@@ -382,22 +514,69 @@ def en_verify(planned: str, out_tag: str, part: int, parts: int):
         if any(t is None for t in wt):
             bump("drop_align")
             continue
-        os.makedirs(os.path.dirname(r["presynth"]), exist_ok=True)
-        sf.write(r["presynth"], x, 16000, subtype="PCM_16")
+        clip = r["presynth"] if r.get("engine") != "presynth" else f"{out}/wav/{r['id']}.wav"
+        os.makedirs(os.path.dirname(clip), exist_ok=True)
+        assert r.get("engine") != "presynth" or not os.path.exists(clip), clip
+        sf.write(clip, x, 16000, subtype="PCM_16")
         bump("kept")
-        kept.append({"audio_filepath": r["presynth"], "duration": round(len(x) / 16000, 3), "text": r["text"],
+        kept.append({"audio_filepath": clip, "duration": round(len(x) / 16000, 3), "text": r["text"],
                      "lang": "en", "src": "tts", "id": r["id"], "origin": f"tts/{r['voice']}", "kinds": r["kinds"],
                      "template": r["template"], "cls": r["cls"], "ckey": r["ckey"], "spans": r["spans"],
                      "num_chars": r["num_chars"], "gclasses": r["gclasses"],
                      "word_times": [[round(a, 3), round(b, 3)] for a, b in wt], "cer_ctc": round(cer, 3), "fit": fit,
                      "greedy": g, "split": r["split"], "voice": r["voice"], "voice_license": r["voice_license"],
-                     "speed": r["speed"], "engine": "kokoro", "engine_src": "kokoro"})
+                     "speed": r["speed"], "engine": r.get("engine", "kokoro"), "engine_src": r.get("engine_src", "kokoro"),
+                     "accent": r.get("accent")})
     with open(rp, "w", encoding="utf-8") as f:
         for k in kept:
             f.write(json.dumps(k, ensure_ascii=False) + "\n")
     json.dump(dict(st, planned=len(rows)), open(f"{out}/stats_{part}.json", "w"), indent=1)
     vol.commit()
     return dict(st, planned=len(rows), part=part)
+
+
+man_img = en_img.add_local_python_source("mix_build", "common") if en_img is not None else None
+
+
+@app.function(image=man_img, volumes={VOL: vol}, cpu=4, memory=8192, timeout=3 * 3600)
+def en_manifest(rows_path: str, name: str, aug_frac: float = 0.75, seed: int = 47) -> dict:
+    """English manifest d1/en4_ok/<name>_en_train.jsonl (a NEW path) from verified rows (ml_tts_symbol finalize):
+    aug_frac of the rows point at a degraded copy (mix_build.Degrader: noise / reverb / phone band; 0.75 = the long
+    sets' rate), the rest at the clean clip; the fields of the earlier English synthetic parts."""
+    import json
+    import random as _r
+
+    import mix_build as MB
+
+    vol.reload()
+    dest = f"{VOL}/d1/en4_ok/{name}_en_train.jsonl"
+    assert not os.path.exists(dest), dest
+    rows = _rows(f"{VOL}/{rows_path}")
+    deg = MB.Degrader(f"{VOL}/slr28/RIRS_NOISES", seed)
+    rng = _r.Random(seed)
+    adir = f"{VOL}/ml/{name}/en/aug"
+    os.makedirs(adir, exist_ok=True)
+    n_aug = 0
+    with open(dest, "w", encoding="utf-8") as f:
+        for r in rows:
+            x = {"audio_filepath": r["audio_filepath"], "duration": r["duration"], "text": r["text"], "id": r["id"],
+                 "lang": "en", "origin": "tts", "src": r.get("engine_src", "kokoro"), "engine": r.get("engine"),
+                 "split": "train", "kinds": r["kinds"], "template": r["template"], "cls": r.get("cls"), "value": None,
+                 "voice": r["voice"], "accent": r.get("accent"), "speed": r["speed"], "num_chars": r["num_chars"],
+                 "word_times": r["word_times"]}
+            if rng.random() < aug_frac:
+                o = f"{adir}/{r['id']}.wav"
+                x["aug"] = deg(r["audio_filepath"], o)
+                x["audio_filepath"] = o
+                n_aug += 1
+            f.write(json.dumps(x, ensure_ascii=False) + "\n")
+    vol.commit()
+    return {"rows": len(rows), "aug": n_aug, "dest": dest}
+
+
+@app.local_entrypoint()
+def run_en_manifest(rows_path: str, name: str):
+    print(en_manifest.remote(rows_path, name))
 
 
 @app.local_entrypoint()

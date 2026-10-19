@@ -774,7 +774,7 @@ def assign_supersedes(rows: list, pool: dict, rng) -> dict:
 
 EN_KOKORO = ("af_heart", "af_bella", "af_sarah", "af_sky", "am_adam", "am_michael", "am_onyx", "bf_emma",
              "bf_isabella", "bf_lily", "bm_george", "bm_daniel")  # ml_tts_fill.EN_KOKORO_TRAIN (dev voices left out)
-EN_SLOT_RE = re.compile(r"\{([a-z_]+?)(\d?)\}")
+EN_SLOT_RE = re.compile(r"\{([a-z_0-9]+?)(\d?)\}")
 # English readings (readings.KINDS, the English label rules) a sentence may not use: generator slips ("a eighth",
 # "three halves", "two quarters") and quarter forms that do not fit after "Our"
 EN_BAD = {"fraction": re.compile(r"\ba [aeiou]|\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven) (?:halves|quarters|thirds)\b"
@@ -782,14 +782,37 @@ EN_BAD = {"fraction": re.compile(r"\ba [aeiou]|\b(?:two|three|four|five|six|seve
           "quarter": re.compile(r"^the\b")}
 
 
-def plan_en(n: int, tag: str, seed: int, rep: dict) -> list:
+def _en_year_fwd(r, R):
+    y = r.randint(2026, 2060)
+    return R.year(y) if r.random() < 0.75 else R.cardinal(y)
+
+
+def _en_money_x(r, R):
+    """Prices in other English-speaking currencies: Australian / Canadian dollars, pounds and pence, rupees, euros."""
+    n = r.randint(2, 9999) if r.random() < 0.7 else r.randint(10, 999)
+    unit = r.choice(["Australian dollars", "Canadian dollars", "pounds", "pounds", "rupees", "euros", "rand"])
+    if unit == "pounds" and r.random() < 0.4:
+        return f"{R.cardinal(n)} pounds {R.cardinal(r.randint(1, 99))}" if r.random() < 0.5 else \
+            f"{R.cardinal(n)} pounds and {R.cardinal(r.randint(2, 99))} pence"
+    return f"{R.cardinal(n)} {unit}"
+
+
+def _en_decimal_uk(r, R):
+    """UK "nought point" decimals below one."""
+    return "nought point " + R.digits(str(r.randint(1, 99)))
+
+
+EN_CUSTOM = {"year_fwd": _en_year_fwd, "money_x": _en_money_x, "decimal_uk": _en_decimal_uk}
+
+
+def plan_en(n: int, tag: str, seed: int, rep: dict, carriers=("en",), avoid=frozenset()) -> list:
     """English rows: carriers_sym2.json "en" sentences, each slot a readings.KINDS reading (the English label rules:
     spoken form, years as words); math slots ma / mb / mc are readings.cardinal of the computed values. The label is the
     readings; the synthesiser gets readings.tts_form (letter names, "ex")."""
     import readings as R
 
     rng = random.Random(f"{tag}|{seed}|en")
-    tpls = load_carriers("en", "carriers_sym2.json")
+    tpls = [t for c in carriers for t in load_carriers(c, "carriers_sym2.json")]
     used = collections.defaultdict(collections.Counter)
     rows, seen, drops = [], set(), collections.Counter()
     tries = 0
@@ -807,6 +830,17 @@ def plan_en(n: int, tag: str, seed: int, rep: dict) -> list:
             tts += body[pos:m.start()]
             if k in ("ma", "mb", "mc"):
                 slot = R.cardinal(mv[k])
+            elif k in EN_CUSTOM:
+                slot = None
+                for _ in range(8):
+                    x = EN_CUSTOM[k](rng, R)
+                    u = used[k]
+                    if u[x.lower()] < max(VALUE_MIN, VALUE_SHARE * sum(u.values())):
+                        slot = x
+                        break
+                if slot is None:
+                    ok = False
+                    break
             else:
                 slot = None
                 for _ in range(8):
@@ -814,7 +848,7 @@ def plan_en(n: int, tag: str, seed: int, rep: dict) -> list:
                     if EN_BAD.get(k) and EN_BAD[k].search(x.replace("|", " ")):
                         continue
                     u = used[k]
-                    if u[x] < max(VALUE_MIN, VALUE_SHARE * sum(u.values())):
+                    if u[x.replace("|", " ").lower()] < max(VALUE_MIN, VALUE_SHARE * sum(u.values())):
                         slot = x
                         break
                 if slot is None:
@@ -836,8 +870,11 @@ def plan_en(n: int, tag: str, seed: int, rep: dict) -> list:
         text += body[pos:]
         tts += body[pos:]
         tts = tts[:1].upper() + tts[1:]
-        if text in seen:
+        if text in seen or text in avoid:
             drops["duplicate"] += 1
+            continue
+        if "{" in text:
+            drops["slot_left"] += 1
             continue
         seen.add(text)
         for k, (a, b) in zip(kinds, offs):
@@ -896,6 +933,29 @@ def assign_voices(rows: list, lang: str, vtag: str, refs: list | None = None, cl
                      voice_path=None, speaker=None, speed=sp, pitch=1.0,
                      presynth=f"{VOL}/ml/{vtag}/{lang}/presynth/{r['id']}.wav")
     assert not any(is_heldout_voice(lang, r["voice"]) for r in rows)
+
+
+def assign_voices_en2(rows: list, refs: list, vtag: str) -> dict:
+    """English cloned voices: within each accent the references alternate Qwen3 / Chatterbox (both engines on every
+    accent); rows round robin over the references in a seeded order, rates 0.9-1.25."""
+    rng = random.Random(f"{vtag}|voices|en2")
+    by = collections.defaultdict(list)
+    for v in sorted(refs, key=lambda v: v["spk"]):
+        by[v["accent"]].append(v)
+    pool, k = [], 0
+    for acc in sorted(by):  # one running toggle: each accent gets both engines, the totals stay even
+        for v in by[acc]:
+            pool.append(dict(v, engine=("qwen3", "chatterbox")[k % 2]))
+            k += 1
+    order = list(range(len(rows)))
+    rng.shuffle(order)
+    for k, i in enumerate(order):
+        r, v = rows[i], pool[k % len(pool)]
+        r.update(engine="presynth", engine_src=v["engine"], voice=f"{v['engine']}:en:{v['spk']}", ref_wav=v["wav"],
+                 ref_text=v["text"], accent=v["accent"],
+                 voice_license=LICENCE[v["engine"]].format(src=v["source"], lic=v["license"]), voice_path=None,
+                 speaker=None, speed=rng.choice(RATES), pitch=1.0, presynth=f"{VOL}/ml/{vtag}/en/presynth/{r['id']}.wav")
+    return dict(collections.Counter((r["engine_src"], r["accent"]) for r in rows))
 
 
 # ------------------------------------------------------------------------------------------------ finalize
@@ -959,6 +1019,25 @@ def numbers_agree(label: str, greedy: str, lang: str, N, readings=()) -> bool:
             if _fold(w) and not N.extract_numbers(w, lang) and _fold(w) not in have:
                 return False
     return True
+
+
+def spread_trim(rows: list, rng, share: float = VALUE_SHARE, min_n: int = VALUE_MIN, skip=("ma", "mb", "mc")) -> tuple:
+    """Rows kept so no reading of a slot kind passes `share` of that kind's spans (after min_n); a row carrying an
+    over-share reading is dropped whole. English rows (spans carry their slot kind and reading). Math operands are
+    exempt (their range is the arithmetic's)."""
+    rows = list(rows)
+    rng.shuffle(rows)
+    tot = collections.Counter(sp["kind"] for r in rows for sp in r["spans"] if sp["kind"] not in skip)
+    got, keep, dropped = collections.defaultdict(collections.Counter), [], collections.Counter()
+    for r in rows:
+        ks = [(sp["kind"], sp["reading"].lower()) for sp in r["spans"] if sp["kind"] not in skip]
+        if any(got[k][v] + 1 > max(min_n, share * tot[k]) for k, v in ks):
+            dropped[next(k for k, v in ks if got[k][v] + 1 > max(min_n, share * tot[k]))] += 1
+            continue
+        for k, v in ks:
+            got[k][v] += 1
+        keep.append(r)
+    return keep, {"dropped_by_kind": dict(dropped), "kept": len(keep), "in": len(rows)}
 
 
 def finalize(rows: list, lang: str) -> tuple:
@@ -1030,6 +1109,8 @@ def main():
     e.add_argument("--tag", default="ttsSYM1")
     e.add_argument("--seed", type=int, default=18)
     e.add_argument("--out", required=True)
+    e.add_argument("--carriers", default="en", help="carrier keys in carriers_sym2.json (en,en2)")
+    e.add_argument("--avoid", default="", help="planned rows of an earlier English set (no repeated sentence)")
     f = sub.add_parser("finalize")
     f.add_argument("--rows", required=True, help="CTC-verified rows.jsonl (several: comma-separated)")
     f.add_argument("--out", required=True)
@@ -1082,7 +1163,8 @@ def main():
         json.dump(summary, open(os.path.join(a.out, "plan_report.json"), "w"), ensure_ascii=False, indent=1)
     elif a.cmd == "plan-en":
         rep: dict = {}
-        rows = plan_en(a.n, a.tag, a.seed, rep)
+        rows = plan_en(a.n, a.tag, a.seed, rep, tuple(a.carriers.split(",")),
+                       frozenset(r["text"] for r in _rows(a.avoid)) if a.avoid else frozenset())
         os.makedirs(a.out, exist_ok=True)
         _write(os.path.join(a.out, "planned_en.jsonl"), rows)
         rep["chars"] = sum(len(r["synth_text"]) for r in rows)

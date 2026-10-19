@@ -962,7 +962,8 @@ if modal is not None:
 
     @app.function(image=image, volumes={VOL: vol}, gpu="L4", timeout=3 * 3600, max_containers=7)
     def build_edge(lang: str, tag: str, set_tag: str, hours: float, seed: int = 1) -> dict:
-        """Edge windows (plan_edge_windows) from one synthetic set's verified rows (ml/<set_tag>/<lang>/rows.jsonl,
+        """Edge windows (plan_edge_windows) from synthetic sets' verified rows (ml/<set_tag>/<lang>/rows.jsonl, set_tag
+        "a,b" for several sets;
         clean audio, one voice per stream); rows with a letter+digit code are left out (the build re-labels codes in
         rows, not in windows). The same CTC re-decode / edge / alignment checks as build_lang. A build keeps a window
         only when every parent row is one it trains on (select_for_build), so windows are cut from the whole set."""
@@ -977,7 +978,7 @@ if modal is not None:
         rng = random.Random(f"win15edge-{lang}-{seed}")
         st = Counter()
         ctc = _ctc(lang)
-        src = [dict(x, src="tts", _set=set_tag) for x in _rows(f"{VOL}/ml/{set_tag}/{lang}/rows.jsonl")]
+        src = [dict(x, src="tts", _set=t) for t in set_tag.split(",") for x in _rows(f"{VOL}/ml/{t}/{lang}/rows.jsonl")]
         syn = [x for x in src if C.has_times(x) and not any(sp.get("kind") == "alnum" for sp in x.get("spans") or [])]
         st["source_rows"], st["source_alnum_or_untimed"] = len(src), len(src) - len(syn)
 
