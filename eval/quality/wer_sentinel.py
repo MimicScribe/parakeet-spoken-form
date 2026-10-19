@@ -115,7 +115,7 @@ def bootstrap_delta(a: dict, b: dict, langs, reps: int = 2000, seed: int = 7) ->
     rng = np.random.default_rng(seed)
     idx = rng.integers(0, len(ids), size=(reps, len(ids)))
     d = 100.0 * (ea[idx].sum(1) - eb[idx].sum(1)) / n[idx].sum(1)
-    return 100.0 * (ea.sum() - eb.sum()) / n.sum(), float(np.percentile(d, 2.5)), float(np.percentile(d, 97.5))
+    return float(100.0 * (ea.sum() - eb.sum()) / n.sum()), float(np.percentile(d, 2.5)), float(np.percentile(d, 97.5))
 
 
 def load_hyps(path: Path) -> list[dict]:
@@ -167,7 +167,7 @@ def report(arms: dict, control: str) -> tuple[str, dict]:
             d, lo, hi = bootstrap_delta(arms[a], ctrl, langs)
             bar = BAR_LANG if len(langs) == 1 else BAR_POOLED
             over = d > bar
-            summary["delta"].setdefault(a, {})[name] = {"d": d, "lo": lo, "hi": hi, "over_bar": over}
+            summary["delta"].setdefault(a, {})[name] = {"d": d, "lo": lo, "hi": hi, "over_bar": bool(over)}
             if over:
                 bad.append(name)
             if len(langs) > 1 or over or abs(d) >= 0.3:
