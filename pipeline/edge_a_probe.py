@@ -33,13 +33,17 @@ def skip(w: str) -> bool:
     return len(k) < R.WORD_MIN_LETTERS or w.lower() in FUNC or w.lower() in CONN
 
 
+# how a reader spells a spoken filler: the filler is "heard" when ANY of these beats its deletion
+FILLER_SPELL = ("uh", "um", "er", "a", "ah", "eh", "euh", "hm", "mm", "eu", "e", "o", "hum", "heu", "este")
+
+
 def probes(T: str, a: int, b: int, vocab: dict) -> list:
-    """[(kind, text, word)] kind in del / wdel / wsub / fdel (filler deleted)."""
+    """[(kind, text, word)] kind in del / wdel / wsub / fdel (filler deleted; the filler probes are scored apart, see strict_span)."""
     out = [("del", tidy(T[:a] + " " + T[b:]), None)]
     for s, e, w in words(T, a, b):
         lw = w.lower()
         if lw in FILLER:
-            out.append(("fdel", tidy(T[:s] + T[e:]), w))
+            out.append(("fdel", tidy(T[:s] + T[e:]), (s, e, w)))
             continue
         if skip(w):
             continue
@@ -59,7 +63,11 @@ def strict_span(nll, T: str, a: int, b: int, vocab: dict, base: float | None = N
     worst = {}
     low = []
     for kind, text, w in probes(T, a, b, vocab):
-        d = nll(text) - base
+        if kind == "fdel":  # deletion vs the filler under its best spelling (a reader writes "uh" as a / er / um ...)
+            fs, fe, w = w
+            d = nll(text) - min([base] + [nll(T[:fs] + v + T[fe:]) for v in FILLER_SPELL])
+        else:
+            d = nll(text) - base
         if m[kind] is None or d < m[kind]:
             m[kind] = d
             worst[kind] = [w, round(d, 1)]

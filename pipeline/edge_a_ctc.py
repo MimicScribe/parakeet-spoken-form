@@ -24,6 +24,22 @@ image = T.image.add_local_python_source("en_win", "label_gpu", "labeller", "read
 app = modal.App("parakeet-edge-a-ctc")
 
 
+# how the readers write a spoken letter name ("Q" heard as "cu" / "queue"): both sides are mapped to the letter before the
+# reading-heard check, so a letter code ("Q three", "T trois") is judged on its number word and its letter
+LETTER_SPELL = {"en": {"cu": "q", "que": "q", "queue": "q", "cue": "q", "kew": "q", "kay": "k", "ess": "s", "pee": "p", "eff": "f",
+                       "tea": "t", "tee": "t", "ex": "x", "why": "y", "wy": "y"},
+                "es": {"cu": "q", "ku": "k", "ka": "k", "te": "t", "efe": "f"},
+                "fr": {"te": "t", "cu": "q", "ka": "k", "ef": "f"}}
+
+
+def letters_norm(s: str, lang: str) -> str:
+    import unicodedata
+
+    m = LETTER_SPELL.get(lang, {})
+    fold = lambda w: "".join(c for c in unicodedata.normalize("NFD", w) if not unicodedata.combining(c))  # noqa: E731
+    return " ".join(m.get(fold(w), w) for w in s.split())
+
+
 def _rows(p):
     return [json.loads(l) for l in open(p, encoding="utf-8") if l.strip()]
 
@@ -58,10 +74,10 @@ def check(planned: str, lang: str, out: str, part: int, parts: int, write_all: b
             def greedy(self, lp):
                 return EW.greedy_norm(super().greedy(lp))
         ctc = EnCTC()
-        norm = EW.greedy_norm
+        norm = lambda s: letters_norm(EW.greedy_norm(s), "en")  # noqa: E731
     else:
         ctc = D.LangCTC(lang, model=D.STRONG.get(lang))
-        norm = lambda s: s  # noqa: E731
+        norm = lambda s: letters_norm(s, lang)  # noqa: E731
     vocab = P.edge_vocab(lang, [c.make(k, random.Random(k)).label for c in E.inventory(lang) for k in c.values])
     rng = random.Random(f"edgeAc|{part}|{lang}")
     st: dict = {}
@@ -82,16 +98,17 @@ def check(planned: str, lang: str, out: str, part: int, parts: int, write_all: b
         lp = ctc.lp(x)
         g = ctc.greedy(lp)
         T_ = r["text"]
-        cer = C.cer(norm(T_) if lang == "en" else T_, g)
+        cer = C.cer(EW.greedy_norm(T_) if lang == "en" else T_, g)
+        gn = norm(g)
         fit, why = "exact", ""
         if cer > T.CER_MAX:
             why = "cer"
         else:
             for a, b in r["num_chars"]:
                 rd = norm(T_[a:b])
-                if D.fits(rd, g):
+                if D.fits(rd, gn):
                     continue
-                if D.fits(rd, g, fuzzy=True):
+                if D.fits(rd, gn, fuzzy=True):
                     fit = "fuzzy"
                     continue
                 fit, why = None, "reading_not_heard"
@@ -104,7 +121,7 @@ def check(planned: str, lang: str, out: str, part: int, parts: int, write_all: b
         if base != float("inf"):
             for a, b in r["edge_spans"]:
                 s = P.strict_span(lambda t: ctc.nll(lp, t), T_, a, b, vocab, base)
-                s.update(a=a, b=b, exact_fit=D.fits(norm(T_[a:b]), g))
+                s.update(a=a, b=b, exact_fit=D.fits(norm(T_[a:b]), gn))
                 strict.append(s)
         basic_ok = not why
         strict_ok = bool(strict) and all(s["ok"] for s in strict)

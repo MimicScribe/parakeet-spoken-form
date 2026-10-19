@@ -41,11 +41,14 @@ assert [w for _, _, w in P.probes(T2, a2, b2, {}) if w in ("and", "to", "a")] ==
 T3 = "It cost twenty uh thirty euros."
 a3, b3 = T3.index("twenty"), T3.index(" euros")
 kinds = {k for k, _, _ in P.probes(T3, a3, b3, vocab)}
-assert "fdel" in kinds and {w for k, _, w in P.probes(T3, a3, b3, vocab) if k == "fdel"} == {"uh"}
+assert "fdel" in kinds and {w[2] for k, _, w in P.probes(T3, a3, b3, vocab) if k == "fdel"} == {"uh"}
 s = P.strict_span(scorer("it cost twenty uh thirty euros"), T3, a3, b3, vocab)
 assert s["ok"] and s["m"]["fdel"] >= 2, s
 s = P.strict_span(scorer("it cost twenty thirty euros"), T3, a3, b3, vocab)
 assert not s["ok"] and s["why"] in ("fdel", "wdel", "wsub", "del"), s
+# a reader that writes the filler as "er": the filler is still heard (best spelling beats deletion)
+s = P.strict_span(scorer("it cost twenty er thirty euros"), T3, a3, b3, vocab)
+assert s["ok"] and s["m"]["fdel"] >= 2, s
 # the vocabulary of a language: pack words and number words, 3+ letters
 v = P.edge_vocab("en", ["twenty five bips", "a billion two", "uh"])
 assert "bips" in v.values() and "uh" not in v.values() and "a" not in v.values()
