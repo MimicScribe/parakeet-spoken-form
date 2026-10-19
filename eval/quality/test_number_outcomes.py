@@ -535,3 +535,41 @@ class EnglishWordFormReader(unittest.TestCase):
 
     def test_decimal_and_is_scoped_to_the_current_number(self):
         self.assertEqual([min(n.vals) for n in N.extract_numbers("two point five one hundred and twenty", "en")][-1], 120)
+
+
+class LetterDigitCodes(unittest.TestCase):
+    """English reference writes a code with digits (B2B, 5G, Q4, COVID-19); the policy label and the model say the letters as
+    letters and the number as a word (B two B, five G, Q four, COVID nineteen). Both sides must read the same value; the
+    homophone "to" is not a number."""
+
+    def oc(self, ref, hyp):
+        return [(o["value"], o["outcome"]) for o in N.number_outcomes(ref, hyp, "en")]
+
+    def test_policy_form_matches_the_digit_code(self):
+        for ref, hyp, v in (("the B2B market", "the B two B market", "2"), ("the B2C arm", "the B two C arm", "2"),
+                            ("a 5G network", "a five G network", "5"), ("up in Q4", "up in Q four", "4"),
+                            ("the COVID-19 wave", "the COVID nineteen wave", "19"), ("at Tele2 today", "at Tele two today", "2"),
+                            ("the G20 summit", "the G twenty summit", "20"), ("some CO2 data", "some CO two data", "2"),
+                            ("an MP3 file", "an MP three file", "3"), ("a 4K screen", "a four K screen", "4"),
+                            ("a 3D print", "a three D print", "3"), ("the PS5 launch", "the PS five launch", "5")):
+            self.assertEqual(self.oc(ref, hyp), [(v, "WORDS_RIGHT_VALUE")], (ref, hyp))
+
+    def test_same_value_either_way_round(self):
+        # a words reference against a digit hypothesis (the model keeps the digits)
+        self.assertEqual(self.oc("the B two B market", "the B2B market"), [("2", "DIGITS_RIGHT_VALUE")])
+        self.assertEqual(self.oc("in Q four we grew", "in Q4 we grew"), [("4", "DIGITS_RIGHT_VALUE")])
+
+    def test_neighbours_are_not_merged_into_the_code(self):
+        self.assertEqual(self.oc("in Q4 2020 we grew", "in Q four twenty twenty we grew"),
+                         [("4", "WORDS_RIGHT_VALUE"), ("2020", "WORDS_RIGHT_VALUE")])
+        self.assertEqual(self.oc("the B2B 5G market", "the B two B five G market"), [("2", "WORDS_RIGHT_VALUE"), ("5", "WORDS_RIGHT_VALUE")])
+        self.assertEqual(self.oc("H1N1 and F1", "H one N one and F one"), [("1", "WORDS_RIGHT_VALUE")] * 3)
+
+    def test_separator_variants_read_alike(self):
+        self.assertEqual(self.oc("the COVID-19 pandemic", "the COVID-nineteen pandemic"), [("19", "WORDS_RIGHT_VALUE")])
+        self.assertEqual(self.oc("the G20 summit", "the G-twenty summit"), [("20", "WORDS_RIGHT_VALUE")])
+
+    def test_the_homophone_is_a_dropped_number(self):  # red-on-base: control (the reader never took "to" for two)
+        self.assertEqual(self.oc("the B2B market", "the b to b market"), [("2", "DROPPED")])
+        self.assertEqual(self.oc("at Tele2 today", "at teleto today"), [("2", "DROPPED")])
+        self.assertEqual(self.oc("in Q4", "in q for"), [("4", "DROPPED")])
