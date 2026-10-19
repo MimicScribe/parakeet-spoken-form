@@ -286,7 +286,7 @@ def _build() -> tuple[dict, dict, dict]:
     # --- English
     en = _lex({"Z": {0: "zero"}, "U": {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine"},
                "T": {10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen", 14: "fourteen", 15: "fifteen", 16: "sixteen", 17: "seventeen", 18: "eighteen", 19: "nineteen"},
-               "D": {20: "twenty", 30: "thirty", 40: "forty", 50: "fifty", 60: "sixty", 70: "seventy", 80: "eighty", 90: "ninety"},
+               "D": {20: "twenty twenties", 30: "thirty thirties", 40: "forty forties", 50: "fifty fifties", 60: "sixty sixties", 70: "seventy seventies", 80: "eighty eighties", 90: "ninety nineties"},
                "H": {100: "hundred hundreds"}, "S": {10**3: "thousand thousands", 10**6: "million millions", 10**9: "billion billions", 10**12: "trillion"}})
     _ords(en, {"U": {1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth", 6: "sixth", 7: "seventh", 8: "eighth", 9: "ninth"},
                "T": {10: "tenth", 11: "eleventh", 12: "twelfth", 13: "thirteenth", 14: "fourteenth", 15: "fifteenth", 16: "sixteenth", 17: "seventeenth", 18: "eighteenth", 19: "nineteenth"},
@@ -368,6 +368,8 @@ def _build() -> tuple[dict, dict, dict]:
 
 
 _LEX, _CONN, _DEC = _build()
+# English "a dollar fifty nine" = "one dollar fifty nine" ($1.59): "a" before a currency word that a small number follows
+_EN_A_CUR = re.compile(r"\ba (?=(?:dollar|euro|pound)s? (?:" + "|".join(sorted(w for w, x in _LEX["en"].items() if x[0] in "TDU" and not x[2])) + r")\b)")
 # spoken decimal words besides the grammar's own ("seis ponto cinco", "sei punto cinque")
 _DEC_ALT = {"de": {"punkt"}, "nl": {"punt"}, "it": {"punto"}, "es": {"punto"}, "pt": {"ponto"}, "fr": {"point"}}
 _SCALE_VALS = {Decimal(10) ** 3, Decimal(10) ** 6, Decimal(10) ** 9, Decimal(10) ** 12}
@@ -385,10 +387,11 @@ _UNIT_FIRST = ("de", "nl")  # "dreiundzwanzig": unit + and + tens
 class Num:
     """One number found in a text. vals = every value its digits/words can mean; form = "words" | "digits"."""
 
-    __slots__ = ("vals", "form", "ordinal", "weak", "start", "end", "fodder")
+    __slots__ = ("vals", "form", "ordinal", "weak", "start", "end", "fodder", "parts")
 
-    def __init__(self, vals, form, ordinal=False, weak=False, start=0, end=0, fodder=None):
+    def __init__(self, vals, form, ordinal=False, weak=False, start=0, end=0, fodder=None, parts=None):
         self.vals, self.form, self.ordinal, self.weak, self.start, self.end = frozenset(vals), form, ordinal, weak, start, end
+        self.parts = parts  # a two-part English year ("nineteen sixty") keeps its two halves: _year_split can undo the merge
         self.fodder = (not weak) if fodder is None else fodder  # may stand in a gap as a WRONG value
 
     def __repr__(self):
@@ -527,6 +530,8 @@ def _items(lang: str, morphs: list) -> list:
 
     def close(last):
         nonlocal st
+        while lang == "en" and last > 0 and morphs[last][1] == "C":
+            last -= 1  # English: "a billion and" ends at "billion"; the connector is not part of the number (2026-10-19)
         if st["n"]:
             weak = len(st["txt"]) == 1 and st["txt"][0] in _WEAK.get(lang, ())
             out.append((_value(st), st["ord"], weak, first, last))
@@ -576,7 +581,7 @@ def _prefix_of_word(lang: str, r: str) -> bool:
 _PREFIXES: dict = {}
 # "and a half" readings -> the decimal word + five, so "zweieinhalb Millionen" = 2 500 000 and "dos y media" = 2.5
 # (a reference clock "2:30" still matches: see _clock_split). Only right after a number word.
-_HALF = {"en": [(r"(?<=[a-z]) and a half\b", " point five")],
+_HALF = {"en": [(r"(?<=[a-z]) and a half\b", " point five"), (r"(?<![\d.,])(\d+) and a half\b", r"\1.5")],
          "de": [(r"\banderthalb\b", "eins komma funf"), (r"\b([a-z]+?)einhalb\b", r"\1 komma funf")],
          "nl": [(r"\banderhalf\b", "een komma vijf"), (r"\b([a-z]+?)enhalf\b", r"\1 komma vijf")],
          "es": [(r"(?<=[a-z]) y medi[oa]\b", " coma cinco")], "fr": [(r"(?<=[a-z]) heures? et demie?\b", " virgule cinq heures"), (r"(?<=[a-z]) et demie?\b", " virgule cinq")],
@@ -885,6 +890,11 @@ def extract_numbers(text: str, lang: str, keep_weak: bool = True, garbles: bool 
     t = _rel_clocks(lang, _fold(text))
     for pat, rep in _HALF.get(lang, ()):
         t = re.sub(pat, rep, t)
+    if lang == "en":
+        t = _EN_A_CUR.sub("one ", t)
+        # "4 billion seven hundred twenty three million": digits + scale word are one digit number (4000000000)
+        t = re.sub(r"(?<![\d.,])(\d+) (thousand|million|billion|trillion)s?\b",
+                   lambda m: str(int(m.group(1)) * 10 ** {"thousand": 3, "million": 6, "billion": 9, "trillion": 12}[m.group(2)]), t)
     if lang in _PCT:
         t = _pct_words(lang, t)
     t = re.sub(r"(\d):00\b", r"\1", t)
@@ -932,8 +942,8 @@ def extract_numbers(text: str, lang: str, keep_weak: bool = True, garbles: bool 
         if seg:
             for m in seg:
                 cur.append((ti, m))
-        elif words and tk == _CONN[lang] and cur:
-            cur.append((ti, (tk, "C", 0, False)))
+        elif words and tk == _CONN[lang] and cur and not (lang == "en" and _en_in_fraction(cur)):
+            cur.append((ti, (tk, "C", 0, False)))  # English "two point five and three": the decimal ends before "and"
         elif words and (tk == _DEC[lang] or tk in _DEC_ALT.get(lang, ())) and cur:
             cur.append((ti, (tk, "P", 0, False)))
         elif words and lang == "es" and tk == "con" and cur and ti + 1 < len(toks) and _segment(lang, toks[ti + 1]) \
@@ -948,6 +958,12 @@ def extract_numbers(text: str, lang: str, keep_weak: bool = True, garbles: bool 
     nums = _merge(lang, [n for n in nums if n.form != "garble"], toks) + [n for n in nums if n.form == "garble"]
     nums.sort(key=lambda n: (n.start, n.end))
     return [n for n in nums if keep_weak or not n.weak]
+
+
+def _en_in_fraction(cur):
+    """English: the number being built is after a decimal "point" with no hundred / scale word since ("two point five and ...")."""
+    last = max((k for k, (_, m) in enumerate(cur) if m[1] == "P"), default=-1)
+    return last >= 0 and not any(m[1] in ("H", "S", "X") for _, m in cur[last + 1:])
 
 
 def _en_digit(lang, tok):
@@ -1054,9 +1070,11 @@ def _merge(lang, nums, toks):
                     i += 2
                     continue
                 if b.start == a.end + 1 and 10 <= bv <= 99 and (
-                        (lang == "en" and 11 <= av <= 99) or (lang == "nl" and 11 <= av <= 20)):
-                    # two-part years: "nineteen sixty", "negentien zestig", "twintig vijfentwintig"
-                    out.append(Num({av * 100 + bv}, "words", start=a.start, end=b.end))
+                        (lang == "en" and 11 <= av <= 20) or (lang == "nl" and 11 <= av <= 20)):
+                    # two-part years: "nineteen sixty", "negentien zestig", "twintig vijfentwintig". English years are
+                    # 1000-2099, so only 11-20 can lead (a bare "ten" + number stays two) ("seventy five twenty five" is 75, 25, never 7525); a pair that
+                    # still reads as a year can be undone against the reference (_year_split)
+                    out.append(Num({av * 100 + bv}, "words", start=a.start, end=b.end, parts=(av, bv) if lang == "en" else None))
                     i += 2
                     continue
         if (a.form == "words" and not a.ordinal and a.end + 1 < len(toks) and toks[a.end + 1] in _MINOR
@@ -1373,6 +1391,61 @@ def _pair_join(H: list, R: list) -> list:
     return out
 
 
+def _year_split(H: list, R: list) -> list:
+    """Hypothesis side, English: a two-part year read from words ("twelve eighteen" = 1218) is two numbers when the
+    reference holds the halves side by side ("12 18 months") and the year itself is not a reference value."""
+    rv = {v for r in R for v in r.vals}
+    out = []
+    for x in H:
+        if x.parts and not (x.vals & rv) and any(
+                x.parts[0] in R[k].vals and x.parts[1] in R[k + 1].vals and R[k + 1].start - R[k].end <= 2
+                for k in range(len(R) - 1)):
+            out += [Num({x.parts[0]}, x.form, start=x.start, end=x.start), Num({x.parts[1]}, x.form, start=x.end, end=x.end)]
+        else:
+            out.append(x)
+    return out
+
+
+def _sum_join(H: list, R: list) -> list:
+    """Hypothesis side, English: "4 billion seven hundred twenty three million" (digits, then words) is two hypothesis numbers
+    but one reference number (4 723 000 000): join two adjacent hypothesis numbers that add up to a reference value
+    (the larger a whole multiple of a million) when neither is a reference value itself."""
+    rv = {v for r in R for v in r.vals}
+    out, k = [], 0
+    while k < len(H):
+        a, b = H[k], H[k + 1] if k + 1 < len(H) else None
+        if b is not None and b.start - a.end <= 2 and len(a.vals) == 1 and len(b.vals) == 1 and not (a.vals & rv) and not (b.vals & rv):
+            x, y = min(a.vals), min(b.vals)
+            if x >= 10**6 and x % 10**6 == 0 and 0 < y < x and x + y in rv:
+                out.append(Num({x + y}, a.form if a.form == b.form else "words", start=a.start, end=b.end))
+                k += 2
+                continue
+        out.append(a)
+        k += 1
+    return out
+
+
+def _sum_split(H: list, R: list) -> list:
+    """Hypothesis side, English: "one billion and ninety one million" is one number (1 091 000 000) in words, while a
+    reference written "1 billion and 91 millions" holds two. Split a hypothesis number into the two adjacent reference
+    numbers that add up to it (the larger a whole multiple of a million) when it is not a reference value itself."""
+    rv = {v for r in R for v in r.vals}
+    out = []
+    for x in H:
+        hit = None
+        if x.form == "words" and len(x.vals) == 1 and not (x.vals & rv):
+            v = min(x.vals)
+            for k in range(len(R) - 1):
+                a, b = min(R[k].vals), min(R[k + 1].vals)
+                if R[k + 1].start - R[k].end <= 2 and a >= 10**6 and a % 10**6 == 0 and 0 < b < a and a + b == v:
+                    hit = (a, b)
+        if hit:
+            out += [Num({hit[0]}, x.form, start=x.start, end=x.start), Num({hit[1]}, x.form, start=x.end, end=x.end)]
+        else:
+            out.append(x)
+    return out
+
+
 def _digit_split(H: list, R: list) -> list:
     """Hypothesis side: a digit run that spells consecutive reference numbers ("C45P2" for "C four five P two", a phone
     number read in groups "zéro six quatre-vingt-dix" = 0 6 90 vs "0690" without its leading zero is not handled) is
@@ -1446,7 +1519,7 @@ def number_outcomes(ref: str, hyp: str, lang: str) -> list:
     mode = _mode(lang)
     R = extract_numbers(ref, lang, keep_weak=False)
     H = extract_numbers(hyp, lang, keep_weak=True, garbles=True)
-    H = _digit_split(_pair_join(_cents_join(_clock_join(_cents_split(_clock_split(H, R), R), R), R), R), R)
+    H = _digit_split(_pair_join(_cents_join(_clock_join(_cents_split(_clock_split(_year_split(_sum_split(_sum_join(H, R), R), R), R), R), R), R), R), R)
     n, m = len(R), len(H)
     dp = [[0] * (m + 1) for _ in range(n + 1)]
     for i in range(n - 1, -1, -1):

@@ -464,3 +464,74 @@ class PlainSpaceGroupNeedsExactlyThreeDigits(unittest.TestCase):
         spec.loader.exec_module(S)
         got = [sorted(map(str, n.vals)) for n in S.extract_numbers("UE 20 2020.", "fr")]
         self.assertEqual(got, [["20"], ["2020"]])
+
+
+class EnglishWordFormReader(unittest.TestCase):
+    """2026-10-19 English held-out value review (Earnings-22 / YODAS-Granary spans): the hypothesis reader penalised WORD
+    form where the same text in digits was right. Each case failed before the fix (red on base). Texts are short excerpts
+    of public eval sets; the reference is the human transcript, the hypothesis a spoken-form model."""
+
+    def oc(self, ref, hyp):
+        return [(r["value"], r["outcome"]) for r in N.number_outcomes(ref, hyp, "en")]
+
+    W, D = "WORDS_RIGHT_VALUE", "DIGITS_RIGHT_VALUE"
+
+    def test_and_between_two_numbers_is_not_a_connector(self):
+        # "twenty seven and twenty eight" was merged through the trailing "and" into the year-like 2728
+        self.assertEqual(self.oc("between 27 % and 28 % as cost", "between twenty seven and twenty eight % as cost"),
+                         [("27", self.W), ("28", self.W)])
+        self.assertEqual(self.oc("of 2.5 and 3 over time", "of two point five and three over time"), [("2.5", self.W), ("3", self.W)])
+
+    def test_trailing_and_after_a_scale_word(self):
+        # "70 billion and new capital": the reference read "billion and" as a second number (1e9)
+        self.assertEqual(self.oc("over 70 billion and new capital", "over seventy billion dollars and new capital"), [("70000000000", self.W)])
+        self.assertEqual([min(n.vals) for n in N.extract_numbers("388 million and this is", "en")], [388000000])
+
+    def test_two_part_year_is_only_a_year_when_it_can_be_one(self):
+        self.assertEqual(self.oc("probably 12 18 months ago", "probably twelve eighteen months ago"), [("12", self.W), ("18", self.W)])
+        self.assertEqual(self.oc("weighted around 75 25 carry", "weighted around seventy five twenty five carry"), [("75", self.W), ("25", self.W)])
+        self.assertEqual(self.oc("this 50 50 system", "this fifty fifty system"), [("50", self.W), ("50", self.W)])
+        self.assertEqual(self.oc("unchanged 21 22 is a year", "unchanged twenty one twenty two is a year"), [("21", self.W), ("22", self.W)])
+        # ... and a real two-part year stays one number, in either direction
+        self.assertEqual(self.oc("compared to 2018 our", "compared to twenty eighteen our"), [("2018", self.W)])
+        self.assertEqual(self.oc("the year nineteen sixty", "the year 1960"), [("1960", self.D)])
+        self.assertEqual(self.oc("in 1218 it", "in twelve eighteen it"), [("1218", self.W)])
+        # a wrong year is still wrong
+        self.assertEqual(self.oc("compared to 2018 our", "compared to twenty nineteen our"), [("2018", "WRONG_VALUE")])
+
+    def test_a_dollar_fifty_nine(self):
+        self.assertEqual(self.oc("earnings of 1.59 per share", "earnings of a dollar fifty nine per share"), [("1.59", self.W)])
+        self.assertEqual(self.oc("earnings of 1.59 per share", "earnings of one dollar fifty nine per share"), [("1.59", self.W)])
+        self.assertEqual(len(N.extract_numbers("a dollar bill", "en")), 0)  # "a dollar" alone is not a number
+
+    def test_decades_in_the_plural(self):
+        self.assertEqual(self.oc("in the low 20 s", "in the low twenties"), [("20", self.W)])
+        self.assertEqual(self.oc("in the low 60 s", "in the low sixties"), [("60", self.W)])
+        self.assertEqual(self.oc("after the nineteen nineties did", "after the 1990 s did"), [("1990", self.D)])
+        self.assertEqual(self.oc("by the 1870 s the", "by the eighteen seventies the"), [("1870", self.W)])
+
+    def test_digits_and_a_half(self):
+        self.assertEqual(self.oc("losses of 10 and a half million in", "losses of ten point five million in"), [("10500000.0", self.W)])
+        self.assertEqual(self.oc("losses of 10 and a half million in", "losses of 10.5 million in"), [("10500000.0", self.D)])
+
+    def test_billion_and_million_is_two_numbers_in_a_digit_reference(self):
+        self.assertEqual(self.oc("decreased by 1 billion and 91 millions leading", "decreased by one billion and ninety one million leading"),
+                         [("1000000000", self.W), ("91000000", self.W)])
+        self.assertEqual(self.oc("decreased by 1 billion and 91 millions leading", "decreased by 1 billion and 91 million leading"),
+                         [("1000000000", self.D), ("91000000", self.D)])
+        self.assertEqual(self.oc("one billion and ninety one million", "1,091,000,000"), [("1091000000", self.D)])  # one number stays one
+
+    def test_other_languages_unchanged(self):
+        # the English-only rules must not touch the other readers
+        self.assertEqual([min(n.vals) for n in N.extract_numbers("dreizehn zehn", "de")], [13, 10])
+        self.assertEqual([min(n.vals) for n in N.extract_numbers("negentien zestig", "nl")], [1960])
+
+    def test_digits_then_words_sum_to_one_reference_number(self):
+        # stock-style mixed form: "4 billion seven hundred twenty three million" is the reference's one number 4,723,000,000
+        self.assertEqual(self.oc("was up to 4,723,000,000 the main", "was up to 4 billion seven hundred twenty three million the main"),
+                         [("4723000000", self.W)])
+        self.assertEqual(self.oc("capex at 1,036,000,000 zlotys", "capex at 1 billion 36,000,000 laris"), [("1036000000", self.D)])
+        self.assertEqual(self.oc("up 1 billion and 3 million", "up 1 billion and 5 million"), [("1000000000", self.D), ("3000000", "WRONG_VALUE")])
+
+    def test_decimal_and_is_scoped_to_the_current_number(self):
+        self.assertEqual([min(n.vals) for n in N.extract_numbers("two point five one hundred and twenty", "en")][-1], 120)
