@@ -28,6 +28,7 @@ import json
 import os
 import random
 
+import ml_balance as B
 import win15 as W
 
 C = W.C
@@ -36,8 +37,22 @@ OVERLAP = (3.5, 7.5)  # s: app overlap, 14.96 - 9.44 = 5.52 moved by +-2 s
 TAIL = (1.0, 3.0)
 HEAD = (0.0, 1.5)
 LONG = W.LONG_MIN_WORDS
-MID_GAP = 0.12  # s: a cut inside a reading with no quiet frame needs this much between the letter frames of its words
+MID_GAP = 0.10  # s: a cut inside a reading with no quiet frame needs this much between the letter frames of its words (ml_p3_core.MIN_GAP)
 TRIM_S = 6 * 0.08  # the 6 trimmed frames of a non-first window: folded into the cut (documented, not re-applied)
+
+
+def edges_ok_cut(label: str, greedy: str, drop_left, drop_right, cut_in: list) -> bool:
+    """win15.edges_ok, except at an edge that cuts through a number: the re-decode may begin with the tail of the word
+    the cut dropped on the left (end with the head of the one dropped on the right), as the seam pairs' edge check allows
+    (ml_balance.seam_edges_ok); the labelled edge word itself must still be heard whole."""
+    lw = [C.letters(w) for w in label.split() if C.letters(w)]
+    g = C.letters(greedy)
+    if not lw or not g:
+        return False
+    dl, dr = C.letters(drop_left or ""), C.letters(drop_right or "")
+    start = g.startswith(lw[0]) or (cut_in[0] and any(g.startswith(dl[-k:] + lw[0]) for k in range(1, len(dl))))
+    end = g.endswith(lw[-1]) or (cut_in[1] and any(g.endswith(lw[-1] + dr[:k]) for k in range(1, len(dr))))
+    return bool(start and end)
 
 
 def cut_list(words: list, total: float, quiet) -> list:
@@ -57,6 +72,28 @@ def cut_list(words: list, total: float, quiet) -> list:
         out.append((round(c, 3), j, p[3] if inside else None))
     out.append((round(total, 3), len(words), None))
     return out
+
+
+def long_pairs(stream: list, rng, promoted: set, min_words: int = LONG, positions: int = 3):
+    """Mirrored seam pairs (ml_balance.seam_pair) cut inside the long readings of promoted rows, at the gaps between their
+    words (ml_p3._long_pairs with the 0.9 number-word edge rule: no cut through a word)."""
+    import ml_balance as B
+
+    _, words, total = C.stream_words(stream)
+    for rd in B.readings(words, stream):
+        if rd["row"] not in promoted or len(rd["idx"]) < min_words:
+            continue
+        cands = [(pp, c) for pp, c in B.cut_positions(words, rd) if not pp.startswith("in")]
+        if len(cands) > positions:
+            cands = rng.sample(cands, positions)
+        reading = " ".join(words[j][0] for j in rd["idx"])
+        for pos, c in cands:
+            pr = B.seam_pair(words, total, c, C.WIN, C.NUM_KEEP_FRAC)
+            if pr is None or not B.pair_partitions(words, pr, rd):
+                continue
+            yield {"reading": reading, "kind": rd["kind"], "pos": pos, "n_words": len(rd["idx"]),
+                   "left": B._half_row(words, pr["left"], "left", rd, pos),
+                   "right": B._half_row(words, pr["right"], "right", rd, pos)}
 
 
 def targets(words: list, promoted: set, min_words: int = LONG) -> list:
@@ -112,6 +149,8 @@ def plan_geom(rows: list, gaps: list, quiet, rng, promoted: set, per_target: int
                              for i in rws],
                         edge=mode, edge_pos_s=[round(t0 - a, 3), round(b - t1, 3)], geom=mode, pair=pair,
                         cut_in=cut_in, overlap_s=overlap, edge_gap_s=round(max(t0 - a, b - t1), 3),
+                        drop_left=words[w["j0"] - 1][0] if w["j0"] > 0 else None,
+                        drop_right=words[w["j1"]][0] if w["j1"] < len(words) else None,
                         edge_words=sum(1 for x in words if x[3] == key)))
         return True
 
@@ -204,7 +243,8 @@ if modal is not None:
         return [json.loads(l) for l in open(p, encoding="utf-8") if l.strip()] if os.path.exists(p) else []
 
     @app.function(image=image, volumes={VOL: vol}, gpu="L4", timeout=3 * 3600, max_containers=6)
-    def build_lang(lang: str, tag: str, rows_path: str, ctx_path: str, hours: float, seed: int = 1) -> dict:
+    def build_lang(lang: str, tag: str, rows_path: str, ctx_path: str, hours: float, seed: int = 1,
+                   seam_hours: float = 1.0) -> dict:
         from collections import Counter
 
         import librosa
@@ -228,6 +268,9 @@ if modal is not None:
             return x if sr == 16000 else librosa.resample(x, orig_sr=sr, target_sr=16000)
 
         rows_out, kept_s, rejects = [], 0.0, []
+        os.makedirs(f"{out}/seam", exist_ok=True)
+        sf_ = open(f"{out}/seam.jsonl", "w", encoding="utf-8")
+        seam_s, seam_pos = 0.0, Counter()
         f = open(f"{out}/windows.jsonl", "w", encoding="utf-8")
         for ph in range(W.PHASES + 1):
             if kept_s >= hours * 3600:
@@ -279,7 +322,7 @@ if modal is not None:
                     if cer > W.WIN_MAX_CER:
                         st["cer"] += 1
                         continue
-                    if not W.edges_ok(w["text"], g):
+                    if not edges_ok_cut(w["text"], g, w.get("drop_left"), w.get("drop_right"), w["cut_in"]):
                         st["edge_word"] += 1
                         if len(rejects) < 40:
                             rejects.append({"label": w["text"], "greedy": g})
@@ -302,11 +345,56 @@ if modal is not None:
                     kept_s += len(x) / 16000
                     st["kept"] += 1
                     st["kept_" + w["geom"]] += 1
+                if seam_s < seam_hours * 3600 and ph == 0:
+                    paths = {r["audio_filepath"]: r["_x"] for r in stream}
+                    try:
+                        pairs = long_pairs(stream, rng, promoted)
+                    except Exception as e:  # noqa: BLE001
+                        st["seam_stream_error"] += 1
+                        pairs = []
+                    for k, p in enumerate(pairs):
+                        if seam_s >= seam_hours * 3600:
+                            break
+                        st["seam_planned"] += 1
+                        halves, ok = [], True
+                        for h in (p["left"], p["right"]):
+                            x = C.window_audio(stream, h["a"], h["b"], lambda q: paths[q])
+                            g = ctc.greedy(ctc.lp(x))
+                            if C.cer(h["text"], g) > W.WIN_MAX_CER:
+                                st[f"seam_{h['side']}_cer"] += 1
+                                ok = False
+                            elif not B.seam_edges_ok(h, g):
+                                st[f"seam_{h['side']}_edge_word"] += 1
+                                ok = False
+                            halves.append((h, x, g))
+                        if not ok:
+                            continue
+                        pid = f"rs{si}_{k}"
+                        for h, x, g in halves:
+                            hid = f"{pid}_{h['side'][0]}"
+                            wav = f"{out}/seam/{hid}.wav"
+                            sf.write(wav, x, 16000, subtype="PCM_16")
+                            par = [stream[i] for i in h["rows"]]
+                            sf_.write(json.dumps({
+                                "audio_filepath": wav, "duration": round(len(x) / 16000, 3), "text": h["text"], "lang": lang,
+                                "id": f"{lang}_seamrx{tag}_{hid}", "origin": "seam", "pair": pid, "side": h["side"],
+                                "pos": p["pos"], "pos_class": B.pos_class(p["pos"], p["n_words"]), "kind": p["kind"],
+                                "reading": p["reading"], "reading_part": h["reading_part"], "num_tokens": h["num_tokens"],
+                                "cut_words": h["cut_words"], "kept_cut_words": h["kept_cut_words"],
+                                "edge_fracs": h["edge_fracs"], "cut_number": True, "edge_number": True, "greedy": g,
+                                "parents": [r["id"] for r in par], "parent_sha": {r["id"]: W.sha(r["text"]) for r in par},
+                                "src": [[stream[i]["id"], kk] for i, kk in h["src"]], "synthetic": False,
+                                "n_words": p["n_words"]}, ensure_ascii=False) + "\n")
+                            seam_s += len(x) / 16000
+                        st["seam_kept_pairs"] += 1
+                        seam_pos[B.pos_class(p["pos"], p["n_words"])] += 1
                 if si % 40 == 0:
                     f.flush()
                     vol.commit()
         f.close()
+        sf_.close()
         res = {"lang": lang, "tag": tag, "hours_target": hours, "kept_h": round(kept_s / 3600, 3), "counts": dict(st),
+               "seam_h": round(seam_s / 3600, 3), "seam_positions": dict(seam_pos),
                "geom": dict(Counter(r["geom"] for r in rows_out)),
                "position": dict(Counter(W.edge_bucket(r) for r in rows_out)),
                "cut_inside": {"left": sum(r["cut_in"][0] for r in rows_out), "right": sum(r["cut_in"][1] for r in rows_out)},
@@ -317,8 +405,10 @@ if modal is not None:
         return res
 
     @app.local_entrypoint()
-    def run(lang: str, tag: str = "a", hours: float = 2.0, seed: int = 1, rows: str = "rows_realx1", context: str = "ctx"):
+    def run(lang: str, tag: str = "a", hours: float = 2.0, seed: int = 1, rows: str = "rows_realx1", context: str = "ctx",
+            seam_hours: float = 1.0):
         """rows: the promoted rows file under ml/realx1/<lang>/; context: context rows (the same sessions) under _in/<lang>/."""
         r = build_lang.remote(lang, tag, f"{VOL}/ml/realx1/{lang}/{rows}.jsonl", f"{VOL}/ml/realx1/_in/{lang}/{context}.jsonl",
-                              hours, seed)
-        print(json.dumps({k: r[k] for k in ("lang", "kept_h", "counts", "geom", "position", "cut_inside")}, ensure_ascii=False))
+                              hours, seed, seam_hours)
+        print(json.dumps({k: r[k] for k in ("lang", "kept_h", "seam_h", "seam_positions", "counts", "geom", "position", "cut_inside")},
+                         ensure_ascii=False))
