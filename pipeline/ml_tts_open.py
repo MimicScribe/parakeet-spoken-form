@@ -283,6 +283,11 @@ def run_refs_en(tag: str = "ttsSYM1r_en"):
     print(refs_en.remote(tag))
 
 
+import re as _re0
+
+_BAD_LABEL = _re0.compile(r"[{}0-9$%€£#@+_/]|[−×=]")  # ml_tts_symbol.LABEL_BAD
+
+
 def _say(r):
     """What the engine is given: the row's synthesiser text where it has one (English letter names), else the label."""
     return r.get("synth_text") or r["text"]
@@ -492,6 +497,9 @@ def en_verify(planned: str, out_tag: str, part: int, parts: int):
         x = np.concatenate([pad(), x, pad()]).astype(np.float32)
         lp = ctc.lp(x)
         g = ctc.greedy(lp)
+        if _BAD_LABEL.search(r["text"]):
+            bump("drop_label_symbol")
+            continue
         lab = E.greedy_norm(r["text"])
         cer = C.cer(lab, g)
         if cer > T.CER_MAX:
@@ -557,6 +565,9 @@ def en_manifest(rows_path: str, name: str, aug_frac: float = 0.75, seed: int = 4
     adir = f"{VOL}/ml/{name}/en/aug"
     os.makedirs(adir, exist_ok=True)
     n_aug = 0
+    import re as _re
+    bad = _re.compile(r"[{}0-9$%€£#@+_/]|[−×=]")  # ml_tts_symbol.LABEL_BAD: no digit, symbol or unfilled slot
+    assert not [r["id"] for r in rows if bad.search(r["text"])], "label with a digit / symbol / slot"
     with open(dest, "w", encoding="utf-8") as f:
         for r in rows:
             x = {"audio_filepath": r["audio_filepath"], "duration": r["duration"], "text": r["text"], "id": r["id"],

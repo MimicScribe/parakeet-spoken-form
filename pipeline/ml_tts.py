@@ -46,6 +46,7 @@ PASS_THROUGH = ("supersedes", "convs", "locale", "ckey", "register", "engine_src
 SPEED_LO, SPEED_HI = 0.9, 1.3
 WORDS_MIN, WORDS_MAX = 8, 20
 FORBIDDEN = re.compile(r"[0-9$€£¥%#/+°²³½¼¾ºª‰&]")  # the build audit's list
+LABEL_BAD = re.compile(r"[{}0-9$%€£#@+_/]|[−×=]")  # every synthetic writer's last check (2026-10-18 audit)
 
 CLASSES = ["count", "large", "dec", "pct", "permille", "unit", "temp", "frac", "range_from", "range_between",
            "price", "price_big", "clock24", "clock12", "date_num", "date_txt", "phone", "code", "roman", "version",
@@ -1103,6 +1104,8 @@ def tts_lang(lang: str, n: int = 600, seed: int = 1, hours: float = 0.0, overgen
         lp = ctc.lp(x)
         greedy = ctc.greedy(lp)
         ok, why, info = check_greedy(row, greedy)
+        if ok and LABEL_BAD.search(row["text"]):  # no label may hold a digit, a symbol or an unfilled slot
+            ok, why = False, "label_symbol"
         if keep_greedy:
             info["greedy"] = greedy
         if not ok:

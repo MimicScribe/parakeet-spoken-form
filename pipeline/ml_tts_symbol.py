@@ -649,6 +649,9 @@ def plan_lang(lang: str, room: dict, tag: str, seed: int, margin: float, rep: di
             drops[why.split(":")[0]] += 1
             return False
         label, spans, offs = res
+        if not label_ok(label):
+            drops["label_symbol"] += 1
+            return False
         if lang in ELISION_BAD and ELISION_BAD[lang].search(label):
             drops["elision"] += 1
             return False
@@ -779,7 +782,16 @@ EN_SLOT_RE = re.compile(r"\{([a-z_0-9]+?)(\d?)\}")
 # "three halves", "two quarters") and quarter forms that do not fit after "Our"
 EN_BAD = {"fraction": re.compile(r"\ba [aeiou]|\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven) (?:halves|quarters|thirds)\b"
                                  r"|\bthree thirds|\bfour quarters|\btwo halves"),
-          "quarter": re.compile(r"^the\b")}
+          "quarter": re.compile(r"^the\b"),
+          # a price with no currency word ("four thousand twenty nine": readings.k_money's bare branch)
+          "money": re.compile(r"^(?!.*\b(?:dollars?|euros?|pounds?|pence|penny|cents?|yen|yuan|rupees?|francs?|kronor|krona|"
+                              r"zlotys?|pesos?|centavos?|bucks|rand)\b)")}
+# no label may hold a digit, a symbol or a slot left unfilled (2026-10-18 audit: "{int_4digit}" rows)
+LABEL_BAD = re.compile(r"[{}0-9$%€£#@+_/]|[−×=]")
+
+
+def label_ok(text: str) -> bool:
+    return not LABEL_BAD.search(text)
 
 
 def _en_year_fwd(r, R):
@@ -873,8 +885,8 @@ def plan_en(n: int, tag: str, seed: int, rep: dict, carriers=("en",), avoid=froz
         if text in seen or text in avoid:
             drops["duplicate"] += 1
             continue
-        if "{" in text:
-            drops["slot_left"] += 1
+        if not label_ok(text):
+            drops["label_symbol"] += 1
             continue
         seen.add(text)
         for k, (a, b) in zip(kinds, offs):
@@ -1047,6 +1059,10 @@ def finalize(rows: list, lang: str) -> tuple:
     N = _reader()
     keep, st = [], collections.Counter(n_in=len(rows))
     for r in rows:
+        if not label_ok(r["text"]) or (lang == "en" and any(sp.get("kind") == "money" and EN_BAD["money"].search(sp["reading"])
+                                                            for sp in r.get("spans") or [])):
+            st["label_rejected"] += 1
+            continue
         if r.get("fit") == "exact":
             st["exact"] += 1
         elif r.get("greedy") and numbers_agree(r["text"], r["greedy"], lang, N, [sp["reading"] for sp in r["spans"]]):
