@@ -404,6 +404,67 @@ if modal is not None:
         vol.commit()
         return res
 
+    @app.function(image=image, volumes={VOL: vol}, gpu="L4", timeout=3600, max_containers=6)
+    def check_windows(lang: str, tag: str, n: int, seed: int = 7) -> dict:
+        """win15.check_lang on this module's windows (ml/realx1w<tag>/<lang>): a random sample of n windows -- each source
+        row's stretch re-decoded alone must give its labelled words (piece_ok), the forced alignment must keep every word in
+        its own source row (boundary) and near where the source puts it (moved); the two wrong-label controls
+        (win15.shift_control, swap_control) must be caught."""
+        import librosa
+        import soundfile as sf
+
+        vol.reload()
+        d = f"{VOL}/ml/realx1w{tag}/{lang}"
+        dest = f"{d}/check_{n}_{seed}.json"
+        assert not os.path.exists(dest), dest
+        ws = _rows(f"{d}/windows.jsonl")
+        random.Random(f"chk-{lang}-{seed}").shuffle(ws)
+        ws = ws[:n]
+        ctc = W._ctc(lang)
+
+        def read(p):
+            x, sr = sf.read(p, dtype="float32")
+            x = x.mean(1) if x.ndim > 1 else x
+            return x if sr == 16000 else librosa.resample(x, orig_sr=sr, target_sr=16000)
+
+        res = {"lang": lang, "n": len(ws), "piece_fail": 0, "pieces": 0, "pieces_bad": 0, "align_boundary_fail": 0,
+               "align_moved": 0, "control_n": 0, "control_piece_caught": 0, "control_align_caught": 0, "fails": []}
+        for w in ws:
+            x = read(w["audio_filepath"])
+            lp = ctc.lp(x)
+            why = W.check_alignment(w, ctc.word_times(lp, w["text"]))
+            res["align_boundary_fail"] += W.boundary_fail(why)
+            res["align_moved"] += any(r.startswith("moved") for r in why)
+            bad = []
+            for pid, a, b, lab in W.pieces(w):
+                g = ctc.greedy(ctc.lp(x[int(a * 16000):int(b * 16000)]))
+                res["pieces"] += 1
+                if not W.piece_ok(lab, g):
+                    res["pieces_bad"] += 1
+                    bad.append({"parent": pid, "label": lab, "greedy": g})
+            if bad:
+                res["piece_fail"] += 1
+                res["fails"].append({"id": w["id"], "geom": w.get("geom"), "pieces": bad[:3], "align": why[:4]})
+            cw, sw = W.swap_control(w), W.shift_control(w)
+            if cw is not None and sw is not None:
+                res["control_n"] += 1
+                res["control_align_caught"] += W.boundary_fail(W.check_alignment(cw, ctc.word_times(lp, cw["text"])))
+                res["control_piece_caught"] += any(
+                    not W.piece_ok(lab, ctc.greedy(ctc.lp(x[int(a * 16000):int(b * 16000)]))) for _, a, b, lab in W.pieces(sw))
+        for k in ("piece_fail", "align_boundary_fail", "align_moved"):
+            res[f"{k}_rate"] = round(res[k] / max(res["n"], 1), 4)
+        res["piece_bad_rate"] = round(res["pieces_bad"] / max(res["pieces"], 1), 4)
+        for k in ("control_piece_caught", "control_align_caught"):
+            res[f"{k}_rate"] = round(res[k] / max(res["control_n"], 1), 4)
+        json.dump(res, open(dest, "w"), indent=1, ensure_ascii=False)
+        vol.commit()
+        return res
+
+    @app.local_entrypoint()
+    def check(langs: str = "es,fr,de,pt,it,nl", tag: str = "b", n: int = 150):
+        for r in check_windows.starmap([(l, tag, n) for l in langs.split(",")]):
+            print(json.dumps({k: v for k, v in r.items() if k != "fails"}, ensure_ascii=False))
+
     @app.local_entrypoint()
     def run(lang: str, tag: str = "a", hours: float = 2.0, seed: int = 1, rows: str = "rows_realx1", context: str = "ctx",
             seam_hours: float = 1.0):
