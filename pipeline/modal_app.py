@@ -1822,6 +1822,9 @@ R3_ARMS.update({
     # R8-s-entm = R8-s-ent + the '▁' digit-cell mask on the English teacher's rows only (non-English rows unmasked as in
     # R8-s): English written-form fix without the non-English damage of kl_mask_space (bisect 2026-10-18)
     "R8-s-entm": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, en_teacher="w3soup_a0.5@0", kl_mask_space_en=True),
+    # R8-s-en3 = the English levers together (2026-10-18): B as the English KL teacher, its KL x 3, English wf_pen x 3
+    "R8-s-en3": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, en_teacher="w3soup_a0.5@0", en_kl_scale=3.0,
+                     wf_en_weight=3.0),
     "R9-S2": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R8S_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0",
                   wf_weight=0.0),
     "R9-S3": dict(_R8, lr=1e-4, l2sp_c=10.0, recipe=_R7_RECIPE, kl_mask_space=True, en_teacher="w3soup_a0.5@0"),
