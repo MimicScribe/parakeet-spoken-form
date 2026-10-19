@@ -155,3 +155,15 @@ with tempfile.TemporaryDirectory() as d:  # build4 refuses before it reads or wr
 _r = C.split_row({"text": "ne arrivarono ventotto", "num_chars": [[14, 22]]}, "it", it_elided=True)
 _still_broken = _r["text"][slice(*_r["num_chars"][0])] != "venti otto"  # today: "venti ott"
 assert _still_broken == (not C.IT_OFFSETS_FIXED), "IT_OFFSETS_FIXED must be True exactly when the offsets are exact"
+
+# ---- Italian "it-" leftovers found by the single-convention assert (2026-10-18; red-on-base: both stayed fused)
+# (1) "uno" after a hundred inside a mila multiplier: 301,700 "trecentounomilasettecento"
+assert C.split_token("trecentounomilasettecento", "it", False) == ["tre", "cento", "uno", "mila", "sette", "cento"]
+assert C.split_token("centounomila", "it", False) == ["cento", "uno", "mila"]
+assert C.split_token("unomila", "it", False) == ["unomila"] and C.split_token("ventunomila", "it", False) == ["ventuno", "mila"]
+# (2) an identifier suffix after the number word: directive "96/53/C" read "cinquantatré-C" (accent dropped, suffix kept)
+assert C.split_token("cinquantatré-C,", "it", False) == ["cinquanta", "tre-C,"]
+assert C.split_token("zweihundert-Euro", "de") == ["zweihundert-Euro"]  # only a one-capital suffix counts
+new, tok_map, ins = C.split_text("direttiva novanta sei cinquantatré-C del", "it", False)
+assert new == "direttiva novanta sei cinquanta tre-C del" and "tré" not in new
+print("test_compound_split: it- fused leftovers ok")

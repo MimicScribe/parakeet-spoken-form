@@ -70,6 +70,9 @@ _IT_SPLIT = dict(_IT_COMMON,
                  h=("cento",), C=("cent",), m=("mila",), k=("mille",))
 # the extra (second) class of a form: the vowel-initial units after an elided stem ("vent|uno", "cent|otto")
 _IT_EXTRA = {"v": ("uno", "otto", "un", "una")}
+# "it-": "uno" is final-only ("venti uno" is a spoken-form error), but after a hundred it can sit inside a mila multiplier:
+# "trecentouno|mila" = 301,000 (class w, only in the multiplier right after the hundred)
+_IT_EXTRA_WHOLE = {"w": ("uno",)}
 # an elided stem is written out in full in the split text ("vent" -> "venti", "trent" -> "trenta", "cent" -> "cento")
 _IT_RESTORE = {**{t[:-1]: t[-1] for t in _IT_TENS}, "cent": "o"}
 
@@ -81,7 +84,7 @@ _B1000 = {"de": f"(?:{_MUL['de']}?ha?(?:{_R99['de']})?|{_R99['de']})",
           "nl": f"(?:{_MUL['nl']}?h(?:a?{_R99['nl']})?|{_R99['nl']})",
           "it-": f"(?:u?(?:h{_R99['it-']}?|c[uf]?)|{_R99['it-']})",  # "centottanta nove"
           "it+": f"(?:u?(?:h(?:{_R99['it+']}|v)?|{_IT_C})|{_R99['it+']})"}  # "cento ottanta nove", "cento uno mila"
-_IT_MUL = "(?:u?(?:h(?:t[uf]?|e|z|u)?|c[uf]?)|t[uf]?|e|z|u)"  # a "mila" multiplier is >= 2 (never a bare "uno")
+_IT_MUL = "(?:u?(?:h(?:t[uf]?|e|z|u|w)?|c[uf]?)|t[uf]?|e|z|u)"  # a "mila" multiplier is >= 2 (never a bare "uno")
 _IT_MUL_S = f"(?:u?(?:h(?:t[uf]?|Tv|z|u|v)?|{_IT_C})|t[uf]?|Tv|z|u)"
 _GRAMMAR = {
     "de": re.compile(f"(?:{_B1000['de']}?ka?{_B1000['de']}?|{_B1000['de']})x?"),  # "drei einhalb"
@@ -172,7 +175,7 @@ def _extra(lang):
     """morpheme -> its extra (class, final_only) options (Italian v: a unit after an elided stem; never final-only,
     "venti uno mila"; its ordinal forms are final-only)."""
     out = {}
-    for cls, words in (_IT_EXTRA if lang == "it+" else {}).items():
+    for cls, words in {"it+": _IT_EXTRA, "it-": _IT_EXTRA_WHOLE}.get(lang, {}).items():
         for w in words:
             out.setdefault(w, []).append((cls, False))
             if w in ("uno", "otto"):
@@ -257,6 +260,9 @@ def split_token(tok: str, lang: str, it_elided=None) -> list[str]:
     pre, core, post = m.group(1), m.group(2), m.group(3)
     if (e := re.fullmatch(r"(\w+['’])(\w+)", core)):  # an elided article stays on the first morpheme ("dell'otto")
         pre, core = pre + e.group(1), e.group(2)
+    tail = ""
+    if (h := re.fullmatch(r"([^\W\d_]+)((?:-[A-Z])+)", core)):  # a number word + an identifier suffix ("cinquantatré-C")
+        core, tail = h.group(1), h.group(2)
     if not core.isalpha():
         return [tok]
     parts = _split_core(core, lang, it_elided)
@@ -264,7 +270,7 @@ def split_token(tok: str, lang: str, it_elided=None) -> list[str]:
         return [tok]
     if lang == "it" and parts[-1].lower() in ("tré", "trè"):  # same length: offsets and insertion points stay valid
         parts[-1] = parts[-1].translate(str.maketrans("éèÉÈ", "eeEE"))
-    parts[0], parts[-1] = pre + parts[0], parts[-1] + post
+    parts[0], parts[-1] = pre + parts[0], parts[-1] + tail + post
     return parts
 
 
