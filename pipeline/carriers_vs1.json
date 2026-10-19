@@ -1,0 +1,297 @@
+{
+ "es": {
+  "count": [
+   "En la votación hubo {n} diputados a favor y {n2} en contra.",
+   "El estadio acogió a {n} espectadores y a {n2} periodistas.",
+   "Esta semana el hospital atendió a {n} pacientes, {n2} de ellos menores de edad.",
+   "Hicimos {n} kilómetros por la mañana y {n2} por la tarde.",
+   "La fábrica produce {n} coches al mes y emplea a {n2} trabajadores.",
+   "Se vendieron {n} libros en la feria y {n2} discos.",
+   "En el congreso participaron {n} ponentes, {n2} voluntarios y {n3} invitados.",
+   "El museo recibió {n} visitantes el sábado, {n2} el domingo y {n3} el lunes.",
+   "El tren llevaba {n} pasajeros y {n2} tripulantes.",
+   "Cada caja contiene {n} tornillos y {n2} clavos.",
+   "La empresa tiene {n} empleados en España y {n2} en Portugal.",
+   "El club cuenta con {n} socios y {n2} voluntarios."
+  ],
+  "label": [
+   "Vaya a la sala {l} y espere en la sala {l2}.",
+   "Los detalles están en la página {l} y en la página {l2}.",
+   "El vuelo {l} sale de la puerta {l2}.",
+   "Tome la carretera {l} hasta la salida {l2}.",
+   "El artículo {l} modifica el artículo {l2} de la ley.",
+   "Su pedido número {l} y el pedido número {l2} salen hoy.",
+   "Las líneas {l}, {l2} y {l3} están cortadas.",
+   "Abra el capítulo {l} y lea hasta el apartado {l2}.",
+   "En la habitación {l} y en la habitación {l2} faltan toallas.",
+   "El código de error {l} aparece junto al mensaje {l2} en el registro."
+  ],
+  "past": [
+   "La catedral se construyó en {y} y se reformó en {y2}.",
+   "Entre {y} y {y2} la ciudad cambió de manos varias veces.",
+   "Nació en {y} y murió en {y2}.",
+   "Los documentos más antiguos son de {y} y los más recientes de {y2}.",
+   "El puente se abrió en {y}, pero la guerra de {y2} lo destruyó.",
+   "En {y}, en {y2} y en {y3} hubo grandes inundaciones."
+  ],
+  "fut": [
+   "El plan prevé reducir las emisiones para {y} y alcanzar la neutralidad en {y2}.",
+   "La nueva línea estará lista en {y} y la ampliación en {y2}.",
+   "Los contratos de la empresa vencen en {y} y en {y2}.",
+   "Las previsiones llegan hasta {y} y un segundo estudio hasta {y2}.",
+   "Las jubilaciones están previstas para {y}, {y2} y {y3}.",
+   "La red debe estar terminada en {y} y la ampliación en {y2}."
+  ],
+  "big": [
+   "La ciudad tiene {b} habitantes y recibe {b2} turistas al año.",
+   "El presupuesto es de {b} euros y el año pasado fue de {b2} euros.",
+   "El estadio tiene capacidad para {b} espectadores.",
+   "Se imprimieron {b} ejemplares en la primera edición y {b2} en la segunda."
+  ]
+ },
+ "de": {
+  "count": [
+   "Bei der Abstimmung gab es {n} Ja-Stimmen und {n2} Nein-Stimmen.",
+   "Im Stadion waren {n} Zuschauer und {n2} Journalisten.",
+   "Die Fabrik produziert {n} Autos im Monat und beschäftigt {n2} Mitarbeiter.",
+   "Auf der Messe wurden {n} Bücher und {n2} Platten verkauft.",
+   "Am Kongress nahmen {n} Redner, {n2} Helfer und {n3} Gäste teil.",
+   "Das Museum zählte {n} Besucher am Samstag, {n2} am Sonntag und {n3} am Montag.",
+   "Der Zug hatte {n} Fahrgäste und {n2} Mitarbeiter an Bord.",
+   "In jeder Kiste liegen {n} Schrauben und {n2} Nägel.",
+   "Die Firma hat {n} Angestellte in Deutschland und {n2} in Österreich.",
+   "Der Verein hat {n} Mitglieder und {n2} Freiwillige.",
+   "Wir sind {n} Kilometer am Vormittag und {n2} am Nachmittag gefahren."
+  ],
+  "label": [
+   "Gehen Sie zu Raum {l} und warten Sie in Raum {l2}.",
+   "Die Einzelheiten stehen auf Seite {l} und auf Seite {l2}.",
+   "Der Flug {l} startet an Gate {l2}.",
+   "Nehmen Sie die Bundesstraße {l} bis zur Ausfahrt {l2}.",
+   "Artikel {l} ändert Artikel {l2} des Gesetzes.",
+   "Ihre Bestellung mit der Nummer {l} und die Nummer {l2} gehen heute raus.",
+   "Die Linien {l}, {l2} und {l3} fallen heute aus.",
+   "Lesen Sie Kapitel {l} bis Abschnitt {l2}.",
+   "In Zimmer {l} und in Zimmer {l2} fehlen Handtücher.",
+   "Der Fehlercode {l} steht im Protokoll neben der Meldung {l2}."
+  ],
+  "past": [
+   "Der Dom wurde {y} gebaut und {y2} umgebaut.",
+   "Zwischen {y} und {y2} wechselte die Stadt mehrfach den Besitzer.",
+   "Er wurde {y} geboren und starb {y2}.",
+   "Die ältesten Urkunden stammen aus dem Jahr {y}, die jüngsten aus dem Jahr {y2}.",
+   "Die Brücke wurde {y} eröffnet, doch der Krieg von {y2} zerstörte sie.",
+   "In den Jahren {y}, {y2} und {y3} gab es große Überschwemmungen."
+  ],
+  "fut": [
+   "Der Plan sieht vor, bis {y} die Emissionen zu senken und {y2} klimaneutral zu sein.",
+   "Die neue Linie soll {y} fertig sein und die Erweiterung {y2}.",
+   "Die Verträge der Firma laufen {y} und {y2} aus.",
+   "Die Prognose reicht bis {y}, eine zweite Studie bis {y2}.",
+   "Die Pensionierungen sind für {y}, {y2} und {y3} vorgesehen.",
+   "Bis {y} soll das Netz stehen und bis {y2} der Ausbau abgeschlossen sein."
+  ],
+  "big": [
+   "Die Stadt hat {b} Einwohner und {b2} Touristen im Jahr.",
+   "Das Budget beträgt {b} Euro, im letzten Jahr waren es {b2} Euro.",
+   "Das Stadion fasst {b} Zuschauer.",
+   "Die erste Auflage hatte {b} Exemplare, die zweite {b2}."
+  ]
+ },
+ "fr": {
+  "count": [
+   "Lors du vote, il y a eu {n} députés pour et {n2} contre.",
+   "Le stade a accueilli {n} spectateurs et {n2} journalistes.",
+   "L'usine produit {n} voitures par mois et emploie {n2} ouvriers.",
+   "Au salon, on a vendu {n} livres et {n2} disques.",
+   "Le congrès réunissait {n} intervenants, {n2} bénévoles et {n3} invités.",
+   "Le musée a reçu {n} visiteurs samedi, {n2} dimanche et {n3} lundi.",
+   "Le train transportait {n} voyageurs et {n2} employés.",
+   "Chaque caisse contient {n} boulons et {n2} clous.",
+   "L'entreprise compte {n} salariés en France et {n2} en Belgique.",
+   "Le club a {n} membres et {n2} bénévoles.",
+   "Nous avons fait {n} kilomètres le matin et {n2} l'après-midi."
+  ],
+  "label": [
+   "Allez à la salle {l} et attendez dans la salle {l2}.",
+   "Les détails sont à la page {l} et à la page {l2}.",
+   "Le vol {l} part de la porte {l2}.",
+   "Prenez la route nationale {l} jusqu'à la sortie {l2}.",
+   "L'article {l} modifie l'article {l2} de la loi.",
+   "Votre commande numéro {l} et la commande numéro {l2} partent aujourd'hui.",
+   "Les lignes {l}, {l2} et {l3} sont coupées.",
+   "Lisez le chapitre {l} jusqu'au paragraphe {l2}.",
+   "Dans la chambre {l} et dans la chambre {l2}, il manque des serviettes.",
+   "Le code d'erreur {l} apparaît à côté du message {l2} dans le journal."
+  ],
+  "past": [
+   "La cathédrale a été construite en {y} et rénovée en {y2}.",
+   "Entre {y} et {y2}, la ville a changé de mains plusieurs fois.",
+   "Il est né en {y} et mort en {y2}.",
+   "Les plus anciens documents remontent à {y}, les plus récents à {y2}.",
+   "Le pont a ouvert en {y}, mais la guerre de {y2} l'a détruit.",
+   "En {y}, en {y2} et en {y3}, il y a eu de grandes inondations."
+  ],
+  "fut": [
+   "Le plan prévoit de réduire les émissions d'ici {y} et d'atteindre la neutralité en {y2}.",
+   "La nouvelle ligne sera prête en {y} et l'extension en {y2}.",
+   "Les contrats de l'entreprise arrivent à échéance en {y} et en {y2}.",
+   "Les prévisions vont jusqu'en {y}, une seconde étude jusqu'en {y2}.",
+   "Les départs à la retraite sont prévus en {y}, {y2} et {y3}.",
+   "Le réseau doit être terminé en {y} et l'extension achevée en {y2}."
+  ],
+  "big": [
+   "La ville compte {b} habitants et reçoit {b2} touristes par an.",
+   "Le budget est de {b} euros, contre {b2} euros l'an dernier.",
+   "Le stade peut accueillir {b} spectateurs.",
+   "Le premier tirage comptait {b} exemplaires, le second {b2}."
+  ]
+ },
+ "it": {
+  "count": [
+   "Hanno votato {n} deputati a favore e {n2} contro.",
+   "Lo stadio ha ospitato {n} spettatori e {n2} giornalisti.",
+   "La fabbrica produce {n} automobili al mese e impiega {n2} operai.",
+   "In fiera sono stati venduti {n} libri e {n2} dischi.",
+   "Al congresso c'erano {n} relatori, {n2} volontari e {n3} ospiti.",
+   "Il museo ha accolto {n} visitatori sabato, {n2} domenica e {n3} lunedì.",
+   "Il treno trasportava {n} passeggeri e {n2} dipendenti.",
+   "Ogni scatola contiene {n} bulloni e {n2} chiodi.",
+   "L'azienda ha {n} dipendenti in Italia e {n2} in Svizzera.",
+   "Il club conta {n} soci e {n2} volontari.",
+   "Abbiamo percorso {n} chilometri al mattino e {n2} nel pomeriggio."
+  ],
+  "label": [
+   "Vada alla sala {l} e aspetti nella sala {l2}.",
+   "I dettagli sono a pagina {l} e a pagina {l2}.",
+   "Il volo {l} parte dal gate {l2}.",
+   "Prenda la strada statale {l} fino all'uscita {l2}.",
+   "L'articolo {l} modifica l'articolo {l2} della legge.",
+   "Il suo ordine numero {l} e l'ordine numero {l2} partono oggi.",
+   "Le linee {l}, {l2} e {l3} sono interrotte.",
+   "Legga il capitolo {l} fino al paragrafo {l2}.",
+   "Nella camera {l} e nella camera {l2} mancano gli asciugamani.",
+   "Il codice di errore {l} compare accanto al messaggio {l2} nel registro."
+  ],
+  "past": [
+   "La cattedrale fu costruita nel {y} e ristrutturata nel {y2}.",
+   "Tra il {y} e il {y2} la città cambiò padrone più volte.",
+   "Nacque nel {y} e morì nel {y2}.",
+   "I documenti più antichi risalgono al {y}, i più recenti al {y2}.",
+   "Il ponte fu inaugurato nel {y}, ma la guerra del {y2} lo distrusse.",
+   "Nel {y}, nel {y2} e nel {y3} ci furono grandi alluvioni."
+  ],
+  "fut": [
+   "Il piano prevede di ridurre le emissioni entro il {y} e di raggiungere la neutralità nel {y2}.",
+   "La nuova linea sarà pronta nel {y} e l'ampliamento nel {y2}.",
+   "I contratti dell'azienda scadono nel {y} e nel {y2}.",
+   "Le previsioni arrivano fino al {y}, un secondo studio fino al {y2}.",
+   "I pensionamenti sono previsti nel {y}, nel {y2} e nel {y3}.",
+   "La rete dovrà essere pronta entro il {y} e l'ampliamento concluso entro il {y2}."
+  ],
+  "big": [
+   "La città ha {b} abitanti e riceve {b2} turisti all'anno.",
+   "Il bilancio è di {b} euro, mentre lo scorso anno erano {b2} euro.",
+   "Lo stadio può ospitare {b} spettatori.",
+   "La prima tiratura contava {b} copie, la seconda {b2}."
+  ]
+ },
+ "nl": {
+  "count": [
+   "Bij de stemming waren er {n} voorstanders en {n2} tegenstanders.",
+   "In het stadion zaten {n} toeschouwers en {n2} journalisten.",
+   "De fabriek maakt {n} auto's per maand en heeft {n2} werknemers.",
+   "Op de beurs werden {n} boeken en {n2} platen verkocht.",
+   "Op het congres waren {n} sprekers, {n2} vrijwilligers en {n3} gasten.",
+   "Het museum ontving {n} bezoekers op zaterdag, {n2} op zondag en {n3} op maandag.",
+   "De trein vervoerde {n} reizigers en {n2} medewerkers.",
+   "In elke doos zitten {n} bouten en {n2} spijkers.",
+   "Het bedrijf heeft {n} werknemers in Nederland en {n2} in België.",
+   "De club heeft {n} leden en {n2} vrijwilligers.",
+   "In de ochtend reden we {n} kilometer en in de middag {n2}."
+  ],
+  "label": [
+   "Ga naar zaal {l} en wacht in zaal {l2}.",
+   "De details staan op pagina {l} en op pagina {l2}.",
+   "Vlucht {l} vertrekt vanaf gate {l2}.",
+   "Neem de weg {l} tot afrit {l2}.",
+   "Artikel {l} wijzigt artikel {l2} van de wet.",
+   "Uw bestelling met nummer {l} en nummer {l2} gaan vandaag de deur uit.",
+   "Lijn {l}, lijn {l2} en lijn {l3} rijden vandaag niet.",
+   "Lees hoofdstuk {l} tot en met paragraaf {l2}.",
+   "In kamer {l} en in kamer {l2} ontbreken handdoeken.",
+   "De foutcode {l} staat in het logboek naast melding {l2}."
+  ],
+  "past": [
+   "De kathedraal werd in {y} gebouwd en in {y2} verbouwd.",
+   "Tussen {y} en {y2} wisselde de stad meerdere keren van eigenaar.",
+   "Hij werd geboren in {y} en overleed in {y2}.",
+   "De oudste documenten dateren uit {y}, de nieuwste uit {y2}.",
+   "De brug werd in {y} geopend, maar de oorlog van {y2} vernielde haar.",
+   "In {y}, in {y2} en in {y3} waren er grote overstromingen."
+  ],
+  "fut": [
+   "Het plan wil de uitstoot tegen {y} verlagen en in {y2} klimaatneutraal zijn.",
+   "De nieuwe lijn moet in {y} klaar zijn en de uitbreiding in {y2}.",
+   "De contracten van het bedrijf lopen af in {y} en in {y2}.",
+   "De prognose loopt tot {y}, een tweede studie tot {y2}.",
+   "De pensioneringen zijn gepland voor {y}, {y2} en {y3}.",
+   "Het netwerk moet in {y} af zijn en de uitbreiding in {y2}."
+  ],
+  "big": [
+   "De stad heeft {b} inwoners en ontvangt {b2} toeristen per jaar.",
+   "Het budget is {b} euro, vorig jaar was het {b2} euro.",
+   "Het stadion biedt plaats aan {b} toeschouwers.",
+   "De eerste oplage telde {b} exemplaren, de tweede {b2}."
+  ]
+ },
+ "pt": {
+  "count": [
+   "Na votação, houve {n} deputados a favor e {n2} contra.",
+   "O estádio recebeu {n} espectadores e {n2} jornalistas.",
+   "A fábrica produz {n} carros por mês e emprega {n2} operários.",
+   "Na feira venderam-se {n} livros e {n2} discos.",
+   "No congresso participaram {n} oradores, {n2} voluntários e {n3} convidados.",
+   "O museu recebeu {n} visitantes no sábado, {n2} no domingo e {n3} na segunda-feira.",
+   "O avião levava {n} passageiros e {n2} tripulantes.",
+   "Cada caixa contém {n} parafusos e {n2} pregos.",
+   "A empresa tem {n} funcionários em Portugal e {n2} no Brasil.",
+   "O clube conta com {n} sócios e {n2} voluntários.",
+   "Fizemos {n} quilómetros de manhã e {n2} à tarde."
+  ],
+  "label": [
+   "Vá à sala {l} e espere na sala {l2}.",
+   "Os detalhes estão na página {l} e na página {l2}.",
+   "O voo {l} sai do portão {l2}.",
+   "Siga pela estrada {l} até à saída {l2}.",
+   "O artigo {l} altera o artigo {l2} da lei.",
+   "O seu pedido número {l} e o pedido número {l2} saem hoje.",
+   "As linhas {l}, {l2} e {l3} estão cortadas.",
+   "Leia o capítulo {l} até ao parágrafo {l2}.",
+   "No quarto {l} e no quarto {l2} faltam toalhas.",
+   "O código de erro {l} aparece junto à mensagem {l2} no registo."
+  ],
+  "past": [
+   "A catedral foi construída em {y} e reformada em {y2}.",
+   "Entre {y} e {y2}, a cidade mudou de mãos várias vezes.",
+   "Nasceu em {y} e morreu em {y2}.",
+   "Os documentos mais antigos são de {y}, os mais recentes de {y2}.",
+   "A ponte abriu em {y}, mas a guerra de {y2} destruiu-a.",
+   "Em {y}, em {y2} e em {y3} houve grandes cheias."
+  ],
+  "fut": [
+   "O plano prevê reduzir as emissões até {y} e atingir a neutralidade em {y2}.",
+   "A nova linha estará pronta em {y} e a ampliação em {y2}.",
+   "Os contratos da empresa terminam em {y} e em {y2}.",
+   "As previsões vão até {y}, um segundo estudo até {y2}.",
+   "As reformas estão previstas para {y}, {y2} e {y3}.",
+   "A rede deve estar concluída em {y} e a ampliação em {y2}."
+  ],
+  "big": [
+   "A cidade tem {b} habitantes e recebe {b2} turistas por ano.",
+   "O orçamento é de {b} euros, no ano passado foram {b2} euros.",
+   "O estádio tem capacidade para {b} espectadores.",
+   "A primeira edição teve {b} exemplares, a segunda {b2}."
+  ]
+ }
+}

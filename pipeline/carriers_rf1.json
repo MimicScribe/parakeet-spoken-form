@@ -1,0 +1,59 @@
+{
+ "es": {
+  "f": [
+   "En la sala había {f} personas y {f2} sillas.",
+   "Se vendieron {f} entradas y {f2} camisetas.",
+   "La biblioteca guarda {f} revistas y {f2} cartas antiguas.",
+   "El jardín tiene {f} rosas, {f2} margaritas y {f3} violetas.",
+   "La encuesta recogió {f} respuestas en {f2} horas.",
+   "Llegaron {f} cartas esta semana y {f2} la anterior.",
+   "Cada paquete lleva {f} galletas y {f2} nueces.",
+   "La ciudad tiene {f} calles y {f2} plazas.",
+   "Contamos {f} ovejas y {f2} vacas en el prado.",
+   "La empresa vendió {f} licencias y {f2} suscripciones.",
+   "Hay {f} fotos en el álbum y {f2} en la caja.",
+   "Ya hemos contestado {f} llamadas y {f2} cartas."
+  ],
+  "m": [
+   "Tiene {m} años y lleva {m2} meses en la empresa.",
+   "Compramos {m} libros y {m2} discos.",
+   "Cada equipo tiene {m} jugadores.",
+   "Hace {m} días que esperamos y {m2} que insistimos.",
+   "El tren llevaba {m} pasajeros y {m2} tripulantes.",
+   "Recorrimos {m} kilómetros el lunes y {m2} el martes."
+  ]
+ },
+ "pt": {
+  "f": [
+   "Na sala havia {f} pessoas e {f2} cadeiras.",
+   "Venderam-se {f} entradas e {f2} camisolas.",
+   "A biblioteca guarda {f} revistas e {f2} cartas antigas.",
+   "O jardim tem {f} rosas, {f2} margaridas e {f3} violetas.",
+   "O inquérito recolheu {f} respostas em {f2} horas.",
+   "Chegaram {f} cartas esta semana e {f2} na anterior.",
+   "Cada pacote leva {f} bolachas e {f2} nozes.",
+   "A cidade tem {f} ruas e {f2} praças.",
+   "Contámos {f} ovelhas e {f2} vacas no prado.",
+   "A empresa vendeu {f} licenças e {f2} subscrições.",
+   "Há {f} fotografias no álbum e {f2} na caixa.",
+   "Já respondemos a {f} chamadas e a {f2} cartas."
+  ],
+  "m": [
+   "Tem {m} anos e está há {m2} meses na empresa.",
+   "Comprámos {m} livros e {m2} discos.",
+   "Cada equipa tem {m} jogadores.",
+   "Esperamos há {m} dias e insistimos há {m2}.",
+   "O avião levava {m} passageiros e {m2} tripulantes."
+  ],
+  "t": [
+   "O João tem {t} anos e a Maria tem {t2}.",
+   "Fizemos {t} quilómetros até Lisboa e {t2} até ao Porto.",
+   "A turma tem {t} alunos e {t2} professores.",
+   "O autocarro número {t} parte às nove e o {t2} às dez.",
+   "A rua tem {t} casas e {t2} lojas.",
+   "Vendemos {t} bilhetes na sexta e {t2} no sábado.",
+   "O armazém recebeu {t} caixas e {t2} paletes.",
+   "Moro no número {t} e o vizinho no número {t2}."
+  ]
+ }
+}
