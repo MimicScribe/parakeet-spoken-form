@@ -220,16 +220,60 @@ def edge_bucket(w: dict) -> str:
 
 
 def plan_edge_windows(rows: list, gaps: list, quiet, rng, win: float = WIN, min_len: float = MIN_LEN,
-                      min_rows: int = MIN_NUM_ROWS, edge_ok=None) -> list:
+                      min_rows: int = MIN_NUM_ROWS, edge_ok=None, straddle: float = 0.0) -> list:
     """One window per long reading of the stream (when the geometry allows): "tail" -- the right edge is the cut
     after the reading closest to its end + U(EDGE_TAIL), the left edge a random cut min_len-win s earlier; "head" --
     the left edge is the cut before the reading closest to its start - U(EDGE_HEAD), the right edge a random cut
     min_len-win s later. Kept when >= min_rows rows have a number word inside, the target reading is whole and every
-    cut row edge re-decodes (ends_ok). Window dicts as plan_windows, plus edge / edge_gap_s / edge_words."""
+    cut row edge re-decodes (ends_ok). Window dicts as plan_windows, plus edge / edge_gap_s / edge_words.
+    straddle (default 0 = off, the rng stream is then unchanged): the share of long readings that get a STRADDLE window instead --
+    the left ("straddle_l") or right ("straddle_r") window edge is a quiet cut BETWEEN two words of the reading, the part inside the
+    window is labelled with the words it holds (what the decoder hears; the other half belongs to the neighbouring window)."""
     starts, words, total = layout(rows, gaps)
     cuts = cut_points(words, total, quiet)
+    cuts_free = None
     out, seen = [], set()
     for key, t0, t1 in long_targets(words):
+        if straddle and rng.random() < straddle:
+            if cuts_free is None:      # cuts anywhere a quiet gap allows, readings or not
+                cuts_free = cut_points([x[:3] + (None,) + x[4:] for x in words], total, quiet)
+            inner = [k for k, (c, j) in enumerate(cuts_free) if 0 < j < len(words) and words[j - 1][3] == key and words[j][3] == key]
+            if not inner:
+                continue
+            side = rng.choice(["straddle_l", "straddle_r"])
+            ki = rng.choice(inner)
+            if side == "straddle_l":      # the window starts inside the reading and runs on to the right
+                ka = ki
+                far = [k for k, (c, _) in enumerate(cuts_free) if min_len <= c - cuts_free[ki][0] <= win and c >= t1]
+                if not far:
+                    continue
+                kb = rng.choice(far)
+            else:                          # the window ends inside the reading, its head is in the window
+                kb = ki
+                far = [k for k, (c, _) in enumerate(cuts_free) if min_len <= cuts_free[ki][0] - c <= win and c <= t0]
+                if not far:
+                    continue
+                ka = rng.choice(far)
+            (a, j0), (b, j1) = cuts_free[ka], cuts_free[kb]
+            if (j0, j1) in seen or j1 <= j0:
+                continue
+            w = {"a": a, "b": b, "j0": j0, "j1": j1}
+            ws = words[j0:j1]
+            n_rows = len({x[4] for x in ws if x[3] is not None})
+            if n_rows < min_rows or not ends_ok(rows, words, w, edge_ok):
+                continue
+            rws = sorted({x[4] for x in ws})
+            if any(min(starts[i] + rows[i]["duration"], b) - max(starts[i], a) < MIN_PIECE_S for i in rws):
+                continue
+            seen.add((j0, j1))
+            out.append(dict(w, text=" ".join(x[0] for x in ws), num_tokens=[x[3] is not None for x in ws],
+                            word_times=[[round(x[1] - a, 3), round(x[2] - a, 3)] for x in ws],
+                            src=[[x[4], x[5]] for x in ws], rows=rws, n_num_rows=n_rows, cut_left=True if side == "straddle_l" else (j0 > 0 and words[j0 - 1][4] == words[j0][4]),
+                            cut_right=True if side == "straddle_r" else (j1 < len(words) and words[j1][4] == words[j1 - 1][4]),
+                            seg=[[i, round(max(starts[i], a) - a, 3), round(min(starts[i] + rows[i]["duration"], b) - a, 3)] for i in rws],
+                            edge=side, edge_gap_s=0.0, edge_pos_s=[round(t0 - a, 3), round(b - t1, 3)],
+                            edge_words=sum(1 for x in words[j0:j1] if x[3] == key)))
+            continue
         mode = rng.choice(EDGE_MODES)
         if mode == "tail":
             want = t1 + rng.uniform(*EDGE_TAIL)
@@ -983,7 +1027,7 @@ if modal is not None:
         return res
 
     @app.function(image=image, volumes={VOL: vol}, gpu="L4", timeout=3 * 3600, max_containers=7)
-    def build_edge(lang: str, tag: str, set_tag: str, hours: float, seed: int = 1, root: str = "") -> dict:
+    def build_edge(lang: str, tag: str, set_tag: str, hours: float, seed: int = 1, root: str = "", straddle: float = 0.0) -> dict:
         """Edge windows (plan_edge_windows) from synthetic sets' verified rows (ml/<set_tag>/<lang>/rows.jsonl, set_tag
         "a,b" for several sets;
         clean audio, one voice per stream); rows with a letter+digit code are left out (the build re-labels codes in
@@ -1045,7 +1089,7 @@ if modal is not None:
                         st[f"row_{side}_bad"] += not flags[(i, side)]
                     return flags[(i, side)]
 
-                planned = plan_edge_windows(stream, gaps, quiet, rng, edge_ok=edge_ok)
+                planned = plan_edge_windows(stream, gaps, quiet, rng, edge_ok=edge_ok, straddle=straddle)
                 for j, w in enumerate(planned):
                     if kept_s >= hours * 3600:
                         break
@@ -1099,10 +1143,10 @@ if modal is not None:
 
     @app.local_entrypoint()
     def edge(langs: str = "de,es,fr,it,nl,pt", tag: str = "sym", set_tag: str = "ttsSYM1", hours: str = "",
-             default_h: float = 0.5, seed: int = 1, root: str = ""):
+             default_h: float = 0.5, seed: int = 1, root: str = "", straddle: float = 0.0):
         """Edge windows of one synthetic set: modal run win15.py::edge --tag sym --set-tag ttsSYM1 --hours de:0.6,nl:0.1"""
         over = {k: float(v) for k, v in (x.split(":") for x in hours.split(",") if x)}
-        for r in build_edge.starmap([(l, tag, set_tag, over.get(l, default_h), seed, root) for l in langs.split(",")]):
+        for r in build_edge.starmap([(l, tag, set_tag, over.get(l, default_h), seed, root, straddle) for l in langs.split(",")]):
             print(json.dumps({k: r[k] for k in ("lang", "kept_h", "counts", "modes", "edge_gap_s")}, ensure_ascii=False))
 
     @app.local_entrypoint()

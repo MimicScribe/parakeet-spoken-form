@@ -273,7 +273,7 @@ def hold_out_refs(refs: list, per_group: int = 2) -> tuple:
 
 
 def assign(rows: list, lang: str, refs: list, cloud: list | None, chirp_share: float, seed: int = 19, vtag: str = "advB", engine: str = "qwen3",
-           test: bool = False) -> dict:
+           test: bool = False, min_voices: int = 4) -> dict:
     """Round robin over the clone references; chirp_share of the rows go to cloud voices. Pack: held-out persona excluded (assign_voices
     does it). Test (test=True): ONLY the held-out Chirp persona of the language is used for the cloud share. Normal rates (0.9-1.25)."""
     import ml_tts_symbol as S
@@ -301,7 +301,7 @@ def assign(rows: list, lang: str, refs: list, cloud: list | None, chirp_share: f
         for r in cl:
             r["speed"] = rng.choice(S.RATES)
     else:
-        S.assign_voices(cl, lang, vtag, refs, None, engine, 4 if test else 10, S.RATES, 0.0)
+        S.assign_voices(cl, lang, vtag, refs, None, engine, min_voices, S.RATES, 0.0)
         by = {v["spk"]: v for v in refs}
         for r in cl:
             r["accent"] = by[r["voice"].split(":")[-1]].get("accent")

@@ -285,7 +285,7 @@ def fr_style(style: str, s: str, rng: random.Random, kind: str) -> tuple:
 def small_style(style: str, s: str, rng: random.Random, lang: str, kind: str) -> tuple:
     P = lambda x: W.pair(x, lang)  # noqa: E731
     D = lambda x: W.digits(x, lang)  # noqa: E731
-    cc = {"de": "plus neun und vierzig", "pt": "mais cinquenta e cinco", "it": "più trenta nove", "nl": "plus drie en dertig"}[lang]
+    cc = {"de": "plus neun und vierzig", "pt": "mais cinquenta e cinco", "it": "più trenta nove", "nl": "plus een en dertig"}[lang]
     cut = {"de": 4, "pt": 2, "it": 3, "nl": 2}[lang]
     if lang == "pt":
         head, mid, rest = s[:2], s[2:3], s[3:]

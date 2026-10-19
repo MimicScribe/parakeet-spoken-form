@@ -100,7 +100,7 @@ def en_regnal(k, rng):
     o = int(o)
     w = W.ordinal_en(o)
     lab = f"{name} the {w}"
-    return _p(lab, [("ord", f"{name} {roman(o)}", f"the {w}")])
+    return _p(lab, [("ord", roman(o), f"the {w}")])
 
 
 def en_address(k, rng):
@@ -241,14 +241,15 @@ def en_date_dmy(k, rng):                     # k = "12-3-2025"
     d, m, y = map(int, k.split("-"))
     yy = en_year(y, rng)
     lab = rng.choice(["the ", ""]) + f"{en_day_ord(d)} of {W.MONTHS['en'][m - 1]} {yy}"
-    return _p(lab, [("date", k, lab)], AM_DATE)
+    pre = lab[:4] if lab.startswith("the ") else ""
+    return _p(lab, [("date", f"{d} {W.MONTHS['en'][m - 1]} {y}", lab[len(pre):])], AM_DATE)
 
 
 def en_date_mdy(k, rng):
     d, m, y = map(int, k.split("-"))
     yy = en_year(y, rng)
     lab = f"{W.MONTHS['en'][m - 1]} {rng.choice([en_day_ord(d), _c(d, 'en')])} {yy}"
-    return _p(lab, [("date", k, lab)], AM_DATE)
+    return _p(lab, [("date", f"{W.MONTHS['en'][m - 1]} {d}, {y}", lab)], AM_DATE)
 
 
 def en_date_numeric(k, rng):
@@ -299,7 +300,7 @@ def es_regnal(k, rng):
     if o > 10 and name != "Alfonso":
         w = ES_ORD[o]
     lab = f"{name} {w}"
-    return _p(lab, [("ord", f"{name} {roman(o)}", w)])
+    return _p(lab, [("ord", roman(o), w)])
 
 
 def es_version(k, rng):
@@ -392,7 +393,7 @@ def es_date_words(k, rng):
     d, m, y = map(int, k.split("-"))
     dd = "primero" if d == 1 else _c(d, "es")
     lab = f"el {dd} de {W.MONTHS['es'][m - 1]} de {_c(y, 'es')}"
-    return _p(lab, [("date", k, lab)], AM_DATE)
+    return _p(lab, [("date", f"{d} de {W.MONTHS['es'][m - 1]} de {y}", lab[3:])], AM_DATE)
 
 
 def es_range_to(k, rng):
@@ -419,7 +420,7 @@ def fr_regnal(k, rng):
     o = int(o)
     w = FR_ORD[o]
     lab = f"{name} {w}"
-    return _p(lab, [("ord", f"{name} {roman(o)}", w)])
+    return _p(lab, [("ord", roman(o), w)])
 
 
 def fr_version(k, rng):
@@ -513,7 +514,7 @@ def fr_date_words(k, rng):
     d, m, y = map(int, k.split("-"))
     dd = "premier" if d == 1 else _c(d, "fr")
     lab = f"le {dd} {W.MONTHS['fr'][m - 1]} {_c(y, 'fr')}"
-    return _p(lab, [("date", k, lab)], AM_DATE)
+    return _p(lab, [("date", f"{'1er' if d == 1 else d} {W.MONTHS['fr'][m - 1]} {y}", lab[3:])], AM_DATE)
 
 
 def fr_range_to(k, rng):

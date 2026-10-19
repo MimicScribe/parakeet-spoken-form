@@ -117,8 +117,41 @@ def test_edge_phrase_never_cut():
 
 
 
+def test_straddle_cuts_inside_a_reading_and_labels_what_is_heard():
+    rows = _stream()
+    seen = set()
+    for seed in range(12):
+        rng = random.Random(seed)
+        gaps = W.stream_gaps(len(rows), rng)
+        quiet = lambda t0, t1: (t0 + t1) / 2  # noqa: E731
+        ws = W.plan_edge_windows(rows, gaps, quiet, rng, straddle=1.0)
+        starts, words, total = W.layout(rows, gaps)
+        for w in ws:
+            assert w["edge"] in ("straddle_l", "straddle_r")
+            seen.add(w["edge"])
+            inside = words[w["j0"]:w["j1"]]
+            assert w["text"] == " ".join(x[0] for x in inside)       # the label is exactly the words in the window
+            keys = {x[3] for x in inside if x[3] is not None}
+            part = [k for k in keys if not all(w["j0"] <= n < w["j1"] for n, x in enumerate(words) if x[3] == k)]
+            assert part, "a straddle window must cut a reading"
+            assert W.MIN_LEN - 1e-6 <= w["b"] - w["a"] <= W.WIN + 1e-6
+    assert seen == {"straddle_l", "straddle_r"}, seen
+
+
+def test_straddle_off_leaves_the_rng_stream_unchanged():
+    rows = _stream()
+    out = []
+    for st in (0.0, 0.0):
+        rng = random.Random(5)
+        gaps = W.stream_gaps(len(rows), rng)
+        out.append([(w["a"], w["b"], w["edge"]) for w in W.plan_edge_windows(rows, gaps, lambda a, b: (a + b) / 2, rng, straddle=st)])
+    assert out[0] == out[1] and out[0]
+
+
 if __name__ == "__main__":
     test_edges()
     test_edge_phrase_never_cut()
     test_short_readings_ignored()
+    test_straddle_cuts_inside_a_reading_and_labels_what_is_heard()
+    test_straddle_off_leaves_the_rng_stream_unchanged()
     print("ok")
