@@ -63,3 +63,52 @@ def test_read_resume_step_missing_file_falls_back_to_done_markers(tmp_path):
     open(last + ".step", "w").write("500")
     assert F.read_resume_step(last, exp) == 500  # a good marker wins
     assert F.read_resume_step(f"{exp}/nope/last.ckpt", f"{exp}/nope") == 0
+
+
+# ---- mix-drift guard: a resume must rebuild the run's first manifest
+def _manifest(tmp_path, rows):
+    p = tmp_path / "train_manifest.jsonl"
+    p.write_text("".join(r + "\n" for r in rows))
+    return str(p)
+
+
+def test_first_start_stores_the_manifest_hash(tmp_path):
+    exp = tmp_path / "exp"
+    exp.mkdir()
+    h = F.check_mix_drift(str(exp), _manifest(tmp_path, ["a", "b"]), resuming=False)
+    assert (exp / "train_manifest.sha256").read_text() == h == F.manifest_sha256(str(tmp_path / "train_manifest.jsonl"))
+
+
+def test_resume_with_the_same_mix_passes(tmp_path):
+    exp = tmp_path / "exp"
+    exp.mkdir()
+    m = _manifest(tmp_path, ["a", "b"])
+    h = F.check_mix_drift(str(exp), m, resuming=False)
+    assert F.check_mix_drift(str(exp), m, resuming=True) == h
+
+
+def test_resume_with_a_drifted_mix_is_refused(tmp_path):
+    exp = tmp_path / "exp"
+    exp.mkdir()
+    F.check_mix_drift(str(exp), _manifest(tmp_path, ["a", "b"]), resuming=False)
+    drifted = _manifest(tmp_path, ["a", "b", "c"])  # a part grew on the volume between attempts
+    try:
+        F.check_mix_drift(str(exp), drifted, resuming=True)
+    except AssertionError as e:
+        assert "mix drift" in str(e)
+    else:
+        raise AssertionError("a drifted resume must be refused")
+    # a fresh start (no checkpoint) is not a resume: it replaces the stored hash
+    h = F.check_mix_drift(str(exp), drifted, resuming=False)
+    assert (exp / "train_manifest.sha256").read_text() == h
+
+
+def test_resume_of_an_older_run_records_and_a_reseeded_resume_only_records(tmp_path):
+    exp = tmp_path / "exp"
+    exp.mkdir()
+    m = _manifest(tmp_path, ["a"])
+    h = F.check_mix_drift(str(exp), m, resuming=True)  # no marker yet: nothing to compare
+    assert (exp / "train_manifest.sha256").read_text() == h
+    other = _manifest(tmp_path, ["z"])
+    F.check_mix_drift(str(exp), other, resuming=True, strict=False)  # non-r3 resume reshuffles on purpose
+    assert (exp / "train_manifest.sha256").read_text() == h  # the first hash is kept

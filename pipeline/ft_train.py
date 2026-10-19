@@ -55,6 +55,39 @@ def read_resume_step(last: str, exp: str) -> int:
     return step
 
 
+def manifest_sha256(path: str) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def check_mix_drift(exp: str, manifest: str, resuming: bool, strict: bool = True) -> str:
+    """Mix-drift guard. Every attempt rebuilds the training manifest from the live volume. The first start of a run
+    stores its sha256 in `<exp>/train_manifest.sha256`; a resume (strict: same seed, so the same mix and order) must
+    write the identical manifest, otherwise a part changed under the run and the resumed steps would train on another
+    mix than the first ones. A fresh start (no checkpoint to resume) replaces the stored hash. A resume of a run
+    that predates the marker records the current hash and says so. strict=False (a resume that reseeds the shuffle on
+    purpose) only records."""
+    marker = f"{exp}/train_manifest.sha256"
+    now = manifest_sha256(manifest)
+    first = open(marker).read().strip() if resuming and os.path.exists(marker) else ""
+    if first and strict:
+        assert first == now, (f"mix drift: the manifest written for this resume ({now[:12]}) differs from the run's first "
+                              f"({first[:12]}, {marker}); a mix part changed on the volume since the run started. "
+                              f"Restore it, or start a new run name")
+        return now
+    if resuming and not first:
+        print(f"resume: no stored manifest hash for this run; recording {now[:12]}", flush=True)
+    if not (resuming and first):  # keep the first hash of a non-strict resume
+        write_atomic(marker, now)
+    print(f"manifest sha256 {now[:12]} recorded", flush=True)
+    return now
+
+
 class SaveEvery(pl.Callback):
     """Keep the trainable weights every `every` steps (no full checkpoints: 18M params, ~70 MB)."""
 
@@ -1656,6 +1689,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         import shutil
 
         shutil.copyfile(manifest, f"{exp}/train_manifest.jsonl")  # the record of what was trained on
+    check_mix_drift(exp, manifest, resuming, strict=r3)  # r3 keeps the seed on resume: the same mix, same order
     if tagged and not r3:
         replay_texts |= tagged.get("anchor", set())
         # a label in two tags keeps the stricter one: anchor > nonen > span
