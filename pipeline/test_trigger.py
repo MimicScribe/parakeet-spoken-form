@@ -311,7 +311,7 @@ def test_gate_go_at_250_500_and_over_both_launches_encF_once(world):
     gate_says(w, 0, 0, 0)
     t = w["make"]()
     settle(w, t)
-    assert [g[g.index("--steps") + 1] for g in w["ex"].gates] == ["250", "500", "250,500"]
+    assert [g[g.index("--steps") + 1] for g in w["ex"].gates] == ["250,500"]
     g = w["ex"].gates[0]
     assert g[g.index("--steps") - 2:g.index("--steps")] == ["E", "C"]  # <E run> <C run> --steps ...
     assert t.state["encF"] == "go" and "F" in launched_runs(w)
@@ -319,10 +319,10 @@ def test_gate_go_at_250_500_and_over_both_launches_encF_once(world):
     assert f[f.index("--arm") + 1] == "R10-encF" and f[f.index("--max-steps") + 1] == "4000"
     assert f[f.index("--init-from") + 1] == "M@1000"
     settle(w, t)
-    assert launched_runs(w).count("F") == 1 and len(w["ex"].gates) == 3
+    assert launched_runs(w).count("F") == 1 and len(w["ex"].gates) == 1
 
 
-@pytest.mark.parametrize("k250,k500,both", [(1, 0, 0), (0, 1, 1), (0, 0, 1)])  # a NO-GO anywhere, incl. the sign read
+@pytest.mark.parametrize("k250,k500,both", [(1, 1, 1), (0, 0, 1)])  # the single registered read (250,500) says NO-GO
 def test_gate_no_go_anywhere_never_launches_encF(world, k250, k500, both):
     w = world
     start_branches(w)
@@ -341,10 +341,10 @@ def test_the_gate_waits_for_both_branches_scores_at_each_step(world):
     gate_says(w, 0, 0, 0)
     t = w["make"]()
     settle(w, t)
-    assert [g[g.index("--steps") + 1] for g in w["ex"].gates] == ["250"] and t.state["encF"] == "pending"
+    assert w["ex"].gates == [] and t.state["encF"] == "pending"  # the registered read needs step 500 too
     w["vol"].put("C", 500)
     settle(w, t)
-    assert len(w["ex"].gates) == 1  # E has no step 500 yet
+    assert len(w["ex"].gates) == 0  # E has no step 500 yet
     w["vol"].put("E", 500)
     settle(w, t)
     assert t.state["encF"] == "go"

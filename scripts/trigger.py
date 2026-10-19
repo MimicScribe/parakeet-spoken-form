@@ -47,7 +47,7 @@ RETRY_S = 300  # a refused / transiently failed launch is tried again no sooner 
 MAX_ATTEMPTS = 3  # for a launcher refusal that retrying cannot fix (bad arguments, wrong commit)
 SWITCHES = ("--anchor-init", "--detach")  # flags of the launcher's training command that take no value
 HAND_LAUNCHED = ("anc1", "cap", "enfree2")  # runs started by hand: scored when they exist, not waited for otherwise
-GATE_KEYS = ("250", "500", "250,500")  # the step sets the interim gate is read over
+GATE_KEYS = ("250,500",)  # the registered read: full bars at the last step (500) + W/U sign agreement with 250; a 250-only read would apply the full bars to noise
 ROLES = ("main", "lr05", "cap", "enfree2", "brC", "brCs2", "brE", "brEr", "encF", "anc1")  # brCs2: brC again on another sampler seed; anc1: launched by hand
 
 
@@ -597,7 +597,7 @@ class Trigger:
     # --- gates, encF, early stop -------------------------------------------------------------------------------
 
     def gate_step(self) -> None:
-        """The interim gate, read at step 250, at step 500 and over both (its sign-agreement read); encF needs all three GO."""
+        """The interim gate, read once over steps 250 and 500 (full bars at 500, W/U sign agreement with 250); encF needs GO."""
         c = self.cfg
         if self.state["encF"] != "pending" or not c.get("gate_script"):
             return
@@ -643,7 +643,7 @@ class Trigger:
             self.log(f"encF decision: NO (gate verdicts {verdicts}); no full encoder run, diagnose by hand")
         elif len(verdicts) == len(GATE_KEYS):
             self.state["encF"] = "go"
-            self.log("encF decision: GO at 250, at 500 and over both (sign agreement)")
+            self.log("encF decision: GO over steps 250,500 (bars at 500, W/U sign agreement)")
         self.save()
 
     def early_stop_step(self) -> None:
