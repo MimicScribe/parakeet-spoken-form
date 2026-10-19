@@ -31,6 +31,30 @@ class KeepEncoderFrozen(pl.Callback):
         m.encoder.eval()
 
 
+def write_atomic(path: str, text: str) -> None:
+    """Write `text` to `path` through a temp file and os.replace: a reader sees the old or the new content, never a
+    truncated file (a crash between open and write used to leave an empty `.step`)."""
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def read_resume_step(last: str, exp: str) -> int:
+    """The step a resume continues from: `<last>.step`, written by SaveEvery. A missing, empty or unreadable file falls
+    back to the highest `step<N>.pt.done` in `exp` (SaveEvery writes both at the same boundary), then to 0, so a run
+    never fails to resume (or resumes with a nonsense sampler seed) over a lost marker."""
+    try:
+        return int(open(last + ".step").read().strip())
+    except (OSError, ValueError):
+        pass
+    done = [int(m.group(1)) for n in (os.listdir(exp) if os.path.isdir(exp) else [])
+            if (m := re.fullmatch(r"step(\d+)\.pt\.done", n))]
+    step = max(done, default=0)
+    print(f"resume: {last}.step missing or unreadable -> step {step} from the .done markers", flush=True)
+    return step
+
+
 class SaveEvery(pl.Callback):
     """Keep the trainable weights every `every` steps (no full checkpoints: 18M params, ~70 MB)."""
 
@@ -43,8 +67,8 @@ class SaveEvery(pl.Callback):
             torch.save(trainable_state(m), f"{self.exp}/step{step}.pt")
             if self.last:  # full state (optimizer, scheduler, step) for a resume after preemption
                 trainer.save_checkpoint(self.last + ".tmp")
+                write_atomic(self.last + ".step", str(step))  # before the checkpoint swap: never behind it
                 os.replace(self.last + ".tmp", self.last)
-                open(self.last + ".step", "w").write(str(step))
             open(f"{self.exp}/step{step}.pt.done", "w").close()
             self.on_save()
 
@@ -1616,7 +1640,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         # lhotse restarts its sampler on resume: a NEW sampler seed so the resumed run does not replay the batches it
         # already saw (NeMo lhotse docs). R3: the MIX (which rows) stays the same — only the order
         # changes (retrain-3 review: reseeding write_mix changed the data mid-run).
-        step0 = int(open(last + ".step").read().strip() or 0)
+        step0 = read_resume_step(last, exp)
         sampler_seed = seed + 1000 * step0
         if not r3:
             seed = sampler_seed
