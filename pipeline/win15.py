@@ -182,6 +182,7 @@ LONG_MIN_WORDS = 3
 EDGE_TAIL = (0.1, 2.0)
 EDGE_HEAD = (0.0, 1.5)
 EDGE_MODES = ("head", "middle", "tail")  # start, middle and end, about evenly
+MIN_PIECE_S = 0.25  # s: shortest stretch of a source row an edge window may hold
 
 
 def long_targets(words: list, min_words: int = LONG_MIN_WORDS) -> list:
@@ -251,6 +252,9 @@ def plan_edge_windows(rows: list, gaps: list, quiet, rng, win: float = WIN, min_
         n_rows = len({x[4] for x in ws if x[3] is not None})
         if n_rows < min_rows or not ends_ok(rows, words, w, edge_ok):
             continue
+        rws = sorted({x[4] for x in ws})
+        if any(min(starts[i] + rows[i]["duration"], b) - max(starts[i], a) < MIN_PIECE_S for i in rws):
+            continue  # a source row with only a sliver inside the window (one short word at a cut)
         seen.add((j0, j1))
         rws = sorted({x[4] for x in ws})
         cut_l = j0 > 0 and words[j0 - 1][4] == words[j0][4]
