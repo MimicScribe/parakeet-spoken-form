@@ -190,7 +190,11 @@ def score_rows(rows: list, lang: str, caps: dict, sym: bool = True) -> dict:
     """{(id, span text, occurrence): record} for one decoded run; mirrors SH.score_spans (same placement, regions,
     outcomes) and adds the class, the form and the unit / decimal-word flags (the old table). sym: also the symmetric
     sub-scores of symscore (value_ok, sform, unit_* , dec_*, clean) for every span; a language symscore cannot read gets
-    none (SYM_FIELDS absent) and the symmetric table skips it."""
+    none (SYM_FIELDS absent) and the symmetric table skips it. A caption span with NO candidate reading (the reading
+    generator has none for e.g. "3.000.000" or it "0,75") used to be skipped without a trace; with sym it is kept, flagged
+    nocand=True and scored by symscore only (value from the caption digits, hyp read by the number reader); the old
+    positional fields are meaningless for it (out="NOCAND") and every old metric leaves it out. Without sym it is skipped as
+    before."""
     out, seen, recs = {}, collections.Counter(), []
     for r in rows:
         m = caps.get(r["id"]) or {}
@@ -207,7 +211,8 @@ def score_rows(rows: list, lang: str, caps: dict, sym: bool = True) -> dict:
         sps = M.spans_regional(cap, lang, SH.READINGS)
         chain_of = _chains(sps, cap)
         for si, (sp, sp0) in enumerate(zip(sps, nobare)):
-            if not sp.cands:
+            nocand = not sp.cands  # no candidate reading for the caption value ("3.000.000", it "0,75"): see below
+            if nocand and not sym:
                 continue
             place, rsp = None, None
             for q in range(k, len(row_spans)):
@@ -237,11 +242,13 @@ def score_rows(rows: list, lang: str, caps: dict, sym: bool = True) -> dict:
             hw0, n0 = hyp_raw[i:j], hw_all[i:j]
             us, ud = unit_flags(cls, sp, lab_words, hw0, n0, lang) if place else (False, False)
             ds, dd = dec_flags(cls, lab_words, hw0, lang) if place else (False, False)
+            if nocand:  # no word reading to compare with: the positional outcome means nothing; symscore still reads the value
+                o = "NOCAND"
             occ = seen[(r["id"], sp.text)]
             seen[(r["id"], sp.text)] += 1
             rec = dict(lang=lang, cl=cluster(r["id"], lang), cls=cls, out=o, form=form,
                        words=form in ("converted", "words_wrong"), digits=form == "digits_left",
-                       right=o in RIGHT, us=us, ud=ud, ds=ds, dd=dd, placed=place is not None)
+                       right=o in RIGHT, us=us, ud=ud, ds=ds, dd=dd, placed=place is not None, nocand=nocand)
             out[(r["id"], sp.text, occ)] = rec
             if sym:  # what symscore needs, dropped again after scoring
                 recs.append(dict(rec, key=(lang, r["id"], sp.text, occ), id=r["id"], si=si, kind=sp.kind, text=sp.text,
@@ -276,8 +283,9 @@ def sym_counts(recs: dict) -> dict:
         if "value_ok" not in r:
             continue
         for key in (r["cls"], "ALL"):
-            c = out.setdefault(key, {"n": 0, "W": 0, "V": 0, "Uw": [0, 0], "Ud": [0, 0]})
+            c = out.setdefault(key, {"n": 0, "W": 0, "V": 0, "Uw": [0, 0], "Ud": [0, 0], "nc": 0})
             c["n"] += 1
+            c["nc"] += bool(r.get("nocand"))
             c["W"] += r["sform"] == "words"
             c["V"] += bool(r["value_ok"])
             for name, form in (("Uw", "words"), ("Ud", "digits")):
@@ -291,7 +299,8 @@ def fmt_sym(c: dict) -> str:
     """One line for a sym_counts entry: n, W %, V %, U_w and U_d as missing% (misses/spans)."""
     pct = lambda a, b: f"{100 * a / b:5.1f}" if b else "   - "  # noqa: E731
     rate = lambda x: f"{pct(x[0], x[1])}% ({x[0]}/{x[1]})"  # noqa: E731
-    return f"n {c['n']:5d}  W {pct(c['W'], c['n'])}  V {pct(c['V'], c['n'])}  U_w {rate(c['Uw'])}  U_d {rate(c['Ud'])}"
+    nc = f" (nocand {c['nc']})" if c.get("nc") else ""
+    return f"n {c['n']:5d}{nc}  W {pct(c['W'], c['n'])}  V {pct(c['V'], c['n'])}  U_w {rate(c['Uw'])}  U_d {rate(c['Ud'])}"
 
 
 def run_name(arg: str, mix: str) -> str:
@@ -314,7 +323,16 @@ def load_arm(run: str, langs: list, work: Path, caps_by_lang: dict, sym: bool = 
 
 # ------------------------------------------------------------------------------------------------ aggregation
 def _sel(recs: list, metric: str) -> tuple:
-    """(numerator flags, denominator flags) per record for one metric."""
+    """(numerator flags, denominator flags) per record for one metric. The old (positional) metrics leave out spans with
+    no candidate reading (nocand): their outcome is not defined there."""
+    num, den = _sel_raw(recs, metric)
+    if metric in METRICS:
+        keep = [not r.get("nocand") for r in recs]
+        num, den = [a and k for a, k in zip(num, keep)], [a and k for a, k in zip(den, keep)]
+    return num, den
+
+
+def _sel_raw(recs: list, metric: str) -> tuple:
     if metric == "W":
         return [r.get("sform") == "words" for r in recs], [True] * len(recs)
     if metric == "V":
@@ -434,6 +452,7 @@ def main(argv=None):
             if keys:
                 has_sym = not a.legacy and all("value_ok" in v[k] for v in arms.values() for k in keys)
                 result[f"{lang}/{c}"] = {"n": len(keys), "sym": has_sym,
+                                         "nocand": sum(1 for k in keys if arms[next(iter(arms))][k].get("nocand")),
                                          "arms": aggregate(arms, keys, refs, a.boot,
                                                            metrics=METRICS + SYM_METRICS if has_sym else METRICS)}
     print("\nValues in %. Under each non-reference arm: difference to each reference, * = cluster CI95 excludes 0, [lo,hi] = CI95.")
@@ -452,7 +471,8 @@ def print_table(result: dict, refs: list, min_n: int, legacy: bool = False) -> N
         if blk["n"] < min_n:
             continue
         sym = blk.get("sym") and not legacy
-        print(f"\n== {key}  (n={blk['n']} spans)")
+        nc = f", {blk['nocand']} without a candidate reading: V / W / U only, not in the old columns" if blk.get("nocand") else ""
+        print(f"\n== {key}  (n={blk['n']} spans{nc})")
         print(sym_hdr if sym else old_hdr)
         for arm, mets in blk["arms"].items():
             if sym:

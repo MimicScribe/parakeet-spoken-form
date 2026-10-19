@@ -229,15 +229,89 @@ class D_ScorerBugs(unittest.TestCase):
         bad = [r["id"] for r in with_hyp("en_words") if rec(r, "en_words")["sform"] == "words"]
         self.assertEqual(bad, [])
 
-    @unittest.expectedFailure
-    def test_every_caption_span_is_scored(self):
-        # SCORER BUG (score_rows / score_spans skip a span whose caption has no candidate reading, without counting it):
-        # these invented captions hold a number and are never scored, in any rate.
-        gaps = [("de", "Es sind 3.000.000 hier."), ("it", "Sono 0,75 qui."), ("nl", "Het zijn 0,75 hier."),
-                ("pt", "São 12,4 aqui."), ("pt", "São 300.000 aqui."), ("fr", "Il y a 6,75 ici."), ("it", "Sono 15,2 qui.")]
-        unscored = [(lang, cap) for lang, cap in gaps
-                    if not [s for s in M.spans_regional(cap, lang, SH.READINGS) if s.cands]]
-        self.assertEqual(unscored, [])
+
+# Captions whose number has NO candidate reading (ml_cands has none): (lang, caption, label, seg, right words, wrong words)
+NOCAND = [
+    ("de", "Es sind 3.000.000 hier.", "es sind drei Millionen hier", "drei Millionen", "drei Millionen", "vier Millionen"),
+    ("it", "Sono 0,75 qui.", "sono zero virgola settantacinque qui", "zero virgola settantacinque",
+     "zero virgola settantacinque", "zero virgola settantasei"),
+    ("nl", "Het zijn 0,75 hier.", "het zijn nul komma vijfenzeventig hier", "nul komma vijfenzeventig",
+     "nul komma vijfenzeventig", "nul komma vijfenzestig"),
+    ("pt", "São 12,4 aqui.", "são doze vírgula quatro aqui", "doze vírgula quatro", "doze vírgula quatro",
+     "doze vírgula cinco"),
+    ("pt", "São 300.000 aqui.", "são trezentos mil aqui", "trezentos mil", "trezentos mil", "quatrocentos mil"),
+    ("fr", "Il y a 6,75 ici.", "il y a six virgule soixante-quinze ici", "six virgule soixante-quinze",
+     "six virgule soixante-quinze", "six virgule soixante-seize"),
+    ("it", "Sono 15,2 qui.", "sono quindici virgola due qui", "quindici virgola due", "quindici virgola due",
+     "quindici virgola tre"),
+]
+
+
+def nocand_run(lang, caption, label, seg, hyps, sym=True):
+    """score_rows on a hand-built row whose caption span has no candidate reading; one row per hypothesis."""
+    (sp,) = [s for s in M.spans_regional(caption, lang, SH.READINGS)]
+    a = label.index(seg)
+    caps = {f"v{k}": {"id": f"v{k}", "caption": caption, "text": label, "spans": [{"text": sp.text, "kind": sp.kind}],
+                      "num_chars": [[a, a + len(seg)]]} for k in range(len(hyps))}
+    rows = [{"id": f"v{k}", "hyp": h, "ref": label} for k, h in enumerate(hyps)]
+    return CR.score_rows(rows, lang, caps, sym=sym), caps, rows, sp
+
+
+class F_SpansWithoutACandidateReading(unittest.TestCase):
+    """These spans were skipped without a trace, so no rate had them. Now: counted (nocand), scored by value."""
+
+    def test_the_fixture_captions_really_have_no_candidate_reading(self):
+        for lang, cap, *_ in NOCAND:
+            (sp,) = M.spans_regional(cap, lang, SH.READINGS)
+            self.assertEqual(list(sp.cands), [], (lang, cap))
+
+    def test_each_gets_a_value_outcome_in_either_form(self):
+        for lang, cap, label, seg, right, wrong in NOCAND:
+            digits = cap.rstrip(".")
+            hyps = [label, label.replace(seg, wrong), cap, label.replace(seg, "")]
+            out, _, _, sp = nocand_run(lang, cap, label, seg, hyps)
+            recs = [out[(f"v{k}", sp.text, 0)] for k in range(4)]
+            with self.subTest(f"{lang} {cap}"):
+                self.assertTrue(all(r["nocand"] for r in recs))
+                self.assertTrue(recs[0]["value_ok"] and recs[0]["sform"] == "words")
+                self.assertFalse(recs[1]["value_ok"])
+                self.assertTrue(recs[2]["value_ok"] and recs[2]["sform"] == "digits")
+                self.assertFalse(recs[3]["value_ok"])
+                self.assertTrue(all(r["out"] == "NOCAND" for r in recs))
+
+    def test_they_are_counted_per_class_and_stay_out_of_the_old_columns(self):
+        lang, cap, label, seg, right, wrong = NOCAND[1]
+        out, *_ = nocand_run(lang, cap, label, seg, [label, label.replace(seg, wrong)])
+        c = CR.sym_counts(out)
+        self.assertEqual((c["ALL"]["n"], c["ALL"]["nc"], c["ALL"]["V"]), (2, 2, 1))
+        self.assertIn("nocand 2", CR.fmt_sym(c["ALL"]))
+        recs = list(out.values())
+        for m in CR.METRICS:
+            num, den = CR._sel(recs, m)
+            self.assertFalse(any(num) or any(den), m)
+        # the symmetric metrics do count them
+        self.assertEqual(sum(CR._sel(recs, "V")[0]), 1)
+        self.assertEqual(sum(CR._sel(recs, "V")[1]), 2)
+
+    def test_the_legacy_scorer_reports_them_as_unscored(self):
+        lang, cap, label, seg, right, wrong = NOCAND[0]
+        _, caps, rows, _ = nocand_run(lang, cap, label, seg, [label])
+        sc, _ = SH.score_spans(rows, lang, caps)
+        self.assertEqual(sc["nocand"], {"all": 1, "int": 1})
+        self.assertNotIn("all", sc)  # nothing else was scored
+        self.assertEqual(nocand_run(lang, cap, label, seg, [label], sym=False)[0], {})  # --legacy records: unchanged
+
+    def test_a_block_header_states_the_coverage(self):
+        lang, cap, label, seg, right, wrong = NOCAND[1]
+        out, *_ = nocand_run(lang, cap, label, seg, [label, label.replace(seg, wrong)])
+        arms = {"a__m": out}
+        keys = list(out)
+        res = {"it/ALL": {"n": 2, "sym": True, "nocand": 2,
+                          "arms": CR.aggregate(arms, keys, [], 20, metrics=CR.METRICS + CR.SYM_METRICS)}}
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            CR.print_table(res, [], 1)
+        self.assertIn("2 without a candidate reading", buf.getvalue())
 
 
 class E_Determinism(unittest.TestCase):

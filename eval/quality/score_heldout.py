@@ -214,7 +214,9 @@ def score_spans(rows: list, lang: str, caps: dict, per_span: list = None, forms:
         k = 0
         nobare = M.spans_regional(cap, lang, READINGS - {"cur_bare"})  # the same spans without the unit-less price reading
         for sp, sp0 in zip(M.spans_regional(cap, lang, READINGS), nobare):
-            if not sp.cands:
+            if not sp.cands:  # no word reading to compare with: not scored here, but counted (the symmetric block reads these)
+                c["nocand"]["all"] += 1
+                c["nocand"][sp.kind] += 1
                 continue
             place = None
             for q in range(k, len(row_spans)):
@@ -540,7 +542,8 @@ def main(argv=None):
             n = sum(al.values()) or 1
             print(f"{run:24s} {lang:4s} {n:5d} {100 * al.get('WORDS_RIGHT_VALUE', 0) / n:7.1f} "
                   f"{100 * al.get('DIGITS_RIGHT_VALUE', 0) / n:7.1f} {al.get('WRONG_VALUE', 0):5d} {al.get('DROPPED', 0):5d} bare-price {al.get('BARE_PRICE', 0):3d}  "
-                  + " ".join(f"{k}:{v.get('WORDS_RIGHT_VALUE', 0)}/{sum(v.values())}" for k, v in sorted(sc.items()) if k not in ("all", "unplaced"))
+                  + " ".join(f"{k}:{v.get('WORDS_RIGHT_VALUE', 0)}/{sum(v.values())}" for k, v in sorted(sc.items()) if k not in ("all", "unplaced", "nocand"))
+                  + (f" unscored(no reading) {sc['nocand']['all']}" if sc.get("nocand") else "")
                   + f"   | lost {di['lost_per100']} invented {di['invented_per100']} per 100 words (n={di['ref_content_words']})")
             sh = N.form_shares(fm)
             print(f"{'':24s} {'':4s} FORM converted {sh['converted']}% digits-left {sh['digits_left']}% mixed {sh['mixed']}% words-wrong {sh['words_wrong']}% other {sh['other']}% (old converted {sh.get('converted_old')}%)")
