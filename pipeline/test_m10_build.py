@@ -129,3 +129,13 @@ assert MB.trim_num_punct(y_) == 1 and y_["num_chars"] == [[0, 4], [6, 10]], y_
 z_ = {"text": "ein.hundert", "num_chars": [[0, 11]]}
 assert MB.trim_num_punct(z_) == 0 and "." in z_["text"][0:11]  # inside: left for the assert
 print("test_m10_build: trailing punctuation of number spans ok")
+
+# ---- syn_cap_raise: only the named (language, class) caps move, and only while a build sets them
+import census_common as CC
+assert CC.syn_limit("de", "pct") == 0.30 and CC.syn_limit("es", "cur") == 0.5
+CC.SYN_CAP_RAISE.update({("de", "pct"): 0.95, ("es", "pct"): 0.95})
+assert CC.syn_limit("de", "pct") == 0.95 and CC.syn_limit("de", "dec") == 0.30 and CC.syn_limit("it", "pct") == 0.30
+assert CC.syn_limit("es", "cur") == 0.5  # never lowers a cap
+CC.SYN_CAP_RAISE.clear()
+assert CC.syn_limit("de", "pct") == 0.30 and 'syn_cap_raise: str = ""' in open(MA.__file__).read()
+print("test_m10_build: syn_cap_raise ok")

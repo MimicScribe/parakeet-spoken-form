@@ -1430,7 +1430,7 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
                en_win15: bool = True, edge_fix_dir: str = "", extra_passes: str = "", relabel_rows: str = "",
                relabel_parts_dir: str = "", relabel_tts: bool = False, part_weights: str = "", extra_parts: str = "",
                en_drop_list: str = "", exclude_passes: str = "", seam_extra: str = "", seam_long_extra: str = "", vsplit_dir: str = "",
-               en_relabel_dir: str = ""):
+               en_relabel_dir: str = "", syn_cap_raise: str = ""):
     """Greek ς restore (idempotent) + mix_build.build4 + the number share of the v4 mix (total and English-only).
     Run 2 (2026-10-17): balance = build4 template / session caps; en_bal = mix_build.en_balance on the English real
     parts (writes their _bcap copies: caps, then the YouTube top-up trim into the 35-40% band); repeat / win_repeat /
@@ -1449,7 +1449,8 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
     seam_extra ("a,b"): more seam files, names relative to ml/p3v2/<lang>/ with {lang} ("../../realx1wb/{lang}/seam"); seam_long_extra: the same for the long-number seam part.
     en_relabel_dir ("ml/tier1/drops"): en_relabel_rows.jsonl / en_relabel_drops.jsonl are applied to the English parts (the
     capped copies by en_balance, every other part as <mix_dir>/en_rl/ copies the listing picks up).
-    vsplit_dir ("ml/ttsVS1"): the build stops if a chosen ttsVS1 / ttsRF1 row carries a V_b value (mix_build.vb_violations)."""
+    syn_cap_raise ("pct,dec=0.95@de,es"): a controlled TEST of raised synthetic-share caps for those classes and languages
+    (mix_build.build4; never the policy). vsplit_dir ("ml/ttsVS1"): the build stops if a chosen ttsVS1 / ttsRF1 row carries a V_b value (mix_build.vb_violations)."""
     import json
 
     import mix_build
@@ -1469,7 +1470,8 @@ def build_mix4(rows_h: float = 99.0, win_h: float = 2.0, langs: str = ",".join(W
                                       relabel_parts_dir=relabel_parts_dir, relabel_tts=relabel_tts,
                                       exclude_passes=tuple(p for p in exclude_passes.split(",") if p),
                                       seam_extra=tuple(p for p in seam_extra.split(",") if p),
-                                      seam_long_extra=tuple(p for p in seam_long_extra.split(",") if p), vsplit_dir=vsplit_dir)}
+                                      seam_long_extra=tuple(p for p in seam_long_extra.split(",") if p), vsplit_dir=vsplit_dir,
+                                      syn_cap_raise=syn_cap_raise)}
     out["en_win15"] = en_win15_part(mix_dir, win15_dir, write=win15_share > 0 and en_win15)
     dry = mix_dir != "mix4" and not final  # final: a candidate mix in its own dir, English copies under it
     kw = dict(repeat=repeat, anchor18=anchor18, win_repeat=win_repeat, en_plain_h=en_plain_h, en_win_repeat=en_win_repeat,

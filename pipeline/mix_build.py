@@ -2107,7 +2107,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
            seam_files: tuple = SEAM_FILES, mix_dir: str = "mix4", seam_long_h: float = 0.0,
            split_langs: tuple = (), win15_share: float = 0.0, win15_dir: str = "ml/win15b", edge_fix_dir: str = "",
            extra_passes: tuple = (), relabel_rows: str = "", relabel_parts_dir: str = "", relabel_tts: bool = False,
-           exclude_passes: tuple = (), seam_extra: tuple = (), seam_long_extra: tuple = (), vsplit_dir: str = "") -> dict:
+           exclude_passes: tuple = (), seam_extra: tuple = (), seam_long_extra: tuple = (), vsplit_dir: str = "", syn_cap_raise: str = "") -> dict:
     """mix4/ manifests for the wave-1 run (all CPU, idempotent):
     - mix4/d2.jsonl: mix3/d2 (Greek restore applied) WITHOUT wave-1 languages: their digit rows were relabelled by P3
       (origin d2) and would otherwise teach digits through the stock token KL;
@@ -2175,8 +2175,15 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
     import compound_split as CS
     import ml_balance as B
 
+    import census_common as CC
+
+    CC.SYN_CAP_RAISE.clear()
+    if syn_cap_raise:
+        kinds, _, rest = syn_cap_raise.partition("=")
+        share, _, lgs = rest.partition("@")
+        CC.SYN_CAP_RAISE.update({(l_, k_): float(share) for l_ in lgs.split(",") for k_ in kinds.split(",") if l_ and k_})
     CS.check_split_langs(split_langs)  # before any work: the restored-vowel Italian form misaligns num_chars
-    stats = {"langs": {}}
+    stats = {"langs": {}, "syn_cap_raise": {f"{l_}.{k_}": v_ for (l_, k_), v_ in sorted(CC.SYN_CAP_RAISE.items())}}
     os.makedirs(f"{vol}/{mix_dir}", exist_ok=True)
     unsplit_targets = set()  # the unsplit texts of split target rows (the anchor-collision check below)
 

@@ -344,9 +344,14 @@ SYN_FLOOR_EXEMPT = {("en", "phone"), ("es", "frac"), ("es", "amp"), ("fr", "frac
 SYN_FLOOR_SPANS = {"frac": 150, "amp": 150}
 
 
+# {(language, class): share}: a build that TESTS raised synthetic-share caps (mix_build.build4 syn_cap_raise) fills it; empty
+# in every other build, so the caps above are the policy
+SYN_CAP_RAISE = {}
+
+
 def syn_limit(lang, k):
     """Max synthetic share of a class's spans in a language."""
-    return max(SYN_SHARE_KIND.get(k, 0.30), SYN_SHARE_LANG.get(lang, 0.0))
+    return max(SYN_SHARE_KIND.get(k, 0.30), SYN_SHARE_LANG.get(lang, 0.0), SYN_CAP_RAISE.get((lang, k), 0.0))
 
 
 def syn_floor(lang, k, tier=None):
