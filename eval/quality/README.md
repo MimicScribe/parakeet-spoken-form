@@ -7,6 +7,8 @@ Data-quality and scoring tools. Python 3, stdlib only for the tests (the number-
 | `data_gate.py` | census and bar per language x class (`--tier`) |
 | `carve_heldout.py` | carve rare-class held-out lists by whole session or video |
 | `score_heldout.py` | four-outcome held-out scoring |
+| `classread.py` | per language x class readout of one or more arms with paired cluster-bootstrap differences. Default: the symmetric table W (written in words), V (value right in either form), U_w / U_d (spoken unit or decimal word missing, among spans written in words / digits); `--legacy` prints the old asymmetric table. Needs `numpy` |
+| `symscore.py` | the symmetric value / unit / decimal scorer behind `classread.py` and `score_heldout.py` (digits and words read by one reader and graded by one procedure; `score_heldout.py --legacy` leaves it out) |
 | `number_outcomes.py` | number reader and scorer (CORE block identical to `pipeline/score_retrain.py`) |
 | `judge_reject.py`, `judge_plro.py` | row judges against a second transcript |
 | `wordfix_ext.py` | interior word repair from agreeing sources |

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Score the held-out probe (modal_app.py::probe_heldout) with the four-outcome number scorer.
 
-usage: score_heldout.py <run>[,<run>...] [--langs de,es,fr,it,nl,pt] [--work DIR] [--json out.json] [--mix-dir mix4]
+usage: score_heldout.py <run>[,<run>...] [--langs de,es,fr,it,nl,pt] [--work DIR] [--json out.json] [--mix-dir mix4] [--legacy]
 --mix-dir: the build the probe decoded (probe_heldout --mix-dir; a candidate build such as mix4final): its
 heldout_<lang> / tts_dev_<lang> rows are the references. The dec18 sets live in mix4 only (DEC18_DIR).
 A caption / validation list that exists on the volume but cannot be fetched is an error (volume_io.read_shared); a
@@ -487,6 +487,9 @@ def main(argv=None):
     ap.add_argument("--set", default="heldout", choices=["heldout", "ttsdev", "dec18"],
                     help="heldout = real held-out + VoxPopuli dev/test rows; ttsdev = held-out synthetic voices")
     ap.add_argument("--mix-dir", default="mix4", help="the build the probe decoded (probe_heldout --mix-dir)")
+    ap.add_argument("--legacy", action="store_true",
+                    help="only the old positional outputs (words-right / digits-right / wrong / dropped); default adds the "
+                         "symmetric V / U_w / U_d / W block per language x class (symscore via classread) and a 'sym' key in --json")
     ap.add_argument("--no-damage-vs", default="",
                     help="baseline run (B or ultra): per-language no-damage rule for every other run (next / moderate tiers)")
     ap.add_argument("--no-damage-rule", default="point", choices=["point", "ci"],
@@ -528,6 +531,11 @@ def main(argv=None):
             di = drops_inserts(rows, lang, caps)
             out[run][lang] = {"spans": sc, "check": check, "four_outcomes": c, "wrong": wrong, "drops_inserts": di,
                               "forms": fm, "forms_by_class": fbc, "per_span": ps}
+            sym = {}
+            if not a.legacy and a.set == "heldout":
+                import classread as CR  # the symmetric scorer's records (classread imports this module: lazy)
+
+                sym = out[run][lang]["sym"] = CR.sym_counts(CR.score_rows(rows, lang, caps, sym=True))
             al = sc.get("all", {})
             n = sum(al.values()) or 1
             print(f"{run:24s} {lang:4s} {n:5d} {100 * al.get('WORDS_RIGHT_VALUE', 0) / n:7.1f} "
@@ -536,6 +544,11 @@ def main(argv=None):
                   + f"   | lost {di['lost_per100']} invented {di['invented_per100']} per 100 words (n={di['ref_content_words']})")
             sh = N.form_shares(fm)
             print(f"{'':24s} {'':4s} FORM converted {sh['converted']}% digits-left {sh['digits_left']}% mixed {sh['mixed']}% words-wrong {sh['words_wrong']}% other {sh['other']}% (old converted {sh.get('converted_old')}%)")
+            if sym:
+                print(f"{'':24s} {'':4s} SYM  {CR.fmt_sym(sym['ALL'])}   (V = value right in either form, W = written in words, "
+                      f"U_w / U_d = unit or decimal word missing among spans written in words / digits)")
+                for cl in sorted(k for k in sym if k != "ALL"):
+                    print(f"{'':24s} {'':4s}   {cl:9s} {CR.fmt_sym(sym[cl])}")
     if a.no_damage_vs:
         for run in out:
             if run == a.no_damage_vs:

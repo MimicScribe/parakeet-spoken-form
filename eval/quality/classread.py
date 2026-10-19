@@ -2,15 +2,25 @@
 """Per-language x class held-out readout for any checkpoint (one command).
 
 usage: classread.py <run>@<step>[__<mix>] [<run>@<step> ...] [--mix mix4final8] [--work DIR] [--langs de,es,fr,it,nl,pt]
-                    [--refs ultra,spike_enc0_all@500] [--json out.json] [--boot 1000] [--min-n 5]
+                    [--refs ultra,spike_enc0_all@500] [--json out.json] [--boot 1000] [--min-n 5] [--legacy]
 
 Reads the held-out hyps probe_heldout / eval_ckpt.sh wrote (hyps/<run>@<step>__<mix>/heldout_<lang>.jsonl; fetched with the
 modal CLI into --work when not there yet) and scores every caption span with the SAME positional rules as
 score_heldout.score_spans (words-right / digits-right / wrong / dropped / bare price; the +-1 word slack; the same READINGS).
-Per language x census class (census_common.gate_class: pct dec dec_pair cur unit int_big int_small year phone clock alnum,
-everything else "other", and ALL) and per arm it reports
+SYMMETRIC readout (default, symscore.py: digits and words graded by one procedure; --legacy prints the old table below
+instead). Per language x census class (census_common.gate_class: pct dec dec_pair cur unit int_big int_small year phone
+clock alnum, everything else "other", and ALL) and per arm it reports
 
   n          spans (the same spans for every arm: the intersection)
+  W          % of spans written in words (what the reader finds standing where the number stands)
+  V          % of spans whose VALUE is right in either form ("40 mil", "XIII", "22" for 22:00, a glued phone number count;
+             a bare year tail does not); never looks at units, decimal words or symbols
+  U_w / U_d  % of the spans that SPEAK a unit or decimal word (percent, euro, km, komma ...) and are written in words / in
+             digits where the region holds neither the word, a symbol, an abbreviation nor a digit separator, over those
+             spans (shown as rate/denominator)
+
+The OLD table (--legacy; asymmetric, kept for comparison; the default JSON holds both) reports
+
   wshare     share of spans WRITTEN in words (converted + words_wrong)
   VR         value-right overall (words or digits with the right value)
   VRw / VRd  value-right among the spans the arm wrote in words / in digits
@@ -33,6 +43,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import number_outcomes as N  # noqa: E402
 import score_heldout as SH  # noqa: E402
+import symscore as SS  # noqa: E402
 
 PIPE = str(Path(__file__).resolve().parents[2] / "pipeline")
 sys.path.insert(0, PIPE)
@@ -44,7 +55,8 @@ CLASSES = ["pct", "dec", "dec_pair", "cur", "unit", "int_big", "int_small", "yea
 RIGHT = ("WORDS_RIGHT_VALUE", "DIGITS_RIGHT_VALUE")
 DEFAULT_REFS = ("ultra", "spike_enc0_all@500")
 SYMBOLS = set("%€$£°‰")
-METRICS = ("wshare", "vr", "vrw", "vrd", "unitdrop", "decdrop")
+METRICS = ("wshare", "vr", "vrw", "vrd", "unitdrop", "decdrop")  # the old table
+SYM_METRICS = ("W", "V", "Uw", "Ud")  # the symmetric table (symscore)
 
 
 def cluster(rid: str, lang: str) -> str:
@@ -138,10 +150,46 @@ def _caps(lang: str, work: Path, mix: str) -> dict:
     return SH._captions(lang, work, "heldout", mix)
 
 
-def score_rows(rows: list, lang: str, caps: dict) -> dict:
+def _chains(sps: list, cap: str) -> dict:
+    """span index -> digits of its caption chain, for spans that touch (gap only space / hyphen / slash / dot): a phone number
+    or a range the caption splits into several spans ("22 14 19 44 49", "43-98"); the chain's digits are one value."""
+    chain_of, cur = {}, []
+
+    def close():
+        if len(cur) > 1:
+            for c in cur:
+                chain_of[c] = "".join(re.sub(r"\D", "", sps[x].text) for x in cur)
+
+    for si, sp in enumerate(sps):
+        if cur and re.fullmatch(r"[ \-\u2013\u2212/.]{0,2}", cap[sps[cur[-1]].end:sp.start]) and sp.start >= sps[cur[-1]].end:
+            cur.append(si)
+        else:
+            close()
+            cur = [si]
+    close()
+    return chain_of
+
+
+SYM_FIELDS = ("value_ok", "sform", "sym_via", "unit_spoken", "unit_present", "dec_spoken", "dec_present", "clean")
+
+
+def _sym_missing(r: dict, form: str) -> tuple:
+    """(speaks a unit or decimal word, and it is missing) for a span written in `form` (words / digits); (False, False)
+    for any other form. The same test for both forms: the word, a symbol, an abbreviation or a digit separator."""
+    if r.get("sform") != form:
+        return False, False
+    spoken = r.get("unit_spoken", False) or r.get("dec_spoken", False)
+    missing = (r.get("unit_spoken", False) and not r.get("unit_present", False)) or (
+        r.get("dec_spoken", False) and not r.get("dec_present", False))
+    return bool(spoken), bool(missing)
+
+
+def score_rows(rows: list, lang: str, caps: dict, sym: bool = True) -> dict:
     """{(id, span text, occurrence): record} for one decoded run; mirrors SH.score_spans (same placement, regions,
-    outcomes) and adds the class, the form and the unit / decimal-word flags."""
-    out, seen = {}, collections.Counter()
+    outcomes) and adds the class, the form and the unit / decimal-word flags (the old table). sym: also the symmetric
+    sub-scores of symscore (value_ok, sform, unit_* , dec_*, clean) for every span; a language symscore cannot read gets
+    none (SYM_FIELDS absent) and the symmetric table skips it."""
+    out, seen, recs = {}, collections.Counter(), []
     for r in rows:
         m = caps.get(r["id"]) or {}
         cap = m.get("caption")
@@ -154,7 +202,9 @@ def score_rows(rows: list, lang: str, caps: dict) -> dict:
         allc = tuple(tuple(x) for x in nc)
         k = 0
         nobare = M.spans_regional(cap, lang, SH.READINGS - {"cur_bare"})
-        for sp, sp0 in zip(M.spans_regional(cap, lang, SH.READINGS), nobare):
+        sps = M.spans_regional(cap, lang, SH.READINGS)
+        chain_of = _chains(sps, cap)
+        for si, (sp, sp0) in enumerate(zip(sps, nobare)):
             if not sp.cands:
                 continue
             place, rsp = None, None
@@ -187,17 +237,66 @@ def score_rows(rows: list, lang: str, caps: dict) -> dict:
             ds, dd = dec_flags(cls, lab_words, hw0, lang) if place else (False, False)
             occ = seen[(r["id"], sp.text)]
             seen[(r["id"], sp.text)] += 1
-            out[(r["id"], sp.text, occ)] = dict(lang=lang, cl=cluster(r["id"], lang), cls=cls, out=o, form=form,
-                                                words=form in ("converted", "words_wrong"), digits=form == "digits_left",
-                                                right=o in RIGHT, us=us, ud=ud, ds=ds, dd=dd, placed=place is not None)
+            rec = dict(lang=lang, cl=cluster(r["id"], lang), cls=cls, out=o, form=form,
+                       words=form in ("converted", "words_wrong"), digits=form == "digits_left",
+                       right=o in RIGHT, us=us, ud=ud, ds=ds, dd=dd, placed=place is not None)
+            out[(r["id"], sp.text, occ)] = rec
+            if sym:  # what symscore needs, dropped again after scoring
+                recs.append(dict(rec, key=(lang, r["id"], sp.text, occ), id=r["id"], si=si, kind=sp.kind, text=sp.text,
+                                 cap=cap, a=sp.start, b=sp.end, labseg=lab[place[0]:place[1]] if place else "", lab=lab,
+                                 place=place, lab_words=lab_words, cands=list(sp.cands), cands0=list(sp0.cands),
+                                 reg_words=hyp_raw[i:j], hyp=r["hyp"], ireg=(i, j), chain_tgt=chain_of.get(si),
+                                 form_old=form, right_old=rec["right"], out_old=o))
+    if sym and recs:
+        try:
+            by = collections.defaultdict(list)
+            for x in recs:
+                by[x["id"]].append(x)
+            for row_recs in by.values():
+                scored = SS.sym_score_row(row_recs)
+                for x in row_recs:
+                    sc = scored[x["key"]]
+                    rec = out[(x["id"], x["text"], x["key"][3])]
+                    rec.update(value_ok=sc["value_ok"], sform=sc["form"], sym_via=sc["via"],
+                               unit_spoken=sc["unit_spoken"], unit_present=sc["unit_present"],
+                               dec_spoken=sc["dec_spoken"], dec_present=sc["dec_present"], clean=sc["clean"])
+        except SS.UnscorableLanguage:
+            print(f"# {lang}: symscore has no number reader for this language; symmetric table skips it", file=sys.stderr)
     return out
+
+
+def sym_counts(recs: dict) -> dict:
+    """{class or "ALL": {n, W, V, Uw, Ud}} counts of one run's score_rows output (symmetric sub-scores): W / V spans, and for
+    U_w / U_d [misses, spans that speak a unit or decimal word] written in words / digits. Rates are counts[k] / counts["n"]
+    or miss / den. {} when no record carries symmetric scores (an unreadable language)."""
+    out = {}
+    for r in recs.values():
+        if "value_ok" not in r:
+            continue
+        for key in (r["cls"], "ALL"):
+            c = out.setdefault(key, {"n": 0, "W": 0, "V": 0, "Uw": [0, 0], "Ud": [0, 0]})
+            c["n"] += 1
+            c["W"] += r["sform"] == "words"
+            c["V"] += bool(r["value_ok"])
+            for name, form in (("Uw", "words"), ("Ud", "digits")):
+                spoken, missing = _sym_missing(r, form)
+                c[name][0] += missing
+                c[name][1] += spoken
+    return out
+
+
+def fmt_sym(c: dict) -> str:
+    """One line for a sym_counts entry: n, W %, V %, U_w and U_d as missing% (misses/spans)."""
+    pct = lambda a, b: f"{100 * a / b:5.1f}" if b else "   - "  # noqa: E731
+    rate = lambda x: f"{pct(x[0], x[1])}% ({x[0]}/{x[1]})"  # noqa: E731
+    return f"n {c['n']:5d}  W {pct(c['W'], c['n'])}  V {pct(c['V'], c['n'])}  U_w {rate(c['Uw'])}  U_d {rate(c['Ud'])}"
 
 
 def run_name(arg: str, mix: str) -> str:
     return arg if "__" in arg else f"{arg}__{mix}"
 
 
-def load_arm(run: str, langs: list, work: Path, caps_by_lang: dict) -> dict:
+def load_arm(run: str, langs: list, work: Path, caps_by_lang: dict, sym: bool = True) -> dict:
     """{(lang, id, text, occ): record} of one arm over the langs. A language with no hyps is skipped (printed)."""
     res = {}
     for lang in langs:
@@ -206,7 +305,7 @@ def load_arm(run: str, langs: list, work: Path, caps_by_lang: dict) -> dict:
         if not rows:
             print(f"# {run} {lang}: no hyps", file=sys.stderr)
             continue
-        for k, v in score_rows(rows, lang, caps_by_lang[lang]).items():
+        for k, v in score_rows(rows, lang, caps_by_lang[lang], sym=sym).items():
             res[(lang,) + k] = v
     return res
 
@@ -214,6 +313,14 @@ def load_arm(run: str, langs: list, work: Path, caps_by_lang: dict) -> dict:
 # ------------------------------------------------------------------------------------------------ aggregation
 def _sel(recs: list, metric: str) -> tuple:
     """(numerator flags, denominator flags) per record for one metric."""
+    if metric == "W":
+        return [r.get("sform") == "words" for r in recs], [True] * len(recs)
+    if metric == "V":
+        return [bool(r.get("value_ok")) for r in recs], [True] * len(recs)
+    if metric in ("Uw", "Ud"):
+        f = _sym_missing
+        form = "words" if metric == "Uw" else "digits"
+        return [f(r, form)[1] for r in recs], [f(r, form)[0] for r in recs]
     if metric == "wshare":
         return [r["words"] for r in recs], [True] * len(recs)
     if metric == "vr":
@@ -227,7 +334,7 @@ def _sel(recs: list, metric: str) -> tuple:
     return [r["dd"] for r in recs], [r["ds"] for r in recs]  # decdrop
 
 
-def aggregate(arms: dict, keys: list, refs: list, boot: int, seed: int = 0) -> dict:
+def aggregate(arms: dict, keys: list, refs: list, boot: int, seed: int = 0, metrics: tuple = METRICS) -> dict:
     """For the span keys of one subset: per arm and metric (value %, n_den, CI95) and, per ref, the paired difference with a
     cluster bootstrap CI95 (clusters resampled within language). arms: {name: {key: rec}}."""
     import numpy as np
@@ -247,14 +354,14 @@ def aggregate(arms: dict, keys: list, refs: list, boot: int, seed: int = 0) -> d
     for a, recs in arms.items():
         rr = [recs[k] for k in keys]
         sums[a] = {}
-        for m in METRICS:
+        for m in metrics:
             num, den = _sel(rr, m)
             sums[a][m] = (np.bincount(ci, weights=np.array(num, float), minlength=len(names)),
                           np.bincount(ci, weights=np.array(den, float), minlength=len(names)))
     out = {}
     for a in arms:
         out[a] = {}
-        for m in METRICS:
+        for m in metrics:
             nn, dd = sums[a][m]
             tot = dd.sum()
             ent = {"v": float(100 * nn.sum() / tot) if tot else None, "den": int(tot)}
@@ -302,13 +409,16 @@ def main(argv=None):
     ap.add_argument("--boot", type=int, default=1000)
     ap.add_argument("--min-n", type=int, default=5, help="hide (lang, class) blocks with fewer spans than this")
     ap.add_argument("--classes", default="", help="comma list of classes to print (default all, plus other and ALL)")
+    ap.add_argument("--legacy", action="store_true",
+                    help="print the OLD asymmetric table (wshare / VR / VRw / VRd / unitdrop / decdrop) and compute only its "
+                         "metrics, instead of the symmetric W / V / U_w / U_d table (symscore)")
     a = ap.parse_args(argv)
     langs, work = a.langs.split(","), Path(a.work)
     refs = [run_name(r, a.mix) for r in a.refs.split(",") if r]
     want = [run_name(x, a.mix) for x in a.arms]
     order = refs + [w for w in want if w not in refs]
     caps_by_lang = {l: _caps(l, work, a.mix) for l in langs}
-    arms = {r: load_arm(r, langs, work, caps_by_lang) for r in order}
+    arms = {r: load_arm(r, langs, work, caps_by_lang, sym=not a.legacy) for r in order}
     arms = {r: v for r, v in arms.items() if v}
     refs = [r for r in refs if r in arms]
     keys_all = sorted(set.intersection(*[set(v) for v in arms.values()]))
@@ -320,28 +430,46 @@ def main(argv=None):
             keys = [k for k in keys_all if (lang == "ALL" or k[0] == lang)
                     and (c == "ALL" or arms[next(iter(arms))][k]["cls"] == c)]
             if keys:
-                result[f"{lang}/{c}"] = {"n": len(keys), "arms": aggregate(arms, keys, refs, a.boot)}
-    hdr = f"{'arm':26s} {'n':>5s} {'wshare':>6s} {'VR':>6s} {'VRw':>6s} {'VRd':>6s} {'unitdrop':>9s} {'decdrop':>8s}"
+                has_sym = not a.legacy and all("value_ok" in v[k] for v in arms.values() for k in keys)
+                result[f"{lang}/{c}"] = {"n": len(keys), "sym": has_sym,
+                                         "arms": aggregate(arms, keys, refs, a.boot,
+                                                           metrics=METRICS + SYM_METRICS if has_sym else METRICS)}
     print("\nValues in %. Under each non-reference arm: difference to each reference, * = cluster CI95 excludes 0, [lo,hi] = CI95.")
-    for key, blk in result.items():
-        if blk["n"] < a.min_n:
-            continue
-        print(f"\n== {key}  (n={blk['n']} spans)")
-        print(hdr)
-        for arm, mets in blk["arms"].items():
-            u, dd = mets["unitdrop"], mets["decdrop"]
-            print(f"{short(arm):26s} {blk['n']:5d} {fmt(mets['wshare']):>6s} {fmt(mets['vr']):>6s} {fmt(mets['vrw']):>6s} "
-                  f"{fmt(mets['vrd']):>6s} {(fmt(u) + '/' + str(u['den'])) if u['den'] else '-':>9s} "
-                  f"{(fmt(dd) + '/' + str(dd['den'])) if dd['den'] else '-':>8s}")
-            if arm in refs:
-                continue
-            for r in refs:
-                print(f"{'  d vs ' + short(r):26s} VR {fmt_diff(mets['vr'], r)} VRw {fmt_diff(mets['vrw'], r)} "
-                      f"VRd {fmt_diff(mets['vrd'], r)} wshare {fmt_diff(mets['wshare'], r)} unitdrop "
-                      f"{fmt_diff(mets['unitdrop'], r)} decdrop {fmt_diff(mets['decdrop'], r)}")
+    print_table(result, refs, a.min_n, legacy=a.legacy)
     if a.json:
         json.dump(result, open(a.json, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     return result
+
+
+def print_table(result: dict, refs: list, min_n: int, legacy: bool = False) -> None:
+    """The per language x class table: symmetric (W V U_w U_d) for blocks that have it, else (or with legacy) the old one."""
+    old_hdr = f"{'arm':26s} {'n':>5s} {'wshare':>6s} {'VR':>6s} {'VRw':>6s} {'VRd':>6s} {'unitdrop':>9s} {'decdrop':>8s}"
+    sym_hdr = f"{'arm':26s} {'n':>5s} {'W':>6s} {'V':>6s} {'U_w':>9s} {'U_d':>9s}"
+    rate = lambda e: (fmt(e) + "/" + str(e["den"])) if e["den"] else "-"  # noqa: E731
+    for key, blk in result.items():
+        if blk["n"] < min_n:
+            continue
+        sym = blk.get("sym") and not legacy
+        print(f"\n== {key}  (n={blk['n']} spans)")
+        print(sym_hdr if sym else old_hdr)
+        for arm, mets in blk["arms"].items():
+            if sym:
+                print(f"{short(arm):26s} {blk['n']:5d} {fmt(mets['W']):>6s} {fmt(mets['V']):>6s} "
+                      f"{rate(mets['Uw']):>9s} {rate(mets['Ud']):>9s}")
+            else:
+                u, dd = mets["unitdrop"], mets["decdrop"]
+                print(f"{short(arm):26s} {blk['n']:5d} {fmt(mets['wshare']):>6s} {fmt(mets['vr']):>6s} {fmt(mets['vrw']):>6s} "
+                      f"{fmt(mets['vrd']):>6s} {rate(u):>9s} {rate(dd):>8s}")
+            if arm in refs:
+                continue
+            for r in refs:
+                if sym:
+                    print(f"{'  d vs ' + short(r):26s} V {fmt_diff(mets['V'], r)} W {fmt_diff(mets['W'], r)} "
+                          f"U_w {fmt_diff(mets['Uw'], r)} U_d {fmt_diff(mets['Ud'], r)}")
+                else:
+                    print(f"{'  d vs ' + short(r):26s} VR {fmt_diff(mets['vr'], r)} VRw {fmt_diff(mets['vrw'], r)} "
+                          f"VRd {fmt_diff(mets['vrd'], r)} wshare {fmt_diff(mets['wshare'], r)} unitdrop "
+                          f"{fmt_diff(mets['unitdrop'], r)} decdrop {fmt_diff(mets['decdrop'], r)}")
 
 
 if __name__ == "__main__":
