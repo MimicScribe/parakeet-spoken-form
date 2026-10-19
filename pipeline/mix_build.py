@@ -2012,7 +2012,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
            seam_files: tuple = SEAM_FILES, mix_dir: str = "mix4", seam_long_h: float = 0.0,
            split_langs: tuple = (), win15_share: float = 0.0, win15_dir: str = "ml/win15b", edge_fix_dir: str = "",
            extra_passes: tuple = (), relabel_rows: str = "", relabel_parts_dir: str = "", relabel_tts: bool = False,
-           exclude_passes: tuple = ()) -> dict:
+           exclude_passes: tuple = (), seam_extra: tuple = ()) -> dict:
     """mix4/ manifests for the wave-1 run (all CPU, idempotent):
     - mix4/d2.jsonl: mix3/d2 (Greek restore applied) WITHOUT wave-1 languages: their digit rows were relabelled by P3
       (origin d2) and would otherwise teach digits through the stock token KL;
@@ -2063,6 +2063,8 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
       before any selection, so the caps, fills and share checks count the fixed labels (a reading masked at an edge
       is a span the fill can replace); win15 parents are checked against the unfixed labels they were cut from;
       consistency pairs skip fixed rows.
+    - seam_extra (2026-10-18): more seam_crops outputs for the short seam part, names relative to ml/p3v2/<lang>/ with
+      {lang} filled ("../../realx1wb/{lang}/seam" = ml/realx1wb/<lang>/seam.jsonl); read like seam_files.
     - exclude_passes (2026-10-18): names ("rows_nlreal1a") of ml/p3v2/<lang>/rows*.jsonl passes the build leaves out (a pass
       still being labelled has no judged marker and would stop the build; its judged copy can come in with extra_passes).
     - extra_passes (2026-10-18): more labelling passes outside ml/p3v2 ("ml/l1conv/{lang}/rows_l1conv.jsonl"), read
@@ -2433,7 +2435,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
             if not on and os.path.exists(f"{vol}/{mix_dir}/{k}_{lang}.jsonl"):  # survive from an earlier build (the v4 mix
                 os.remove(f"{vol}/{mix_dir}/{k}_{lang}.jsonl")                  # lists whichever of them exist)
         if seam_h > 0:
-            seam = _seam_rows(base, seam_files)  # ml_p3.seam_crops tags "" and "_b" (dry runs write other tags)
+            seam = _seam_rows(base, tuple(seam_files) + tuple(p_.format(lang=lang) for p_ in seam_extra))  # ml_p3.seam_crops tags "" and "_b" (dry runs write other tags)
             bad = held | rej | held_dup | ext_all
             seam = [x for x in seam if not set(x.get("parents", [])) & bad and not x.get("synthetic")]
             n_s0, n_sy = len(seam), sum(1 for x in seam if set(x.get("parents", [])) & year_out)

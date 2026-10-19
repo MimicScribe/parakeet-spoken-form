@@ -60,3 +60,15 @@ src = inspect.getsource(MB.build4)
 assert "not in exclude_passes" in src
 assert 'exclude_passes: str = ""' in open(MA.__file__).read()
 print("test_m10_build: exclude_passes wired ok")
+
+# ---- seam_extra: a seam file outside ml/p3v2 is read with the main seam files (pairs namespaced by file)
+v3 = tempfile.mkdtemp()
+os.makedirs(f"{v3}/ml/p3v2/xx"); os.makedirs(f"{v3}/ml/realx1wb/xx")
+mk = lambda pid, t: {"pair": pid, "side": "a", "text": t, "parents": ["p1"], "num_tokens": [0]}  # noqa: E731
+open(f"{v3}/ml/p3v2/xx/seam.jsonl", "w").write(json.dumps(mk("s0", "alpha")) + "\n")
+open(f"{v3}/ml/realx1wb/xx/seam.jsonl", "w").write(json.dumps(mk("s0", "beta")) + "\n")
+base = f"{v3}/ml/p3v2/xx"
+got = MB._seam_rows(base, MB.SEAM_FILES + ("../../realx1wb/xx/seam",))
+assert sorted(x["text"] for x in got) == ["alpha", "beta"] and len({x["pair"] for x in got}) == 2, got
+assert "seam_extra" in inspect.signature(MB.build4).parameters and 'seam_extra: str = ""' in open(MA.__file__).read()
+print("test_m10_build: seam_extra ok")
