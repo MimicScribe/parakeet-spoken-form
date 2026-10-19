@@ -357,8 +357,8 @@ def refs_cv(tag: str, lang: str = "pt", shards: int = 8, per_gender: int = 12, m
 
 @app.local_entrypoint()
 def run_refs_cv(tag: str, lang: str = "pt", shards: int = 8, per_gender: int = 12, accent_re: str = "",
-                probe: bool = False, min_snr: float = 30.0):
-    print(refs_cv.remote(tag, lang, shards, per_gender, min_snr, accent_re, 4.5, probe))
+                probe: bool = False, min_snr: float = 30.0, min_dur: float = 4.5):
+    print(refs_cv.remote(tag, lang, shards, per_gender, min_snr, accent_re, min_dur, probe))
 
 
 @app.local_entrypoint()
