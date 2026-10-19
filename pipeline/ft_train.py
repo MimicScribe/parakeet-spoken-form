@@ -1354,6 +1354,19 @@ class L2SP(pl.Callback):
         self.path, self.c, self.exempt, self.extra = anchor_path, c, exempt_rows, extra_anchor
         self.enc_c = c if enc_c is None else enc_c
         self.anchor = None
+        self.sched = None  # the run's LrSchedule, when it has one (attach_lr_schedule)
+
+    def pull_lrs(self, groups: list) -> list[float]:
+        """The lr of each optimizer group for the pull = the lr the optimizer step just used. Lightning steps NeMo's
+        scheduler BEFORE on_train_batch_end, and that scheduler (max_steps = this run's steps) rewrites every group's lr;
+        a group LrSchedule drives (lr_total / enc_lr_peak) therefore takes LrSchedule's own value (sched.last), not
+        NeMo's (2026-10-19: a 500-step lr_total run pulled at 0.56x the strength of the 5,000-step run it matched). No
+        LrSchedule: the group lr, as before (bit for bit)."""
+        lrs = [g["lr"] for g in groups]
+        if self.sched is not None:
+            for i, v in self.sched.last.items():
+                lrs[i] = v
+        return lrs
 
     def on_train_batch_end(self, trainer, m, outputs, batch, batch_idx):
         if not (self.c or self.enc_c) or (batch_idx + 1) % trainer.accumulate_grad_batches:
@@ -1373,8 +1386,9 @@ class L2SP(pl.Callback):
             if self.enc_c != self.c:
                 print(f"L2SP per-group: encoder tensors c={self.enc_c}, all others c={self.c}", flush=True)
         groups = trainer.optimizers[0].param_groups
-        lr0 = groups[0]["lr"]
-        lr_of = {id(p): g["lr"] for g in groups for p in g.get("params", ())}  # each parameter: its own group's lr
+        lrs = self.pull_lrs(groups)
+        lr0 = lrs[0]
+        lr_of = {id(p): lrs[i] for i, g in enumerate(groups) for p in g.get("params", ())}  # each parameter: its group's lr
         last = "joint.joint_net." + str(len(m.joint.joint_net) - 1)
         with torch.no_grad():
             drift = 0.0
@@ -1804,6 +1818,17 @@ def branch_trainer_parts(lr: float, warmup: int, lr_offset: int = 0, lr_total: i
     return cbs, (None if enc_clip else 1.0)
 
 
+def attach_lr_schedule(callbacks: list) -> bool:
+    """Give every L2SP callback the run's LrSchedule (if any), so the pull uses the lr each step actually took (L2SP.pull_lrs).
+    True when one was attached."""
+    sched = [c for c in callbacks if isinstance(c, LrSchedule)]
+    assert len(sched) <= 1, f"{len(sched)} LrSchedule callbacks"
+    pulls = [c for c in callbacks if isinstance(c, L2SP)]
+    for c in pulls:
+        c.sched = sched[0] if sched else None
+    return bool(sched and pulls)
+
+
 def resolve_sampler_seed(seed: int, explicit: int = 0, resuming: bool = False, step0: int = 0) -> int:
     """The lhotse sampler seed: `seed` (default) or the explicit one (a branch off another run's checkpoint draws its own
     batch order; the mix, written with `seed`, stays the same); a resume offsets it by 1000 * the step it resumes from."""
@@ -2091,6 +2116,8 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
         lr, warmup, lr_offset=lr_offset, lr_total=lr_total, enc_lr_peak=enc_lr_peak, enc_lr_floor=enc_lr_floor,
         enc_lr_warmup=enc_lr_warmup, enc_lr_steps=enc_lr_steps, enc_clip=enc_clip, max_steps=max_steps,
         has_encoder=bool(unfreeze_top))
+    if attach_lr_schedule(extra + extra_cb + branch_cb):
+        print("L2SP pull lr: LrSchedule's per-group lr (not NeMo's rewritten group lr)", flush=True)
     if branch_cb:
         print(f"branch options: sampler_seed {sampler_seed} lr_offset {lr_offset} lr_total {lr_total} enc_lr_peak "
               f"{enc_lr_peak:g} floor {enc_lr_floor:g} warmup {enc_lr_warmup} steps {enc_lr_steps or max_steps} enc_clip "
