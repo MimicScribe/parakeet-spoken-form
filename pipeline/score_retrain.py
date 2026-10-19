@@ -76,6 +76,11 @@ def year_readings(y):
         for x in _two(n):
             out += [f"two thousand {x}", f"two thousand and {x}"]
             out.append(f"twenty {x}" if n >= 10 else f"twenty oh {x}")
+    elif 1900 <= y < 2000:  # 2026-10-18: 19xx years too ("nineteen ninety five", "nineteen oh five")
+        m = y - 1900  # 1900 has no word reading here: "nineteen hundred" is also the head of "nineteen hundred and fifty"
+        for x in (_two(m) if m else []):
+            out += [f"nineteen oh {x}" if m < 10 else f"nineteen {x}", f"one thousand nine hundred {x}",
+                    f"one thousand nine hundred and {x}"]
     return out
 
 
@@ -85,8 +90,8 @@ def _ynorm(t):
 
 
 def ref_years(ref):
-    ys, r = [int(y) for y in re.findall(r"\b(20\d\d)\b", ref)], _ynorm(ref)
-    for y in range(2001, 2100):
+    ys, r = [int(y) for y in re.findall(r"\b((?:19|20)\d\d)\b", ref)], _ynorm(ref)
+    for y in list(range(1900, 2000)) + list(range(2001, 2100)):
         # not the head of a bigger number ("two thousand seven hundred fifty" = 2750, maintainer gold g16/g18)
         if y not in ys and any(re.search(rf" {re.escape(x)} (?!(?:hundred|thousand|million|billion|point|{_U}) )", r)
                                for x in year_readings(y)[1:]):
@@ -1577,7 +1582,7 @@ def score(root, run, want_split="dev", exclude=frozenset(), stock_run="ultra_rt"
             n, k = year_value_kept(ref, r["hyp"])
             vn, vk = vn + n, vk + k
             # truncation: a year (not 2000) lost while the hyp holds a bare "two thousand"
-            lost = [y for y in ref_years(ref) if y != 2000 and year_value_kept(str(y), r["hyp"])[1] == 0]
+            lost = [y for y in ref_years(ref) if y > 2000 and year_value_kept(str(y), r["hyp"])[1] == 0]  # 20xx only
             tr += min(len(lost), max(0, bare_two_thousand(r["hyp"]) - bare_two_thousand(ref)))
     s["year_value_kept"], s["year_value_n"], s["year_trunc"] = vk, vn, tr
     # maintainer listening gold (definitive, gold/owner_year_readings.json): d1_dev clips, reading AND value
