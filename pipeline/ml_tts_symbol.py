@@ -945,8 +945,14 @@ LICENCE = {"qwen3": "Qwen3-TTS-12Hz-1.7B-Base (Apache-2.0); reference speaker {s
            "chatterbox": "Chatterbox Multilingual V3 (MIT); reference speaker {src} ({lic})"}
 
 
+RATES_WIDE = [0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3]
+CB_EXAGGERATION = [0.35, 0.45, 0.5, 0.6, 0.7, 0.8]  # Chatterbox expressiveness (default 0.5)
+CB_CFG = [0.3, 0.4, 0.5, 0.6, 0.7]  # Chatterbox cfg weight (default 0.5)
+
+
 def assign_voices(rows: list, lang: str, vtag: str, refs: list | None = None, cloud: list | None = None,
-                  engine: str | None = None, min_voices: int = 10) -> None:
+                  engine: str | None = None, min_voices: int = 10, rates: list | None = None,
+                  pitch_share: float = 0.0, pitch_cents: tuple = (100, 200), cb_vary: bool = False) -> None:
     """Voice x rate per row, round robin over the voices in a seeded order (equal rows per voice). engine: override of
     ENGINE[lang] (nl: "chatterbox" with the VoxPopuli references, the ttsSYM1 pilot's Chatterbox-for-Chirp swap)."""
     from mix_build import heldout_persona, is_heldout_voice
@@ -963,7 +969,7 @@ def assign_voices(rows: list, lang: str, vtag: str, refs: list | None = None, cl
     order = list(range(len(rows)))
     rng.shuffle(order)
     for k, i in enumerate(order):
-        r, v, sp = rows[i], pool[k % len(pool)], rng.choice(RATES)
+        r, v, sp = rows[i], pool[k % len(pool)], rng.choice(rates or RATES)
         if eng == "kokoro":
             r.update(engine="kokoro", engine_src="kokoro", voice=v, voice_license=T.KOKORO, voice_path=None,
                      speaker=None, speed=sp, pitch=1.0)
@@ -978,6 +984,10 @@ def assign_voices(rows: list, lang: str, vtag: str, refs: list | None = None, cl
                      ref_text=v["text"], voice_license=LICENCE[eng].format(src=v["source"], lic=v["license"]),
                      voice_path=None, speaker=None, speed=sp, pitch=1.0,
                      presynth=f"{VOL}/ml/{vtag}/{lang}/presynth/{r['id']}.wav")
+            if pitch_share and rng.random() < pitch_share:  # a mild pitch shift (sox pitch, cents) before verification
+                r["pitch_cents"] = rng.choice([-1, 1]) * rng.randint(*pitch_cents)
+            if cb_vary and eng == "chatterbox":
+                r["cb_exag"], r["cb_cfg"] = rng.choice(CB_EXAGGERATION), rng.choice(CB_CFG)
     assert not any(is_heldout_voice(lang, r["voice"]) for r in rows)
 
 
@@ -1148,6 +1158,9 @@ def main():
     v.add_argument("--out", required=True)
     v.add_argument("--engine", default="", help="override of the language's engine (nl: chatterbox)")
     v.add_argument("--min-voices", type=int, default=10)
+    v.add_argument("--wide-rates", action="store_true", help="rates 0.85-1.3 (default 0.9-1.25)")
+    v.add_argument("--pitch-share", type=float, default=0.0, help="share of cloned clips given a +-100..200 cent shift")
+    v.add_argument("--cb-vary", action="store_true", help="vary Chatterbox exaggeration / cfg per clip")
     c = sub.add_parser("chirp")
     c.add_argument("--planned", required=True)
     c.add_argument("--vtag", default="ttsSYM1v")
@@ -1202,7 +1215,8 @@ def main():
         if (a.engine or ENGINE[lang]) == "chirp":
             import ml_tts_cloud as CL
             cloud = list(CL.voices(CL.Auth(), lang))
-        assign_voices(rows, lang, a.vtag, refs, cloud, a.engine or None, a.min_voices)
+        assign_voices(rows, lang, a.vtag, refs, cloud, a.engine or None, a.min_voices, RATES_WIDE if a.wide_rates else None,
+                      a.pitch_share, (100, 200), a.cb_vary)
         _write(a.out, rows)
         print(lang, len(rows), collections.Counter(r["voice"] for r in rows).most_common(3), len({r["voice"] for r in rows}))
     elif a.cmd == "chirp":
