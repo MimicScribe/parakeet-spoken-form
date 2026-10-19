@@ -72,3 +72,12 @@ got = MB._seam_rows(base, MB.SEAM_FILES + ("../../realx1wb/xx/seam",))
 assert sorted(x["text"] for x in got) == ["alpha", "beta"] and len({x["pair"] for x in got}) == 2, got
 assert "seam_extra" in inspect.signature(MB.build4).parameters and 'seam_extra: str = ""' in open(MA.__file__).read()
 print("test_m10_build: seam_extra ok")
+
+# ---- seam_long_extra, and the tier-1 sets in the synthetic-set tables
+assert "seam_long_extra" in inspect.signature(MB.build4).parameters and 'seam_long_extra: str = ""' in open(MA.__file__).read()
+tags = [t_ for t_, _ in MB.TTS_SETS]
+for t_ in ("ttsDW1", "ttsPC1", "tvar1v"):
+    assert t_ in tags, t_
+assert {"ttsDW1", "ttsPC1"} <= MB.TTS_TARGETED and {"ttsDW1", "ttsPC1"} <= MB.TTS_LONG_SETS
+assert 0.9 < MB.number_share_of("d1/en4_ok/ttsDW1_en_train.jsonl") <= 1.0
+print("test_m10_build: seam_long_extra, tier-1 sets ok")

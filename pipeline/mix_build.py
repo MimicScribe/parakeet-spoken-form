@@ -883,7 +883,10 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
             # ttsSYM1r: the same generator's single-class rows for the cells at their synthetic cap (nl / it cur, phone,
             # dec, int_big; de phone; pt int_big; de / it Roman numerals); each REPLACES older single-class synthetic
             # rows of its class (TTS_REPLACING, never a ttsRV1 row), so the class sizes stay as they are
-            ("ttsSYM1r", "ttsSYM1r_judge"))
+            ("ttsSYM1r", "ttsSYM1r_judge"),
+            # tier-1 packs (2026-10-18, ml_tts_pack): decimal words (de es fr it nl pt), percent with the unit word
+            # (es fr pt), and the verified look-alike / business-reading set (tvar1v)
+            ("ttsDW1", "ttsDW1_judge"), ("ttsPC1", "ttsPC1_judge"), ("tvar1v", "tvar1v_judge"))
 # sets planned against the census's per-value gaps (tts5y: thin year values, normal speaking rates): the share cap
 # applies, the "real speech has enough of this class" cut-off does not (synthetic years and counts
 # are fine within the cap)
@@ -899,7 +902,7 @@ TTS_TARGETED = {"tts5y", "tts6uk", "tts7", "tts8", "tts9nl", "tts9ru", "tts9ru2"
                 "ttsFT1", "ttsFT2", "ttsFT3", "ttsFT4", "ttsFT5", "ttsFT5c", "ttsFT5d",
                 "ttsFT6c", "ttsFT6r", "ttsFT6rd", "ttsLNw", "ttsLNr", "ttsLNm", "ttsYRm", "ttsYRr",
                 "ttsYRs", "ttsYRn", "ttsCNm", "ttsLTw", "ttsLTr", "ttsNL1", "ttsNL2", "ttsW1", "ttsRV1b", "ttsRV1r2", "ttsSYM1",
-                "ttsSYM1r"}
+                "ttsSYM1r", "ttsDW1", "ttsPC1"}
 # sets whose rows replace older synthetic rows (2026-10-18, B2): a row's "supersedes" lists the ids it replaces (rows of
 # the same class and value spread, read one convention; ml_tts_variety picked them). order_synthetic drops those ids
 # and puts the set's rows first, so they take the room the dropped rows leave (a class at its fill-to-bar or share cap
@@ -912,7 +915,7 @@ TTS_AUG_FRAC = 0.6  # share of chosen synthetic rows given a degraded copy inste
 # rows of the long sets, so it keeps their degraded share
 # ttsSYM1 (2026-10-18): long numbers (phones, big amounts, decimals with units) in mostly-synthetic cells, like the long sets
 TTS_LONG_SETS = {"ttsLNw", "ttsLNr", "ttsLNm", "ttsLTw", "ttsLTr", "ttsNL2", "ttsW1", "ttsRV1b", "ttsRV1r2", "ttsSYM1",
-                 "ttsSYM1r"}
+                 "ttsSYM1r", "ttsDW1", "ttsPC1"}
 TTS_AUG_FRAC_LONG = 0.75
 
 
@@ -2012,7 +2015,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
            seam_files: tuple = SEAM_FILES, mix_dir: str = "mix4", seam_long_h: float = 0.0,
            split_langs: tuple = (), win15_share: float = 0.0, win15_dir: str = "ml/win15b", edge_fix_dir: str = "",
            extra_passes: tuple = (), relabel_rows: str = "", relabel_parts_dir: str = "", relabel_tts: bool = False,
-           exclude_passes: tuple = (), seam_extra: tuple = ()) -> dict:
+           exclude_passes: tuple = (), seam_extra: tuple = (), seam_long_extra: tuple = ()) -> dict:
     """mix4/ manifests for the wave-1 run (all CPU, idempotent):
     - mix4/d2.jsonl: mix3/d2 (Greek restore applied) WITHOUT wave-1 languages: their digit rows were relabelled by P3
       (origin d2) and would otherwise teach digits through the stock token KL;
@@ -2065,6 +2068,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
       consistency pairs skip fixed rows.
     - seam_extra (2026-10-18): more seam_crops outputs for the short seam part, names relative to ml/p3v2/<lang>/ with
       {lang} filled ("../../realx1wb/{lang}/seam" = ml/realx1wb/<lang>/seam.jsonl); read like seam_files.
+    - seam_long_extra (2026-10-18): the same for the long-number seam part (realx1 / dense-scan pair files).
     - exclude_passes (2026-10-18): names ("rows_nlreal1a") of ml/p3v2/<lang>/rows*.jsonl passes the build leaves out (a pass
       still being labelled has no judged marker and would stop the build; its judged copy can come in with extra_passes).
     - extra_passes (2026-10-18): more labelling passes outside ml/p3v2 ("ml/l1conv/{lang}/rows_l1conv.jsonl"), read
@@ -2458,7 +2462,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
             os.remove(f"{vol}/{mix_dir}/seam_long_{lang}.jsonl")  # a part this build does not make must not survive
         if seam_long_h > 0 and any(os.path.exists(f"{base}/{n}.jsonl") for n in SEAM_LONG_FILES + SYN_SEAM_LONG_FILES):
             bad = held | rej | held_dup | ext_all
-            seam_long = [x for x in _seam_rows(base, SEAM_LONG_FILES, bare_first=True)
+            seam_long = [x for x in _seam_rows(base, SEAM_LONG_FILES + tuple(p_.format(lang=lang) for p_ in seam_long_extra), bare_first=True)
                          if not set(x.get("parents", [])) & bad and not x.get("synthetic")]
             n_l0, n_ly = len(seam_long), sum(1 for x in seam_long if set(x.get("parents", [])) & year_out)
             seam_long = [x for x in seam_long if not set(x.get("parents", [])) & cap_out]
@@ -2612,6 +2616,7 @@ NUMBER_PART.update({"mix3b/d1_ycap.jsonl": 1.0, "mix3b/d10n_ycap.jsonl": 1.0,
                     # caption-scan top-up; shares measured on the manifests (number words in the label)
                     "d1/en4_ok/ttsSYM1_en_train_v2.jsonl": 0.992, "d1/en4_ok/ttsSYM1en2_en_train.jsonl": 0.992,
                     "d1/en4_ok/yodas_en5_train_ycap.jsonl": 0.975,
+                    "d1/en4_ok/ttsDW1_en_train.jsonl": 1.0, "d1/en4_ok/ttsLK1_en_train.jsonl": 0.971,
                     "d1/en4_ok/vox_rare_train_ycap.jsonl": 1.0,
                     "d1/en4_ok/win_en.jsonl": 1.0, "d1/en4_ok/seam_en.jsonl": 0.977})
 # the balance-capped English copies (en_balance) carry their source part's number share
