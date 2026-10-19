@@ -234,6 +234,19 @@ def test_resume_needs_the_run_and_the_first_commit(world):
     assert again.returncode == 0 and "resumed launch" in (log / "launch_manifest.txt").read_text()
 
 
+def test_the_orchestrator_reads_the_launch_manifest_the_launcher_writes(world):
+    import sys
+
+    sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
+    import trigger
+
+    r, log = world["launch"]("--part-weights", "a/b=2,c/d=1", "--extra-parts", "p/q:tag:3")
+    assert r.returncode == 0, r.stderr
+    got = trigger.parse_manifest(str(log / "launch_manifest.txt"))
+    assert got == dict(sha=world["sha"], app="ap-FAKE123abc", mix_dir="mix4final10", part_weights="a/b=2,c/d=1",
+                       extra_parts="p/q:tag:3")
+
+
 def test_dry_run_checks_everything_and_launches_nothing(world):
     r, log = world["launch"]("--dry-run")
     assert r.returncode == 0 and "DRY RUN" in r.stdout

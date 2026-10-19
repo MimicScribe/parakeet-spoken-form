@@ -58,7 +58,8 @@ class FakeExec:
         self.tmp = tmp
         self.launches, self.gates, self.scores, self.stops = [], [], [], []
         self.launch_rc = []  # exit codes to return in order (default 0)
-        self.gate_out = {}  # step -> output
+        self.gate_out = {}  # steps text -> output
+        self.gate_rc = {}  # steps text -> exit code (0 GO, 1 NO-GO, 2 no verdict)
         self.score_rc = 0
         self.summaries = {}  # out dir basename -> summary dict
         self.on_launch = None
@@ -73,9 +74,12 @@ class FakeExec:
         if argv[:3] == ["modal", "app", "stop"]:
             self.stops.append(argv[3])
             return 0, "stopped"
+        if argv[0] == "SUMMARY":
+            d = os.path.basename(argv[1])
+            return (0, json.dumps(self.summaries[d])) if d in self.summaries else (1, "no scores")
         self.gates.append(argv)
-        step = int(argv[argv.index("--step") + 1])
-        return 0, self.gate_out.get(step, "no verdict here")
+        steps = argv[argv.index("--steps") + 1]
+        return self.gate_rc.get(steps, 2), self.gate_out.get(steps, "CANNOT DECIDE")
 
     def start(self, argv, log_path, cwd=None):
         out = argv[-1]
@@ -105,7 +109,7 @@ def world(tmp_path):
                   brC=dict(run="C", arm="R10-brC"), brE=dict(run="E", arm="R10-brE"), brEr=dict(run="Er", arm="R10-brEr"),
                   encF=dict(run="F", arm="R10-encF")),
         score_plan=dict(main=[1000, 1500, 2000, 2500, 3000, 5000], lr05=[2000, 3500, 5000], encF=[4000]),
-        early_stop=dict(step=2500, v_limit_pp=3.0), score_concurrency=2)
+        early_stop=dict(step=2500, v_limit_pp=3.0, summary_cmd=["SUMMARY", "{scores_dir}"]), score_concurrency=2)
     os.makedirs(cfg["score_root"])
     vol, clock, ex = FakeVol(), Clock(), FakeExec(tmp_path)
 
@@ -292,31 +296,55 @@ def settle(w, t, n=8):
         t.cycle()
 
 
-def test_gate_go_at_both_steps_with_matching_signs_launches_encF(world):
+def gate_says(w, k250, k500, both):
+    w["ex"].gate_rc = {"250": k250, "500": k500, "250,500": both}
+    w["ex"].gate_out = {k: ("==> GO for encF" if v == 0 else "==> NO-GO for encF" if v == 1 else "CANNOT DECIDE")
+                        for k, v in w["ex"].gate_rc.items()}
+
+
+def test_gate_go_at_250_500_and_over_both_launches_encF_once(world):
     w = world
     start_branches(w)
-    w["ex"].gate_out = {250: "all four criteria met\nGO\nsigns: +,-,+", 500: "GO\nsigns: + , - , +"}
+    gate_says(w, 0, 0, 0)
     t = w["make"]()
     settle(w, t)
-    assert [g[g.index("--step") + 1] for g in w["ex"].gates] == ["250", "500"]
+    assert [g[g.index("--steps") + 1] for g in w["ex"].gates] == ["250", "500", "250,500"]
+    g = w["ex"].gates[0]
+    assert g[g.index("--steps") - 2:g.index("--steps")] == ["E", "C"]  # <E run> <C run> --steps ...
     assert t.state["encF"] == "go" and "F" in launched_runs(w)
     f = w["ex"].launches[launched_runs(w).index("F")]
     assert f[f.index("--arm") + 1] == "R10-encF" and f[f.index("--max-steps") + 1] == "4000"
     assert f[f.index("--init-from") + 1] == "M@1000"
     settle(w, t)
-    assert launched_runs(w).count("F") == 1
+    assert launched_runs(w).count("F") == 1 and len(w["ex"].gates) == 3
 
 
-@pytest.mark.parametrize("o250,o500", [("NO-GO\nsigns: +", "GO\nsigns: +"), ("GO\nsigns: +", "NO-GO"),
-                                       ("GO\nsigns: +,+", "GO\nsigns: +,-")])
-def test_gate_no_go_or_a_sign_flip_never_launches_encF(world, o250, o500):
+@pytest.mark.parametrize("k250,k500,both", [(1, 0, 0), (0, 1, 1), (0, 0, 1)])  # a NO-GO anywhere, incl. the sign read
+def test_gate_no_go_anywhere_never_launches_encF(world, k250, k500, both):
     w = world
     start_branches(w)
-    w["ex"].gate_out = {250: o250, 500: o500}
+    gate_says(w, k250, k500, both)
     t = w["make"]()
     settle(w, t)
     assert t.state["encF"] == "nogo" and "F" not in launched_runs(w)
     assert "encF decision: NO" in log_text(w)
+
+
+def test_the_gate_waits_for_both_branches_scores_at_each_step(world):
+    w = world
+    w["vol"].put("M", 1000)
+    w["vol"].put("C", 250)
+    w["vol"].put("E", 250)
+    gate_says(w, 0, 0, 0)
+    t = w["make"]()
+    settle(w, t)
+    assert [g[g.index("--steps") + 1] for g in w["ex"].gates] == ["250"] and t.state["encF"] == "pending"
+    w["vol"].put("C", 500)
+    settle(w, t)
+    assert len(w["ex"].gates) == 1  # E has no step 500 yet
+    w["vol"].put("E", 500)
+    settle(w, t)
+    assert t.state["encF"] == "go"
 
 
 def test_a_missing_gate_waits_and_a_gate_without_a_verdict_is_retried_then_left_to_hand(world):
@@ -327,8 +355,9 @@ def test_a_missing_gate_waits_and_a_gate_without_a_verdict_is_retried_then_left_
     settle(w, t, 4)
     assert w["ex"].gates == [] and t.state["encF"] == "pending" and "interim gate" in log_text(w)
     open(w["cfg"]["gate_script"], "w").close()
-    settle(w, t, 6)  # the fake prints no verdict: three tries per step, then "decide by hand", never a launch
-    assert "F" not in launched_runs(w) and "decide by hand" in log_text(w)
+    settle(w, t, 8)  # exit 2 = cannot decide: three tries (>= 5 min apart), then "decide by hand", never a launch
+    assert "F" not in launched_runs(w) and "decide by hand" in log_text(w) and t.state["encF"] == "manual"
+    assert len(w["ex"].gates) == 3
 
 
 def test_early_stop_at_main_2500_stops_only_the_main_app(world):
@@ -360,6 +389,9 @@ def test_early_stop_without_the_numbers_is_flagged_not_acted_on(world):
     settle(w, t, 4)
     assert w["ex"].stops == [] and "cannot be decided" in log_text(w)
     assert T.early_stop_decision(5.0, None, True, 3.0)[0] == "undetermined"
+    assert T.early_stop_decision(4.0, 1.0, None, 3.0)[0] == "stop"  # V alone is enough
+    assert T.early_stop_decision(1.0, 1.0, None, 3.0)[0] == "undetermined"  # an unknown WER is not "fine"
+    assert T.early_stop_decision(None, 1.0, True, 3.0)[0] == "undetermined"
 
 
 def test_dry_run_acts_on_nothing(world):
@@ -380,10 +412,28 @@ def test_a_failed_scorer_is_retried_once_then_given_up(world):
     assert [a[2] for a in w["ex"].scores].count("1000") == 2 and "giving up" in log_text(w)
 
 
+def test_a_launch_command_that_cannot_be_read_in_full_never_feeds_a_branch(world, tmp_path):
+    w = world
+    man = tmp_path / "main_log" / "launch_manifest.txt"
+    man.write_text("run m\ncommit abc123def\narm R10-main\nlaunched x\ncommand modal run --detach modal_app.py::f --run m "
+                   "--mix v4 --mix-dir mixdir --save-every 250 --r3-sub-batch 1 --part-weights p1=2\np2=1 --extra-parts x:y:3\n"
+                   "approval m\napp ap-MAINAPP\n")
+    assert T.parse_manifest(str(man)).get("command_untrusted") is True
+    w["vol"].put("M", 1000)
+    t = w["make"]()
+    t.cycle()
+    assert w["ex"].launches == [] and "could not be read in full" in log_text(w)
+    cfg = dict(w["cfg"], mix_dir="mixdir", part_weights="p1=2,p2=1", extra_parts="x:y:3")  # control: explicit values launch
+    t = w["make"](cfg)
+    t.cycle()
+    a = w["ex"].launches[0]
+    assert a[a.index("--part-weights") + 1] == "p1=2,p2=1" and a[a.index("--mix-dir") + 1] == "mixdir"
+
+
 def test_helpers():
-    assert T.parse_gate("blah\nNO-GO because x") == ("nogo", None)
-    assert T.parse_gate("GO\nSigns: +,-")[0] == "go" and T.parse_gate("GO\nSigns: +, -")[1] == "+,-"
-    assert T.parse_gate("GOOD") == (None, None) and T.parse_gate("nothing") == (None, None)
+    assert T.parse_gate("x", 0) == "go" and T.parse_gate("x", 1) == "nogo" and T.parse_gate("CANNOT DECIDE", 2) is None
+    assert T.parse_gate("a\n==> NO-GO for encF", None) == "nogo" and T.parse_gate("==> GO for encF", None) == "go"
+    assert T.parse_gate("GOOD", None) is None and T.parse_gate("a traceback", 3) is None
     m = T.parse_manifest("/nonexistent")
     assert m == {}
 

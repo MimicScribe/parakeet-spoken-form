@@ -6,8 +6,8 @@ It never launches a main run: those are started by hand through launch_run.sh. I
 exp/<main>/step<branch_step>.pt.done and then, through launch_run.sh only,
   * launches the two branch runs (decoder-only control `brC`, then the encoder branch `brE`, `stagger_s` apart);
   * launches the real-only encoder branch `brEr` only if the flag file named in the config exists;
-  * scores every branch checkpoint (step 250 and 500) and runs the interim gate on C vs E at each; when the gate prints GO
-    at every gate step and the printed `signs` lines agree, it launches the full encoder continuation `encF`;
+  * scores every branch checkpoint (step 250 and 500) and runs the interim gate on E vs C at 250, at 500 and over both
+    (sign agreement); when all three say GO it launches the full encoder continuation `encF`;
   * scores the planned checkpoints of the main, half-lr and encF runs as each `step<N>.pt.done` appears;
   * applies the early-stop rule to the main run at `early_stop.step` (stops its app).
 Every action goes to the log file; the state file makes a restart harmless: a run whose exp/<run> exists on the volume (or
@@ -16,13 +16,15 @@ job already done is not repeated. The approvals file is only read by launch_run.
 without its approval line is refused by the launcher and retried (logged once) until the line appears.
 
 Contracts with the scoring tools (argv templates `score_argv` / `gate_argv` in the config; {score_script} {gate_script}
-{run} {step} {out} {c_dir} {e_dir} {python} are filled in; the defaults are `<scorer> <run> <step> <out>` and
-`python <gate> --step <step> --c-dir <dir> --e-dir <dir>`):
-  * the scorer is run once per checkpoint and writes <out>/summary.json; exit 0 = scored. The early-stop rule reads
-    `pooled_v_vs_stock_pp` (number) and `wer_ok` (bool) from the summary of the main run's early_stop step and of its
-    branch_step checkpoint (key names are config values);
-  * the gate is run with the two score dirs of one step; its output holds a verdict token GO or NO-GO, and optionally a
-    line `signs: <list>` (the sign of each E-C effect); the lists of the gate steps must be equal for the sign agreement.
+{run} {step} {out} {e_run} {c_run} {steps} {python} are filled in; the defaults are `<scorer> <run> <step> <out>` and
+`python <gate> <E run> <C run> --steps <steps>`):
+  * the scorer is run once per checkpoint; exit 0 = scored. Its results must be where `score_dir_template` says (it is
+    also the directory the gate reads);
+  * the gate is run over step 250, over step 500 and over both (its sign-agreement read): exit 0 = GO, 1 = NO-GO, anything
+    else = no verdict (retried, then left to hand). The encoder run launches only when all three say GO;
+  * the early-stop rule reads `pooled_v_vs_stock_pp` (number) and `wer_ok` (bool) of the main run's early_stop step and of
+    its branch_step checkpoint, from the JSON object printed by `early_stop.summary_cmd` (argv template, {scores_dir}) or,
+    without one, from <scores dir>/summary.json (key names are config values).
 A missing scorer or gate is logged once and waited for, never treated as a failure.
 """
 import argparse
@@ -39,6 +41,8 @@ from datetime import datetime
 MARK = re.compile(r"step(\d+)\.pt\.done$")
 RETRY_S = 300  # a refused / transiently failed launch is tried again no sooner than this
 MAX_ATTEMPTS = 3  # for a launcher refusal that retrying cannot fix (bad arguments, wrong commit)
+SWITCHES = ("--anchor-init", "--detach")  # flags of the launcher's training command that take no value
+GATE_KEYS = ("250", "500", "250,500")  # the step sets the interim gate is read over
 ROLES = ("main", "lr05", "brC", "brE", "brEr", "encF")
 
 
@@ -106,43 +110,62 @@ def parse_manifest(path: str) -> dict:
     apps = re.findall(r"^app (ap-\S+)", text, re.M)
     if apps:
         out["app"] = apps[0]
-    m = re.search(r"^command (.*)$", text, re.M)
+    m = re.search(r"^command (.*?)\n(?=approval |module sha256|app |launched |# resumed|\Z)", text, re.M | re.S)
     if m:
         try:
             toks = shlex.split(m.group(1))
         except ValueError:
             toks = []
+        start = toks.index("--run") if "--run" in toks else len(toks)
+        i, ok = start, start < len(toks)
+        # every flag of the logged command takes exactly one value (except the switches): a value that was split (a space
+        # or a line break inside it) breaks that pattern, and then nothing taken from this line can be trusted
+        while ok and i < len(toks):
+            if not toks[i].startswith("--"):
+                ok = False
+            elif toks[i] in SWITCHES:
+                i += 1
+            elif i + 1 < len(toks) and not toks[i + 1].startswith("--"):
+                i += 2
+            else:
+                ok = False
+        if not ok:
+            return {k: v for k, v in out.items() if k in ("sha", "app")} | {"command_untrusted": True}
         for flag, key in (("--mix-dir", "mix_dir"), ("--part-weights", "part_weights"), ("--extra-parts", "extra_parts")):
             if flag in toks and toks.index(flag) + 1 < len(toks):
                 out[key] = toks[toks.index(flag) + 1]
     return out
 
 
-def parse_gate(output: str):
-    """(verdict, signs): verdict "go" | "nogo" | None; signs the text after a `signs:` line, or None."""
-    verdict = None
-    if re.search(r"\bNO[-_ ]?GO\b", output, re.I):
-        verdict = "nogo"
-    elif re.search(r"\bGO\b", output):
-        verdict = "go"
-    m = re.search(r"^\s*signs?\s*[:=]\s*(.+?)\s*$", output, re.I | re.M)
-    return verdict, (re.sub(r"\s+", "", m.group(1)) if m else None)
+def parse_gate(output: str, rc=None):
+    """"go" | "nogo" | None. The gate's exit code decides (0 GO, 1 NO-GO; anything else, e.g. 2 = cannot decide, is no
+    verdict unless the output still holds an explicit GO / NO-GO line)."""
+    if rc == 0:
+        return "go"
+    if rc == 1:
+        return "nogo"
+    if re.search(r"==>\s*NO[-_ ]?GO\b", output):
+        return "nogo"
+    if re.search(r"==>\s*GO\b", output):
+        return "go"
+    return None
 
 
 def early_stop_decision(v_now, v_ref, wer_ok, limit_pp: float):
     """("stop"|"keep"|"undetermined", reason). Stop when WER is broken, or the pooled V vs stock is above limit_pp and
-    worse than at the reference checkpoint."""
+    worse than at the reference checkpoint. A missing number is "undetermined", never "keep"."""
     if wer_ok is False:
         return "stop", "WER broken"
-    if v_now is None or wer_ok is None:
-        return "undetermined", "summary lacks the pooled V or the WER verdict"
+    if v_now is None:
+        return "undetermined", "no pooled V in the summary"
     if v_now > limit_pp:
         if v_ref is None:
             return "undetermined", f"V {v_now:+.1f} pp > {limit_pp:+.1f} but the reference checkpoint has no V"
         if v_now > v_ref:
             return "stop", f"pooled V {v_now:+.1f} pp > {limit_pp:+.1f} and worse than {v_ref:+.1f} at the reference"
-        return "keep", f"pooled V {v_now:+.1f} pp > {limit_pp:+.1f} but not worse than {v_ref:+.1f}"
-    return "keep", f"pooled V {v_now:+.1f} pp within {limit_pp:+.1f}"
+    if wer_ok is None:
+        return "undetermined", "no WER verdict in the summary"
+    return "keep", f"pooled V {v_now:+.1f} pp (limit {limit_pp:+.1f}, reference {v_ref}), WER ok"
 
 
 class Trigger:
@@ -245,6 +268,10 @@ class Trigger:
         if man.get("sha"):
             p["sha"] = man["sha"]
         p["app"] = man.get("app", "")
+        if man.get("command_untrusted") and not (c.get("mix_dir") and "part_weights" in c and "extra_parts" in c):
+            self.once("untrusted-cmd", "ALARM the main run's logged launch command could not be read in full; the branches "
+                                       "would risk a different mix. Set mix_dir, part_weights and extra_parts in the config.")
+            p["mix_dir"] = ""
         return p
 
     def try_launch(self, role: str, steps: int, init_from: str = "") -> None:
@@ -362,7 +389,8 @@ class Trigger:
         return f"{role}@{step}"
 
     def out_dir(self, role: str, step: int) -> str:
-        return os.path.join(self.cfg["score_root"], f"{self.runs[role]['run']}_step{step}")
+        tpl = self.cfg.get("score_dir_template") or "{score_root}/{run}_step{step}"
+        return tpl.format(score_root=self.cfg["score_root"], run=self.runs[role]["run"], step=step)
 
     def tool_ready(self, name: str, path: str) -> bool:
         if os.path.exists(path):
@@ -440,52 +468,53 @@ class Trigger:
     # --- gates, encF, early stop -------------------------------------------------------------------------------
 
     def gate_step(self) -> None:
+        """The interim gate, read at step 250, at step 500 and over both (its sign-agreement read); encF needs all three GO."""
         c = self.cfg
         if self.state["encF"] != "pending" or not c.get("gate_script"):
             return
-        for step in (250, 500):
-            k = str(step)
-            if k in self.state["gates"] or not (self.done("brC", step) and self.done("brE", step)):
+        g = self.state["gates"]
+        for key in GATE_KEYS:
+            steps = [int(x) for x in key.split(",")]
+            if key in g or not all(self.done(r, s) for s in steps for r in ("brC", "brE")):
+                continue
+            err = g.setdefault("errors", {}).get(key, {})
+            if self.clock() - err.get("last", 0) < RETRY_S:
                 continue
             if not self.tool_ready("interim gate", c["gate_script"]):
                 return
-            argv = self.fill(c.get("gate_argv") or ["{python}", "{gate_script}", "--step", "{step}", "--c-dir", "{c_dir}",
-                                                    "--e-dir", "{e_dir}"], gate_script=c["gate_script"], step=step, c_dir=self.out_dir("brC", step), e_dir=self.out_dir("brE", step),
-                             out=os.path.join(c["score_root"], f"gate_step{step}.txt"))
+            argv = self.fill(c.get("gate_argv") or ["{python}", "{gate_script}", "{e_run}", "{c_run}", "--steps", "{steps}"],
+                             gate_script=c["gate_script"], e_run=self.runs["brE"]["run"], c_run=self.runs["brC"]["run"],
+                             steps=key, out=os.path.join(c["score_root"], f"gate_{key.replace(',', '_')}.json"))
             if self.dry:
-                self.log(f"DRY-RUN would run the gate at {step}: {shlex.join(argv)}")
+                self.log(f"DRY-RUN would run the gate over steps {key}: {shlex.join(argv)}")
                 continue
-            self.log(f"ACTION interim gate at step {step}: {shlex.join(argv)}")
-            rc, out = self.ex.run(argv, timeout=900, log_path=os.path.join(c["score_root"], f"gate_step{step}.log"),
-                                  cwd=c.get("score_cwd"))
-            verdict, signs = parse_gate(out)
+            self.log(f"ACTION interim gate over steps {key}: {shlex.join(argv)}")
+            rc, out = self.ex.run(argv, timeout=1800, cwd=c.get("score_cwd"),
+                                  log_path=os.path.join(c["score_root"], f"gate_{key.replace(',', '_')}.log"))
+            verdict = parse_gate(out, rc)
             if verdict is None:
-                n = self.state["gates"].setdefault("errors", {}).get(k, 0) + 1
-                self.state["gates"]["errors"][k] = n
-                self.log(f"{'ALARM ' if n >= 3 else ''}gate at {step}: no GO / NO-GO in the output (exit {rc}); "
+                n = err.get("n", 0) + 1
+                g["errors"][key] = dict(n=n, last=self.clock())
+                self.log(f"{'ALARM ' if n >= 3 else ''}gate over {key}: no verdict (exit {rc}); "
                          f"{'giving up, decide by hand' if n >= 3 else 'will retry'}: {' | '.join(out.strip().splitlines()[-3:])}")
                 if n >= 3:
-                    self.state["gates"][k] = dict(verdict="error", signs=None)
+                    g[key] = dict(verdict="error")
                 self.save()
-                continue
-            self.state["gates"][k] = dict(verdict=verdict, signs=signs)
-            self.log(f"gate at step {step}: {verdict.upper()} signs={signs} (exit {rc})")
+                break  # the gate cannot decide yet: do not try the other step sets on top of it
+            else:
+                g[key] = dict(verdict=verdict)
+                self.log(f"gate over steps {key}: {verdict.upper()} (exit {rc}): {' | '.join(out.strip().splitlines()[-1:])}")
             self.save()
-        g = self.state["gates"]
-        verdicts = {s: g[s]["verdict"] for s in ("250", "500") if s in g}
-        if any(v != "go" for v in verdicts.values()):
+        verdicts = {k: g[k]["verdict"] for k in GATE_KEYS if k in g}
+        if "error" in verdicts.values():
+            self.state["encF"] = "manual"
+            self.log(f"ALARM encF decision left to hand: the gate gave no verdict ({verdicts})")
+        elif any(v == "nogo" for v in verdicts.values()):
             self.state["encF"] = "nogo"
             self.log(f"encF decision: NO (gate verdicts {verdicts}); no full encoder run, diagnose by hand")
-        elif len(verdicts) == 2:
-            a, b = g["250"]["signs"], g["500"]["signs"]
-            if a is None or b is None:
-                self.log("note: the gate printed no `signs:` line; sign agreement is taken from the GO verdicts alone")
-            if a != b:
-                self.state["encF"] = "nogo"
-                self.log(f"encF decision: NO (GO at both steps but the signs differ: {a} vs {b})")
-            else:
-                self.state["encF"] = "go"
-                self.log("encF decision: GO at 250 and 500 with sign agreement")
+        elif len(verdicts) == len(GATE_KEYS):
+            self.state["encF"] = "go"
+            self.log("encF decision: GO at 250, at 500 and over both (sign agreement)")
         self.save()
 
     def early_stop_step(self) -> None:
@@ -496,7 +525,7 @@ class Trigger:
         step, ref = es["step"], self.cfg.get("branch_step", 1000)
         if not self.done("main", step):
             return
-        read = lambda s: self.read_summary(self.out_dir("main", s))
+        read = lambda s: self.read_summary("main", s)
         now, then = read(step), read(ref)
         v_key, w_key = es.get("v_key", "pooled_v_vs_stock_pp"), es.get("wer_key", "wer_ok")
         verdict, why = early_stop_decision(now.get(v_key), then.get(v_key), now.get(w_key), es.get("v_limit_pp", 3.0))
@@ -526,14 +555,22 @@ class Trigger:
             st["action"] = "stopped"
         self.save()
 
-    @staticmethod
-    def read_summary(out_dir: str) -> dict:
+    def read_summary(self, role: str, step: int) -> dict:
+        """{pooled V vs stock, WER verdict} of a scored checkpoint: from the early-stop `summary_cmd` (argv template with
+        {scores_dir}; prints one JSON object) or, without one, <scores dir>/summary.json."""
+        d = self.out_dir(role, step)
+        cmd = self.cfg.get("early_stop", {}).get("summary_cmd")
         try:
-            with open(os.path.join(out_dir, "summary.json")) as f:
-                d = json.load(f)
-            return d if isinstance(d, dict) else {}
+            if cmd:
+                rc, out = self.ex.run(self.fill(cmd, scores_dir=d, run=self.runs[role]["run"], step=step), timeout=300,
+                                      cwd=self.cfg.get("score_cwd"))
+                doc = json.loads(out) if rc == 0 else {}
+            else:
+                with open(os.path.join(d, "summary.json")) as f:
+                    doc = json.load(f)
         except (OSError, ValueError):
             return {}
+        return doc if isinstance(doc, dict) else {}
 
     # --- the loop --------------------------------------------------------------------------------------------
 
