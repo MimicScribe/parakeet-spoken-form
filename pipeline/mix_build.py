@@ -886,7 +886,9 @@ TTS_SETS = (("tts1", "tts_judge"), ("tts2", "tts2_judge"), ("tts5y", "tts5y_judg
             ("ttsSYM1r", "ttsSYM1r_judge"),
             # tier-1 packs (2026-10-18, ml_tts_pack): decimal words (de es fr it nl pt), percent with the unit word
             # (es fr pt), and the verified look-alike / business-reading set (tvar1v)
-            ("ttsDW1", "ttsDW1_judge"), ("ttsPC1", "ttsPC1_judge"), ("tvar1v", "tvar1v_judge"))
+            ("ttsDW1", "ttsDW1_judge"), ("ttsPC1", "ttsPC1_judge"), ("tvar1v", "tvar1v_judge"),
+            # value-spread (ttsVS1, V_a values only) and rare-form (ttsRF1: feminine hundreds, apocope, pt-PT teens) packs
+            ("ttsVS1", "ttsVS1_judge"), ("ttsRF1", "ttsRF1_judge"))
 # sets planned against the census's per-value gaps (tts5y: thin year values, normal speaking rates): the share cap
 # applies, the "real speech has enough of this class" cut-off does not (synthetic years and counts
 # are fine within the cap)
@@ -902,7 +904,7 @@ TTS_TARGETED = {"tts5y", "tts6uk", "tts7", "tts8", "tts9nl", "tts9ru", "tts9ru2"
                 "ttsFT1", "ttsFT2", "ttsFT3", "ttsFT4", "ttsFT5", "ttsFT5c", "ttsFT5d",
                 "ttsFT6c", "ttsFT6r", "ttsFT6rd", "ttsLNw", "ttsLNr", "ttsLNm", "ttsYRm", "ttsYRr",
                 "ttsYRs", "ttsYRn", "ttsCNm", "ttsLTw", "ttsLTr", "ttsNL1", "ttsNL2", "ttsW1", "ttsRV1b", "ttsRV1r2", "ttsSYM1",
-                "ttsSYM1r", "ttsDW1", "ttsPC1"}
+                "ttsSYM1r", "ttsDW1", "ttsPC1", "ttsVS1", "ttsRF1"}
 # sets whose rows replace older synthetic rows (2026-10-18, B2): a row's "supersedes" lists the ids it replaces (rows of
 # the same class and value spread, read one convention; ml_tts_variety picked them). order_synthetic drops those ids
 # and puts the set's rows first, so they take the room the dropped rows leave (a class at its fill-to-bar or share cap
@@ -1959,6 +1961,25 @@ SYN_SEAM_LONG_FILES = ("seam_long_syn", "seam_long_syn2", "seam_long_syn3", "sea
 WIN_FILES = ("windows", "windows_syn", "windows_syn2")
 
 
+def vb_violations(rows: list, vb) -> list:
+    """Rows of the value-spread fill sets (ttsVS1 / ttsRF1, row["_set"]) that carry a span whose "class:value" is in the
+    held-back V_b half (ml/ttsVS1/vsplit_<lang>.json): the control half must get no new synthetic fill. Class: year =
+    a four-digit 1900-2099, int_big = 1000+, else int_small; only "int" spans (digits of the written text)."""
+    out = []
+    for x in rows:
+        if x.get("_set") not in ("ttsVS1", "ttsRF1"):
+            continue
+        for sp in x.get("spans") or []:
+            t = re.sub(r"\D", "", str(sp.get("text", "")))
+            if sp.get("kind") != "int" or not t:
+                continue
+            n = int(t)
+            c = "year" if len(t) == 4 and 1900 <= n <= 2099 else "int_big" if n >= 1000 else "int_small"
+            if f"{c}:{n}" in vb:
+                out.append((x["id"], f"{c}:{n}"))
+    return out
+
+
 def keep_syn_pairs(rows: list, bad: set, cap_out: set, took_ids: set) -> tuple[list, dict]:
     """Whole synthetic seam pairs whose every parent is a synthetic row this build trains on (took_ids: the chosen
     synthetic rows; the rule synthetic windows follow), none held out / rejected / ext (bad) or capped out (cap_out).
@@ -2015,7 +2036,7 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
            seam_files: tuple = SEAM_FILES, mix_dir: str = "mix4", seam_long_h: float = 0.0,
            split_langs: tuple = (), win15_share: float = 0.0, win15_dir: str = "ml/win15b", edge_fix_dir: str = "",
            extra_passes: tuple = (), relabel_rows: str = "", relabel_parts_dir: str = "", relabel_tts: bool = False,
-           exclude_passes: tuple = (), seam_extra: tuple = (), seam_long_extra: tuple = ()) -> dict:
+           exclude_passes: tuple = (), seam_extra: tuple = (), seam_long_extra: tuple = (), vsplit_dir: str = "") -> dict:
     """mix4/ manifests for the wave-1 run (all CPU, idempotent):
     - mix4/d2.jsonl: mix3/d2 (Greek restore applied) WITHOUT wave-1 languages: their digit rows were relabelled by P3
       (origin d2) and would otherwise teach digits through the stock token KL;
@@ -2068,6 +2089,8 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
       consistency pairs skip fixed rows.
     - seam_extra (2026-10-18): more seam_crops outputs for the short seam part, names relative to ml/p3v2/<lang>/ with
       {lang} filled ("../../realx1wb/{lang}/seam" = ml/realx1wb/<lang>/seam.jsonl); read like seam_files.
+    - vsplit_dir (2026-10-18): "ml/ttsVS1" holds vsplit_<lang>.json; the chosen ttsVS1 / ttsRF1 rows must carry no V_b value
+      (vb_violations; the build stops), so the V_b half stays the unfilled control of the value-spread readout.
     - seam_long_extra (2026-10-18): the same for the long-number seam part (realx1 / dense-scan pair files).
     - exclude_passes (2026-10-18): names ("rows_nlreal1a") of ml/p3v2/<lang>/rows*.jsonl passes the build leaves out (a pass
       still being labelled has no judged marker and would stop the build; its judged copy can come in with extra_passes).
@@ -2430,6 +2453,11 @@ def build4(vol: str, langs=WAVE1, rows_h: float = 3.0, win_h: float = 1.0, seed:
                 o = f"{vol}/{mix_dir}/tts_aug/{lang}/{i}_{os.path.basename(x['audio_filepath'])}"
                 x["aug"] = deg(x["audio_filepath"], o)
                 x["audio_filepath"] = o
+        if vsplit_dir and os.path.exists(f"{vol}/{vsplit_dir}/vsplit_{lang}.json"):
+            vb_ = set(json.load(open(f"{vol}/{vsplit_dir}/vsplit_{lang}.json"))["V_b"])
+            bad_ = vb_violations(took, vb_)
+            stats.setdefault("vb_violations", {})[lang] = len(bad_)
+            assert not bad_, f"{lang}: {len(bad_)} chosen ttsVS1 / ttsRF1 rows carry a held-back V_b value, e.g. {bad_[:3]}"
         for x in took:
             x.pop("_targeted", None)
             x.pop("_set", None)

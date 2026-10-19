@@ -81,3 +81,15 @@ for t_ in ("ttsDW1", "ttsPC1", "tvar1v"):
 assert {"ttsDW1", "ttsPC1"} <= MB.TTS_TARGETED and {"ttsDW1", "ttsPC1"} <= MB.TTS_LONG_SETS
 assert 0.9 < MB.number_share_of("d1/en4_ok/ttsDW1_en_train.jsonl") <= 1.0
 print("test_m10_build: seam_long_extra, tier-1 sets ok")
+
+# ---- V_b control half: a chosen value-spread row with a V_b value is a violation; V_a values and other sets are not
+rows_ = [{"id": "a", "_set": "ttsVS1", "spans": [{"kind": "int", "text": "14.500"}]},      # int_big:14500 (V_a)
+         {"id": "b", "_set": "ttsVS1", "spans": [{"kind": "int", "text": "19.500"}]},      # int_big:19500 (V_b)
+         {"id": "c", "_set": "ttsRF1", "spans": [{"kind": "int", "text": "105"}]},         # int_small:105 (V_b)
+         {"id": "d", "_set": "ttsSYM1", "spans": [{"kind": "int", "text": "105"}]},        # another set: not this check
+         {"id": "e", "_set": "ttsVS1", "spans": [{"kind": "int", "text": "2025"}]}]        # year:2025 (V_b)
+got = MB.vb_violations(rows_, {"int_big:19500", "int_small:105", "year:2025"})
+assert [g[0] for g in got] == ["b", "c", "e"], got
+assert [t_ for t_, _ in MB.TTS_SETS if t_ in ("ttsVS1", "ttsRF1")] == ["ttsVS1", "ttsRF1"] and {"ttsVS1", "ttsRF1"} <= MB.TTS_TARGETED
+assert not ({"ttsVS1", "ttsRF1"} & MB.TTS_LONG_SETS) and 'vsplit_dir: str = ""' in open(MA.__file__).read()
+print("test_m10_build: V_b control ok")
