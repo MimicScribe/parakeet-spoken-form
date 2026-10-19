@@ -167,7 +167,7 @@ class C_Corruptions(unittest.TestCase):
         self.assertTrue(x["unit_spoken"] and not x["unit_present"])
         # the legacy table has the same test
         lab = r["seg"].split()
-        self.assertEqual(CR.unit_flags("cur", type("S", (), {"cands": []}), lab, "deux cent cinquante".split(),
+        self.assertEqual(CR.unit_flags("cur", type("S", (), {"cands": [], "text": "250 €"}), lab, "deux cent cinquante".split(),
                                        "deux cent cinquante".split(), "fr"), (True, True))
 
     def test_a_dropped_decimal_word_is_a_decimal_miss(self):
