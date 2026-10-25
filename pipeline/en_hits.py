@@ -216,16 +216,20 @@ try:
         import os
 
         import pyarrow.parquet as pq
-        from huggingface_hub import hf_hub_download
 
         want = {r["utt_id"]: r for r in rows}
         name = path.split("/")[1] + "_" + os.path.basename(path)[:-8]
         out_dir = f"{VOL}/yodas/en_{tag}/{name}" if lang == "en" else f"{VOL}/ml/p3v2/{lang}/wav"
         os.makedirs(out_dir, exist_ok=True)
-        local = hf_hub_download(REPO, path, repo_type="dataset", local_dir="/tmp/shard")
-        pf = pq.ParquetFile(local)
+        # range reads (2026-10-24): read the small utt_id column of every row group, then audio only from the row groups
+        # that hold a wanted row -- not the whole shard (a few clips per shard made full downloads ~all waste)
+        from huggingface_hub import HfFileSystem
+        fh = HfFileSystem().open(f"datasets/{REPO}/{path}", block_size=1 << 20)
+        pf = pq.ParquetFile(fh)
+        local = None
         kept = []
-        for rg in range(pf.metadata.num_row_groups):
+        rgs = [rg for rg in range(pf.metadata.num_row_groups) if want.keys() & set(pf.read_row_group(rg, columns=["utt_id"]).column(0).to_pylist())]
+        for rg in rgs:
             for x in pf.read_row_group(rg, columns=["utt_id", "audio"]).to_pylist():
                 r = want.get(x["utt_id"])
                 if r is None:
@@ -242,7 +246,7 @@ try:
                 open(wav, "wb").write(x["audio"]["bytes"])
                 kept.append({k: r[k] for k in COLS} | {"kind": "digit" if re.search(r"\d", r["text"]) else "word",
                                                        "shard": path, "audio_filepath": wav, "hits": r["hits"]})
-        os.remove(local)
+        if local: os.remove(local)
         vol.commit()
         return kept
 
