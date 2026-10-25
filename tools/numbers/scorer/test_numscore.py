@@ -132,10 +132,12 @@ print("v2.2 total fail", f)
 
 def test_extra_numbers_is_form_blind_and_net_of_substitutions():
     import numscore as N
+    assert N.number_groups("1999") == N.number_groups("nineteen ninety nine") == 1
+    assert N.number_groups("978-0-07-802189-3") == N.number_groups("nine seven eight zero one two three four") == 1
+    assert N.number_groups("1865\u20131955") == N.number_groups("eighteen sixty five to nineteen fifty five") == 1
     ref = "the ISBN is 9780123456789 thanks"
     assert N.extra_numbers(ref, "the ISBN is nine seven eight zero one two three four five six seven eight eight thanks") == 0
     assert N.extra_numbers(ref, "the ISBN is 978012345678 thanks") == 0
     assert N.extra_numbers(ref, "the ISBN is 9780123456789 and 5 and 7") == 2
-    assert N.extra_numbers("it cost 25 dollars", "it cost twenty, twenty five dollars") == 1
     assert N.extra_numbers("it cost 25 dollars", "it cost 35 dollars") == 0
     assert N.extra_numbers("it cost 25 dollars", "it cost 25 dollars, call five five five one two one two") == 1

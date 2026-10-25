@@ -632,33 +632,44 @@ def insertions(ref_text, hyp_text, slot_mode=None):
     return b[1]
 
 
-def _groups(atoms, idx):
-    """number groups among atoms[k] for k in idx (in order): contiguous single-digit WORD atoms ("nine seven eight") are one spoken
-    digit string; every other atom (a digit token, "twenty five", "2020") is a number of its own"""
-    n, prev = 0, None
-    for k in sorted(idx):
-        a = atoms[k]
-        sd = a.form == "w" and len(a.s) == 1 and a.s.isdigit()
-        if not (prev is not None and k == prev[0] + 1 and sd and prev[1]):
-            n += 1
-        prev = (k, sd)
+_JOIN = {"double", "triple", "point", "dash", "oh", "o", "to", "through", "hyphen"}
+_SCALE_AND = {"hundred", "thousand", "million", "billion", "trillion"}
+
+
+def number_groups(text):
+    """number groups in a text, counted on its words (form-blind): a maximal run of number tokens (a token with a digit, or a
+    number word / ordinal / decade) joined by double / triple / point / dash / oh / to (and "and" right after hundred / thousand /
+    million); a comma, colon, semicolon or sentence end closes a group and " | " always separates. "1999", "nineteen ninety nine",
+    "978-0-07-802189-3", "nine seven eight zero ..." and "five to ten" are one group each; "twenty, twenty five" is two."""
+    n = 0
+    for part in (text or "").split(" | "):
+        inrun, pend, last = False, False, ""
+        for tok in part.replace("\u2013", "-").split():
+            closes = bool(re.search(r"[,;:.!?]$", tok)) and not re.fullmatch(r"\d[\d,.]*\d", tok)
+            w = re.sub(r"^[^\w$]+|[^\w%]+$", "", tok).lower()
+            if not w:
+                inrun = pend = False
+                continue
+            isnum = bool(re.search(r"\d", w)) or w in NUMWORD or w == "zero"
+            if isnum:
+                if not inrun:
+                    n += 1
+                inrun, pend, last = True, False, w
+            elif inrun and not pend and (w in _JOIN or (w == "and" and last in _SCALE_AND)):
+                pend = True
+            else:
+                inrun = pend = False
+            if closes:
+                inrun = pend = False
     return n
 
 
 def extra_numbers(ref_text, hyp_text, slot_mode=None):
-    """v2.3: numbers in the hypothesis beyond the reference, counted per NUMBER GROUP and net of substitutions:
-    max(0, unmatched hyp groups - unmatched ref groups). A failed 13-digit string counts 0 whether it is written in words
-    (13 word atoms) or digits (1 atom) - insertions() counts 13 vs 1, which made the insertion bar depend on the written form.
-    A stutter ("twenty, twenty five" for 25) and an invented number still count 1."""
-    b = _best_alignment(ref_text, hyp_text, slot_mode=slot_mode)
-    _, _, R, Hs, mt, _, _ = b
-    hm, rm = set(), set()
-    for (i, i2, j, j2) in mt:
-        rm.update(range(i, i2 + 1)); hm.update(range(j, j2 + 1))
-    H = [a for a in Hs if a.s != "#"]
-    hu = [k for k in range(len(H)) if k not in hm]
-    ru = [k for k in range(len(R)) if k not in rm and R[k].s != "#"]
-    return max(0, _groups(H, hu) - _groups(R, ru))
+    """v2.3: numbers in the hypothesis beyond the reference = max(0, number groups(hyp) - number groups(ref)), groups counted on
+    the words (number_groups), so the written form never changes the count; a substitution counts 0, an invented number or a
+    stutter ("twenty, twenty five" for 25) 1. On slot references (" | " lists of the target numbers) background numbers in the clip
+    count for every arm alike (compare arms with each other / stock, not with 0)."""
+    return max(0, number_groups(_clean_hyp(hyp_text)) - number_groups(ref_text))
 
 
 def form_report(ref_text, hyp_text, slot_mode=None):
