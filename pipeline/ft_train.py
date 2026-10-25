@@ -736,6 +736,16 @@ def anchor_positions(words: list[tuple[str, int, int]], flags: list[bool], n_ids
     return keep
 
 
+def digit_mask_cols(ids, wf_set) -> list[int]:
+    """en_digit_mask: label columns (0..len(ids)) to free from English KL: every column whose next token is a written-form
+    piece, plus the column right after it (where the teacher would choose what follows the digits)."""
+    cols = set()
+    for j, tok in enumerate(ids):
+        if tok in wf_set:
+            cols.update((j, j + 1))
+    return sorted(cols)
+
+
 def klu_row(spm, tag: str, ids, suffix_anchor: bool = False, anchor_after: int = 1, nspan_pos: dict | None = None,
             span_prefix: dict | None = None, cache: dict | None = None, en_full: bool = False,
             en_free: bool = False) -> list[bool]:
@@ -1015,9 +1025,13 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
                   kl_mask_space: bool = False, en_teacher_state: dict | None = None, en_teacher_num: str = "anchor",
                   en_kl_scale: float = 1.0, wf_pen_digits_only: bool = False,
                   kl_mask_space_en: bool = False, enc_real_only: bool = False, en_free_teacher: bool = False,
-                  en_span_gate: float = 0.0):
+                  en_span_gate: float = 0.0, en_digit_mask: bool = False):
     """en_free_teacher / en_span_gate (both off by default, bit for bit): the "free" rows join the English KL rows, and the
     English "span" rows get blank-KL gate en_span_gate (block comment at EN_TEACHER_TAGS).
+    en_digit_mask (off by default, bit for bit): on the English KL rows, label columns that hold a written-form piece
+    (digits / letter-digit codes under label v3) and the column right after each get no KL at all, so the spoken-form
+    English teacher never pulls a digit target toward words or a blank; the RNNT term owns those tokens (as stock-era
+    span rows did). Synthetic "free" rows are unaffected (they never read a teacher).
     enc_real_only (unfreeze_top only): the rows whose label is in `synthetic` send no gradient into the encoder (every
     loss, main and auxiliary, reads the same encoder output, whose value is unchanged; see unfreeze_top_layers). The decoder
     and joint train on every row as before. `synthetic` holds the nonen_span labels of TTS rows / TTS windows (write_mix);
@@ -1071,6 +1085,10 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
     space_ids = [i for i in range(spm.get_piece_size()) if spm.id_to_piece(i) == "▁"]
     wfm_t = torch.tensor(wf_piece_ids(spm) + space_ids) if kl_mask_space or kl_mask_space_en else wf_t
     wfp_t = wf_t
+    wf_set = set(wf_piece_ids(spm))  # en_digit_mask: written-form pieces (digits, letter-digit code pieces)
+    dmask_rows = {"seen": 0, "cols": 0}
+    if en_digit_mask:
+        print(f"en_digit_mask on: English KL rows get no KL on written-form label columns (+1 after); {len(wf_set)} pieces", flush=True)
     if wf_pen_digits_only:
         wfp_t = torch.tensor([i for i in wf_piece_ids(spm) if re.fullmatch(r"▁?[0-9]+", spm.id_to_piece(i))])
         assert len(wfp_t), "wf_pen_digits_only but no digit piece"
@@ -1162,6 +1180,16 @@ def add_r3_losses(m, row_tags: dict, kl_weight: float = 10.0, punct_weight: floa
             klu[i, :len(row_toks[i]) + 1] = torch.tensor(klu_row(spm, tg, row_toks[i], suffix_anchor, anchor_after,
                                                                  nspan_pos, span_prefix, en_cache, en_full,
                                                                  en_free_teacher))
+        if en_digit_mask:
+            for i, tg in enumerate(tags):
+                if tg not in en_tags:
+                    continue
+                for j in digit_mask_cols(row_toks[i], wf_set):
+                    klu[i, j] = False
+                    dmask_rows["cols"] += 1
+            dmask_rows["seen"] += 1
+            if dmask_rows["seen"] % 200 == 1:
+                print(f"en_digit_mask: label columns freed from English KL so far {dmask_rows['cols']}", flush=True)
         klu = klu.to(dev)
         is_en = torch.tensor([tg in en_tags for tg in tags], device=dev)
         is_ent = is_en & (edec is not None)  # rows read from the English teacher
@@ -1887,7 +1915,8 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
           wf_pen_digits_only: bool = False, kl_mask_space_en: bool = False, enc_lr_scale: float = 1.0, enc_l2sp_c: float | None = None,
           lora_rank: int = 0, lora_alpha: float = 16.0, sampler_seed: int = 0, lr_offset: int = 0, lr_total: int = 0,
           enc_lr_peak: float = 0.0, enc_lr_floor: float = 0.0, enc_lr_warmup: int = 0, enc_lr_steps: int = 0,
-          enc_clip: float = 0.0, enc_real_only: bool = False, en_free_teacher: bool = False, en_span_gate: float = 0.0):
+          enc_clip: float = 0.0, enc_real_only: bool = False, en_free_teacher: bool = False, en_span_gate: float = 0.0,
+          en_digit_mask: bool = False):
     """`init_from` = "<run>@<step>": start from that run's checkpoint (the KL teacher stays stock).
     Mix entries may carry a third element, the KL treatment tag ("anchor" | "span" | "nonen" | "free"); tagged
     entries replace the path-based "replay/" rule. `resume`: continue from exp/<run>/last.ckpt when it exists.
@@ -2061,7 +2090,7 @@ def train(vol: str, ultra: str, run: str, mix: list[tuple[str, float]], max_step
                       wf_en_weight=wf_en_weight, kl_mask_space=kl_mask_space, en_teacher_state=en_state,
                       en_teacher_num=en_teacher_num, en_kl_scale=en_kl_scale, wf_pen_digits_only=wf_pen_digits_only,
                       kl_mask_space_en=kl_mask_space_en, enc_real_only=enc_real_only,
-                      en_free_teacher=en_free_teacher, en_span_gate=en_span_gate)
+                      en_free_teacher=en_free_teacher, en_span_gate=en_span_gate, en_digit_mask=en_digit_mask)
         if l2sp_c or enc_l2sp_c:
             last_layer = m.joint.joint_net[-1].weight.shape[0]
             exempt = [i for i in wf_piece_ids(m.tokenizer.tokenizer) if i < last_layer]

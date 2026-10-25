@@ -2092,6 +2092,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
     cfg.setdefault("en_kl_scale", 1.0)
     cfg.setdefault("en_free_teacher", False)
     cfg.setdefault("en_span_gate", 0.0)
+    cfg.setdefault("en_digit_mask", False)
     cfg.setdefault("enc_lr_scale", 1.0)
     cfg.setdefault("enc_l2sp_c", None)
     cfg.setdefault("lora_rank", 0)
@@ -2157,7 +2158,7 @@ def retrain3(run: str, arm: str = "S-A", seed: int = 1, max_steps: int = 4000, s
                    l2sp_exempt_num=cfg["l2sp_exempt_num"], wf_pen_digits_only=cfg["wf_pen_digits_only"],
                    kl_mask_space_en=cfg["kl_mask_space_en"], en_teacher=cfg["en_teacher"],
                    en_teacher_num=cfg["en_teacher_num"], en_kl_scale=cfg["en_kl_scale"],
-                   en_free_teacher=cfg["en_free_teacher"], en_span_gate=cfg["en_span_gate"],
+                   en_free_teacher=cfg["en_free_teacher"], en_span_gate=cfg["en_span_gate"], en_digit_mask=cfg["en_digit_mask"],
                    enc_lr_scale=cfg["enc_lr_scale"], enc_l2sp_c=cfg["enc_l2sp_c"], lora_rank=cfg["lora_rank"],
                    lora_alpha=cfg["lora_alpha"], sampler_seed=cfg["sampler_seed"], lr_offset=cfg["lr_offset"],
                    lr_total=cfg["lr_total"], enc_lr_peak=cfg["enc_lr_peak"], enc_lr_floor=cfg["enc_lr_floor"],
