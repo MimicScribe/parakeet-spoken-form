@@ -11,13 +11,14 @@ NUMWORDS = set("zero oh one two three four five six seven eight nine ten eleven 
 
 
 def add_marker(label):
-    # digits: every adjacent identical pair inside a digit run
-    out = re.sub(r"\d{2,}", lambda m: re.sub(r"(\d)(?=\1)", r"\1" + M, m.group()), label)
-    # number words: identical adjacent number words ("two two", "twenty twenty", "five, five" is NOT adjacent -> untouched)
+    # digits: only digit-by-digit strings (>= 5 digits, the label-v3 rule); never years, amounts or codes ("1999", "100", "B11")
+    out = re.sub(r"(?<![\w.])\d{5,}(?!\w|\.\d)", lambda m: re.sub(r"(\d)(?=\1)", r"\1" + M, m.group()), label)
+    # number words: identical adjacent number words, punctuation ignored for the comparison ("two two.", "twenty twenty,")
     toks = re.split(r"(\s+)", out)
+    core = lambda t: re.sub(r"^[\"'(]+|[\"').,;:!?]+$", "", t).lower()
     for i in range(2, len(toks), 2):
         a, b = toks[i - 2], toks[i]
-        if a.lower() == b.lower() and a.lower() in NUMWORDS:
+        if core(a) == core(b) and core(a) in NUMWORDS and not re.search(r"[.,;:!?]$", a):  # "five, five" (pause) stays unmarked
             toks[i - 2] = a + M
     return "".join(toks)
 
@@ -27,10 +28,12 @@ def strip_marker(text):
 
 
 def _test():
-    cases = [("call 5551234 now", "call 5¡5¡51234 now"), ("room two two oh one", "room two¡ two oh one"), ("1112", "1¡1¡12"),
+    cases = [("call 5551234 now", "call 5¡5¡51234 now"), ("room two two oh one", "room two¡ two oh one"), ("11123", "1¡1¡123"),
              ("twenty twenty to twenty twenty one", "twenty¡ twenty to twenty¡ twenty one"), ("very very good", "very very good"),
              ("we need five, five is plenty", "we need five, five is plenty"), ("ISBN 9780814659311", "ISBN 978081465931¡1"),
-             ("B12 and 3D", "B12 and 3D"), ("Two two", "Two¡ two"), ("no repeats 123", "no repeats 123")]
+             ("B12 and 3D", "B12 and 3D"), ("Two two", "Two¡ two"), ("no repeats 123", "no repeats 123"),
+             ("in 1999 we paid 100", "in 1999 we paid 100"), ("aisle B11", "aisle B11"), ("it was two two.", "it was two¡ two."),
+             ("version 802.11", "version 802.11"), ("call 5551234.", "call 5¡5¡51234.")]
     bad = 0
     for src, want in cases:
         got = add_marker(src)
