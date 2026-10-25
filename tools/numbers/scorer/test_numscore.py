@@ -128,3 +128,14 @@ chk("form 15,000 ordinary", N.form_report("15,000", "15000")[0][0], "ordinary")
 s = N.form_summary([N.form_report("25", "twenty five"), N.form_report("5551234", "5551234"), N.form_report("A-10", "A 10")])
 chk("summary", (s["ordinary_words_pct"], s["long_digits_pct"], s["code_digits_pct"]), (100.0, 100.0, 100.0))
 print("v2.2 total fail", f)
+
+
+def test_extra_numbers_is_form_blind_and_net_of_substitutions():
+    import numscore as N
+    ref = "the ISBN is 9780123456789 thanks"
+    assert N.extra_numbers(ref, "the ISBN is nine seven eight zero one two three four five six seven eight eight thanks") == 0
+    assert N.extra_numbers(ref, "the ISBN is 978012345678 thanks") == 0
+    assert N.extra_numbers(ref, "the ISBN is 9780123456789 and 5 and 7") == 2
+    assert N.extra_numbers("it cost 25 dollars", "it cost twenty, twenty five dollars") == 1
+    assert N.extra_numbers("it cost 25 dollars", "it cost 35 dollars") == 0
+    assert N.extra_numbers("it cost 25 dollars", "it cost 25 dollars, call five five five one two one two") == 1

@@ -632,6 +632,35 @@ def insertions(ref_text, hyp_text, slot_mode=None):
     return b[1]
 
 
+def _groups(atoms, idx):
+    """number groups among atoms[k] for k in idx (in order): contiguous single-digit WORD atoms ("nine seven eight") are one spoken
+    digit string; every other atom (a digit token, "twenty five", "2020") is a number of its own"""
+    n, prev = 0, None
+    for k in sorted(idx):
+        a = atoms[k]
+        sd = a.form == "w" and len(a.s) == 1 and a.s.isdigit()
+        if not (prev is not None and k == prev[0] + 1 and sd and prev[1]):
+            n += 1
+        prev = (k, sd)
+    return n
+
+
+def extra_numbers(ref_text, hyp_text, slot_mode=None):
+    """v2.3: numbers in the hypothesis beyond the reference, counted per NUMBER GROUP and net of substitutions:
+    max(0, unmatched hyp groups - unmatched ref groups). A failed 13-digit string counts 0 whether it is written in words
+    (13 word atoms) or digits (1 atom) - insertions() counts 13 vs 1, which made the insertion bar depend on the written form.
+    A stutter ("twenty, twenty five" for 25) and an invented number still count 1."""
+    b = _best_alignment(ref_text, hyp_text, slot_mode=slot_mode)
+    _, _, R, Hs, mt, _, _ = b
+    hm, rm = set(), set()
+    for (i, i2, j, j2) in mt:
+        rm.update(range(i, i2 + 1)); hm.update(range(j, j2 + 1))
+    H = [a for a in Hs if a.s != "#"]
+    hu = [k for k in range(len(H)) if k not in hm]
+    ru = [k for k in range(len(R)) if k not in rm and R[k].s != "#"]
+    return max(0, _groups(H, hu) - _groups(R, ru))
+
+
 def form_report(ref_text, hyp_text, slot_mode=None):
     """for each reference number group matched by the best alignment: (ref_kind, hyp_form).
     ref_kind: 'long' (digit string >= 5 digits, no thousands commas/decimal point; or a joined hyphen chain >= 5
