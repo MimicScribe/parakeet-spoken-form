@@ -2,8 +2,21 @@
 Pre-synthesis:  python3 -I census_v2.py [--tag v2]
 Post-synthesis: python3 -I census_v2.py --kept <final rows jsonl>   (adds yield by cell, word_times edge position, aug, speed)
 Value-spread stats use ORDINARY numbers only (repeat==False); repeat-cell values are reported in the distinct-readings table.
-Writes census/<tag>[_kept].json, prints a summary and FLAG lines where a bar fails (parsed must equal n for every parser)."""
-import argparse, collections, hashlib, json, os, re
+Writes census/<tag>[_kept].json, prints a summary and FLAG lines where a bar fails (parsed must equal n for every parser).
+
+Sentence mode also checks the label-v3 invariant on every number (digit-by-digit runs >= 5 digits -> digits only; ordinary kinds -> no digits except
+AM/PM; word+number codes -> no digits) and crowding (distinct-2/3 of number-masked templates, share of the top-50 templates; flag if > 5%).
+
+MIX MODE (text only, no audio): python3 -I census.py --mix SPEC.json
+  SPEC.json = list of {"path": "rows.jsonl", "weight": 1.0, "synthetic": true|false}. Rows are JSONL with a label ("label_v3", "label" or "text", in that
+  order) and "duration" (seconds); an optional "lang" (rows without one count as English; only lang == "en" is counted). Hours are duration * weight / 3600,
+  so the shares are PER-HOUR shares of the whole weighted mix. Reports English hours, synthetic share of English hours, digit-string share (a run of >= 5
+  digits, written as digits or spoken digit by digit), number-free share (no digit, no number word; "one" counts as a number word, so this is conservative),
+  and the repeat-free share among digit-string hours (no two equal adjacent digits). Flags: synthetic digit-string share outside 4-5% of English hours,
+  number-free share < 0.40, synthetic share > 0.30, repeat-free digit share outside 35-65%."""
+import argparse, collections, hashlib, json, os, re, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # works under python -I
+import neardup
 
 U = {w: i for i, w in enumerate("zero one two three four five six seven eight nine".split())} | {"oh": 0}
 T = {w: 10 + i for i, w in enumerate("ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split())}
@@ -43,10 +56,25 @@ def cardinal(ws):  # standard cardinal; adjacent same-rank words ("twenty twenty
 def year(ws):
     ws = [w for w in ws if w != "and"]
     if not ws: return None
-    if ws[:2] == ["two", "thousand"]: return 2000 + (cardinal(ws[2:]) or 0) if len(ws) > 2 else 2000
+    if ws[:2] == ["two", "thousand"]:
+        if len(ws) == 2: return 2000
+        t = cardinal(ws[2:])  # an unparseable tail is NOT 2000: return None so the unparsed counter fires
+        return None if t is None else 2000 + t
     for k in (1, 2):
         a, b = small(ws[:k]), small(ws[k:]) if ws[k:] else None
         if a and 10 <= a <= 99 and (b is not None or ws[k:] == ["hundred"]): return a * 100 + (b or 0)
+    return None
+
+
+RANGE_KINDS = ("a range of quantities", "a page range", "range (between X and Y)", "rough count (X or Y)")
+
+
+def range_ends(reading):  # (low, high) of "X to Y" / "X through Y" / "X or Y" / "between X and Y"; None when no split parses both sides
+    ws = [w for w in re.sub(r"[,.]", " ", reading.lower()).split() if w not in ("between", "um", "uh", "er")]
+    for i, w in enumerate(ws):
+        if w in ("to", "through", "or", "and") and 0 < i < len(ws) - 1:
+            a, b = cardinal(ws[:i]), cardinal(ws[i + 1:])
+            if a is not None and b is not None: return a, b
     return None
 
 
@@ -126,6 +154,48 @@ def mag(v):
     return "1M+"
 
 
+DIGIT_WORDS = {w: str(i) for i, w in enumerate("zero one two three four five six seven eight nine".split())} | {"oh": "0", "o": "0"}
+CODE_KINDS = ("alphanumeric code", "letter-digit code", "short code", "model number")  # single-token letter-digit codes may carry digits
+TENS = r"\b(?:ten|eleven|twelve|thir\w*teen|\w*teen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|thousand|million|plus)\b"
+WORDCODE_KINDS = ("product or code name", "name with a number in it")  # word+number codes ("Chapter eleven"): words only
+
+
+def digit_runs(reading):  # maximal runs of spoken digits (zero/oh/one..nine, double/triple X, "hundred" = 00) -> digit strings; any other word breaks a run
+    runs, cur, mult = [], "", 1
+    for w in re.sub(r"[,.-]", " ", reading.lower()).split() + ["|"]:
+        if w in DIGIT_WORDS: cur += DIGIT_WORDS[w] * mult; mult = 1
+        elif w in ("double", "triple") and mult == 1: mult = 2 if w == "double" else 3
+        elif w == "hundred" and cur: cur += "00"
+        else:
+            if cur: runs.append(cur)
+            cur, mult = "", 1
+    return runs
+
+
+def spoken_digits(reading):  # the digits of a PURE digit-by-digit reading ("seven seven double five"), else None
+    if re.sub(r"[,.-]", " ", reading.lower()).split() and all(w in DIGIT_WORDS or w in ("double", "triple") for w in re.sub(r"[,.-]", " ", reading.lower()).split()):
+        r = digit_runs(reading); return r[0] if len(r) == 1 else None
+    return None
+
+
+def label_violations(r):  # label-v3 invariant on one sentence row -> list of messages
+    bad = []
+    for n in r["numbers"]:
+        lab, kind, g = n.get("label") or "", n["kind"], str(n.get("groups") or "-"); nodig = re.sub(r"\b[AP]M\b", "", lab)
+        if g not in ("-", "") and "L" not in g and not kind.startswith(WORDCODE_KINDS):  # digit-by-digit reading: runs >= 5 digits -> digits, shorter runs stay words
+            if not re.search(TENS, n["reading"].lower()):  # pairs like "twenty seven forty nine" are not digit-by-digit: only the dash check applies
+                segs = re.split(r"\bext(?:ension)?\b", n["reading"].lower())  # an extension is its own number; fillers inside one number ("442, yes, 5884") do not split it
+                want = sum(t for t in (sum(len(x) for x in digit_runs(sg)) for sg in segs) if t >= 5); have = len(re.findall(r"\d", lab))
+                if want != have: bad.append(f"digit runs: expected {want} digit chars, label has {have}: {n['reading']!r} -> {lab!r}")
+            if re.search(r"\d-\d", lab): bad.append(f"digit label has dashes: {lab!r}")
+        elif kind.startswith(WORDCODE_KINDS):  # single-token codes (MP3, 10K, I-9) keep digits; "word number" codes must not
+            if re.search(r"\w\s+\d|\d\s+\w", lab): bad.append(f"word+number code has digits: {n['reading']!r} -> {lab!r}")
+        elif kind.startswith(CODE_KINDS): pass
+        elif re.search(r"\d", nodig): bad.append(f"ordinary ({kind}) label has digits: {n['reading']!r} -> {lab!r}")
+        if lab and lab.lower() not in r.get("label_v3", lab).lower(): bad.append(f"label not in label_v3: {lab!r}")
+    return bad
+
+
 def words(t): return [m.group().lower() for m in re.finditer(r"[A-Za-z']+", t)]
 
 
@@ -145,12 +215,52 @@ def q(xs):
 def share(c, keys, n): return sum(c.get(k, 0) for k in keys) / max(n, 1)
 
 
+NUMWORDS = (neardup.NW | neardup.ORD | neardup.DECADES) - {"oh", "o", "point", "double", "triple", "tens", "hundreds", "thousands", "millions", "billions", "dozens"}
+
+
+def digit_strings(t):  # all digit strings >= 5 long in a label: written digits or spoken digit-by-digit runs
+    return [m.group() for m in re.finditer(r"\d{5,}", t)] + [d for d in digit_runs(t.lower()) if len(d) >= 5]
+
+
+def mix(path):
+    spec = json.load(open(os.path.expanduser(path))); flags = []
+    tot = collections.Counter(); files = []
+    for sp in spec:
+        c = collections.Counter(); w = float(sp.get("weight", 1.0)); syn = bool(sp.get("synthetic"))
+        for l in open(os.path.expanduser(sp["path"])):
+            if not l.strip(): continue
+            r = json.loads(l)
+            if r.get("lang", "en") != "en" or not r.get("duration"): c["skipped_rows"] += 1; continue
+            t = r.get("label_v3") or r.get("label") or r.get("text") or ""; h = r["duration"] * w / 3600
+            ds = digit_strings(t); free = not re.search(r"\d", t) and not any(x in NUMWORDS for x in re.findall(r"[a-z']+", t.lower()))
+            c["en"] += h; c["syn"] += h * syn; c["rows"] += 1
+            if ds: c["dig"] += h; c["dig_syn"] += h * syn; c["dig_free"] += h * (not any(re.search(r"(\d)\1", d) for d in ds))
+            if free: c["free"] += h
+        files.append(dict(path=sp["path"], weight=w, synthetic=syn, **{k: round(v, 3) for k, v in c.items()})); tot.update(c)
+    en = max(tot["en"], 1e-9)
+    res = dict(english_hours=round(tot["en"], 2), synthetic_share=round(tot["syn"] / en, 4), digit_string_share=round(tot["dig"] / en, 4),
+               synthetic_digit_string_share=round(tot["dig_syn"] / en, 4), real_digit_string_share=round((tot["dig"] - tot["dig_syn"]) / en, 4),
+               number_free_share=round(tot["free"] / en, 4), repeat_free_digit_share=round(tot["dig_free"] / max(tot["dig"], 1e-9), 4), files=files)
+    if not 0.04 <= res["synthetic_digit_string_share"] <= 0.05: flags.append(f"mix: synthetic digit-string share {res['synthetic_digit_string_share']:.2%} of English hours (want 4-5%)")
+    if res["number_free_share"] < 0.40: flags.append(f"mix: number-free share {res['number_free_share']:.1%} < 40% of English hours")
+    if res["synthetic_share"] > 0.30: flags.append(f"mix: synthetic share {res['synthetic_share']:.1%} of English hours > 30%")
+    if not 0.35 <= res["repeat_free_digit_share"] <= 0.65: flags.append(f"mix: repeat-free digit share {res['repeat_free_digit_share']:.0%} (want 35-65%)")
+    res["flags"] = flags
+    print(json.dumps({k: v for k, v in res.items() if k != "files"}, indent=1))
+    for f in files: print("  ", json.dumps(f))
+    print(f"\nFLAGS ({len(flags)}):"); [print("  FLAG", f) for f in flags]
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--tag", default="v2"); ap.add_argument("--kept"); ap.add_argument("--briefs", action="store_true", help="census briefs/<tag>.jsonl (no sentences yet)")
     ap.add_argument("--root", default=".", help="data directory (sentences/, briefs/, plan/, voices.json; census/ is written here)")
     ap.add_argument("--prefix", default="ttsBIG1", help="audio row id prefix: <prefix>_<tag>_<sha1[:10]>")
     ap.add_argument("--addon", action="store_true", help="add-on pack: skip value-spread flags for number types it does not contain")
-    a = ap.parse_args(); os.chdir(a.root)
+    ap.add_argument("--outdir", default="census", help="where census/<tag>.json is written (relative to --root)")
+    ap.add_argument("--mix", help="JSON mix spec (see docstring): per-hour shares over a weighted mix of label files; text only")
+    a = ap.parse_args()
+    if a.mix: return mix(a.mix)
+    os.chdir(a.root)
     if a.briefs:
         allrows = [dict(b, said=" ... ".join(n["reading"] for n in b["numbers"]) or "none") for b in map(json.loads, open(f"briefs/{a.tag}.jsonl"))]
     else:
@@ -284,8 +394,9 @@ def main():
     F(len(dy) >= 28, f"dates: only {len(dy)} distinct days")
 
     # --- ranges and scores
-    rq = [cardinal(n["reading"].lower().split(" to ")[-1].split()) for _, n in byo["a range of quantities"] + byo["a page range"]]
-    out["ranges"] = dict(q([v for v in rq if v is not None]), unparsed=rq.count(None))
+    rr = [range_ends(n["reading"]) for k in RANGE_KINDS for _, n in byo[k]]
+    out["ranges"] = dict(q([e[1] for e in rr if e]), unparsed=rr.count(None), reversed=sum(bool(e) and e[0] > e[1] for e in rr))
+    F(rr.count(None) == 0, f"ranges: {rr.count(None)} unparsed")
 
     # --- digit strings, by cell
     dig = {}
@@ -319,6 +430,16 @@ def main():
     out["dashed_digit_labels"] = dashed
     F(dashed == 0, f"labels: {dashed} digit labels with dashes (real labels have none)")
     if not a.briefs:
+        viol = [(r, m) for r in R for m in label_violations(r)]
+        out["label_v3_violations"] = dict(n=len(viol), examples=[m for _, m in viol[:8]], by_type=dict(collections.Counter(m.split(":")[0].split(" (")[0] for _, m in viol)))
+        F(not viol, f"label v3: {len(viol)} violations {out['label_v3_violations']['by_type']} e.g. {[m for _, m in viol[:2]]}")
+        fr = [neardup.frame(r["said"]) for r in R]
+        for k in (2, 3):
+            g = [tuple(w[i:i + k]) for w in fr for i in range(len(w) - k + 1)]
+            out[f"distinct_{k}"] = round(len(set(g)) / max(len(g), 1), 4)
+        tp = collections.Counter(" ".join(w) for w in fr); top50 = sum(c for _, c in tp.most_common(50)) / max(len(R), 1)
+        out["top50_template_share"] = round(top50, 4); out["top_templates"] = tp.most_common(5)
+        F(top50 <= 0.05, f"crowding: top-50 number-masked templates are {top50:.1%} of rows (want <= 5%)")
         nm = collections.Counter(m for r in R for m in re.findall(r"\b(?!I\b)[A-Z][a-z]+\b", r["said"][1:]))
         stop = {"The", "We", "Please", "That", "This", "It", "Our", "Can", "Could", "Did", "Do", "Is", "Are", "What", "Let", "So", "And", "But", "If", "When", "Your", "You", "Mr", "Mrs", "Dr", "Ms"}
         names = [(k, v) for k, v in nm.most_common(60) if k not in stop]
@@ -378,8 +499,8 @@ def main():
         out["aug_by_kind"] = {k: dict(c.most_common(12)) for k, c in aug.items()}
 
     out["flags"] = flags
-    os.makedirs("census", exist_ok=True)
-    p = f"census/{a.tag}{'_kept' if a.kept else ''}.json"
+    os.makedirs(a.outdir, exist_ok=True)
+    p = f"{a.outdir}/{a.tag}{'_kept' if a.kept else ''}.json"
     json.dump(out, open(p, "w"), indent=1, default=str)
     print(json.dumps({k: out[k] for k in ("rows", "cells", "numbers_per_row", "dup_sentences")}))
     for k in ("years", "times", "money", "decimals", "percent", "counts", "dates", "ranges"): print(f"[{k}]", json.dumps(out[k], default=str)[:700])
