@@ -1,4 +1,12 @@
-"""Form-blind number scorer v2.1 (2026-10-24; v2 of 2026-10-23 is frozen in numscore_v2_frozen.py).
+"""Form-blind number scorer v2.2 (2026-10-24; v2 of 2026-10-23 is frozen in numscore_v2_frozen.py).
+v2.2 (blind spots found by independent review; each fix can be switched off via FIX[...] to measure it alone):
+  FIX["slot"]    slots of a " | " reference never share token ids, so "8 | 9" can no longer match the hyp "89";
+  FIX["hyphen"]  hyphen chains ("2-3", "1932-33") join across the hyphen only if >= 3 segments or >= 7 digits
+                 (phones, ISBNs, IDs); short 2-segment chains are ranges/scores and match part by part;
+  FIX["mant"]    the mantissa rule ("7.5" matches "seven point five million") applies to slot references only;
+  FIX["filler"]  fillers (um/uh/er...) are no longer deleted: like a comma they end the current word run, so
+                 "twenty, uh, two" is 20 2 (not 22) while "five five um five one two" still joins as digits.
+  New metrics (verdict() itself is unchanged): insertions(), nonnum_wer(), form_report() / form_summary().
 v2.1 changes: (1) segmentation cap 64 -> 4096, longest chunks enumerated first, alternative-product cap 256 -> 4096,
   cap hits counted in CAP_HITS; (2) ok_point needs a spoken/written point (point/dot/digit.digit) or money word/$ in the
   hypothesis ("two five" for 2.5, "three fourteen" for 3.14 are no longer ok_point); (3) ok_point point-word must be
@@ -48,14 +56,19 @@ NUMWORD.discard("k")
 
 
 class Atom:
-    __slots__ = ("s", "scaled", "tok", "nojoin", "mant")
+    __slots__ = ("s", "scaled", "tok", "nojoin", "mant", "form", "kind")
 
     def __init__(self, s, scaled=False, tok=None, nojoin=False, mant=None):
         self.s, self.scaled, self.tok, self.nojoin, self.mant = s, scaled, tok, nojoin, mant
+        self.form, self.kind = None, None  # form: "d" digits / "w" words (hyp side); kind: "long" / "code" (ref side)
 
     def __repr__(self): return self.s + ("^" if self.scaled else "")
 
     def joinable(self): return not self.scaled and "." not in self.s and not self.s.startswith("f")
+
+
+FIX = {"slot": True, "hyphen": True, "mant": True, "filler": True}
+_CTX = {"slot_mode": True}  # set by verdict(): is the reference a " | " slot list?
 
 
 def dval(s):
@@ -123,7 +136,7 @@ def _pre(t, glue=False):
 
 
 def _words(low):
-    """tokens: ('d', digit-token) | ('w', word) | ('|', break). Fillers dropped (they never break a number)."""
+    """tokens: ('d', digit-token) | ('w', word) | ('f', filler) | ('|', break). With FIX["filler"] a filler acts like a comma."""
     out = []
     for m in re.finditer(r"\d+(?:[.,:/]\d+)*|[a-z]+(?:'[a-z]+)?|[-]|[^\sa-z\d]", low):
         x = m.group(0)
@@ -132,7 +145,9 @@ def _words(low):
         elif x[0].isalpha():
             x = MISSPELL.get(x, x)
             if x is None: out.append(("|", "")); continue
-            if x in FILLERS: continue
+            if x in FILLERS:
+                if FIX["filler"]: out.append(("f", x))
+                continue
             out.append(("w", x))
         elif x in ".,;:!?": out.append(("p", x))
         else: out.append(("|", x))
@@ -183,6 +198,9 @@ def _chunk_ends(ws, i):
     zero_lead = False
     while j < n:
         w = ws[j]
+        if w == "<f>":
+            if last is None or last == "tens": break
+            j += 1; continue
         if w in ("a", "an") and last is None and j + 1 < n and (ws[j + 1] == "hundred" or ws[j + 1] in SCALES):
             cur, last = 1, "unit"
         elif w in UNITS:
@@ -288,6 +306,7 @@ def _segs(ws, cap=4096):
         if i >= len(ws): return [[]]
         if i in memo: return memo[i]
         out = []
+        if ws[i] == "<f>": return go(i + 1)  # filler between chunks: no atom, no barrier (digit strings continue)
         ends = _chunk_ends(ws, i)
         if not ends:  # a word inside the run that starts no number: barrier (no joins across it)
             out = [[BAR] + r for r in go(i + 1)]
@@ -303,19 +322,39 @@ def _segs(ws, cap=4096):
     return go(0) or [[]]
 
 
-def atom_lattice(text, glue=False):
+_CODE_SUFFIX = {"am", "pm", "st", "nd", "rd", "th", "s", "k", "m", "b", "bn", "x"}
+
+
+def _code_digits(text):
+    """digit groups that sit inside a letter-digit code in the ORIGINAL text (M24KB, ESP8266, A-10, 3D, 4A);
+    plain suffixes (9am, 22nd, 1980s, 5k) are not codes. Approximation: matched by digit string."""
+    out = set()
+    for tk in re.findall(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*", unicodedata.normalize("NFKC", text or "")):
+        al, dg = re.findall(r"[A-Za-z]+", tk), re.findall(r"\d+", tk)
+        if al and dg and not all(a.lower() in _CODE_SUFFIX and a == a.lower() or a in ("S", "K", "M", "B") for a in al):
+            out.update(dg)
+    return out
+
+
+def atom_lattice(text, glue=False, tok0=0):
     """list of alternatives; each alternative = (atoms, point_mode) where point_mode marks the decimal-split variant"""
     low = _pre(text, glue)
     toks = _words(low)
     seq = []  # list of 'slots': each slot is list of alternative atom lists (with tag)
-    i, tokid = 0, 0
+    i, tokid = 0, tok0
     run = []
+    codes = _code_digits(text)
 
     def flush():
         nonlocal run
+        while run and run[-1] == "<f>": run.pop()
         if run in (["oh"], ["o"]) and not near_digit: run = []  # interjection, not zero
         if run:
-            seq.append([("w", s) for s in _segs(run)])
+            segs = _segs(run)
+            for sg in segs:
+                for a in sg:
+                    if a is not BAR: a.form = "w"
+            seq.append([("w", s) for s in segs])
             run = []
     def nd(q):  # digit token at q or across a '-'
         return 0 <= q < len(toks) and (toks[q][0] == "d" or (toks[q][0] == "-" and 0 <= q + (1 if q > i else -1) < len(toks) and toks[q + (1 if q > i else -1)][0] == "d"))
@@ -352,16 +391,25 @@ def atom_lattice(text, glue=False):
             if len(chain) == 1:
                 alts = _digit_atoms(x, tokid, nxt_scale)
                 slot, pm = [], False
+                kind = "code" if x in codes else ("long" if re.fullmatch(r"\d{5,}", x) else None)
                 for a in alts:
                     if a == "POINT": pm = True; continue
+                    for at in a: at.form, at.kind = "d", kind
                     slot.append(("p" if pm else "w", a))
                 seq.append(slot)
             else:
+                ndig = sum(len(re.sub(r"\D", "", c)) for c in chain)
+                joined = (not FIX["hyphen"]) or len(chain) >= 3 or ndig >= 7
                 atoms = []
-                for c in chain: atoms += _digit_atoms(c, tokid)[0]
+                for n, c in enumerate(chain):
+                    if n and not joined: tokid += 1  # short range/score: each part its own token, never concatenated
+                    atoms += _digit_atoms(c, tokid)[0]
+                for at in atoms: at.form, at.kind = "d", ("long" if joined and ndig >= 5 else None)
                 seq.append([("w", atoms)])
         else:
-            if k in ("p", "|", "-"):
+            if k == "f":
+                if run: run.append("<f>")  # in-run barrier: blocks tens+unit, nothing else
+            elif k in ("p", "|", "-"):
                 flush()
         i += 1
     flush()
@@ -380,7 +428,7 @@ def atom_lattice(text, glue=False):
 # ---------------------------------------------------------------- matching
 def _eq1(r, h):
     if r.s == h.s: return True
-    if h.mant is not None and not r.scaled and dval(r.s) is not None and dval(r.s) == dval(h.mant): return True  # slot "7.616" vs "7.616 billion"
+    if h.mant is not None and (_CTX["slot_mode"] or not FIX["mant"]) and not r.scaled and dval(r.s) is not None and dval(r.s) == dval(h.mant): return True  # slot "7.616" vs "7.616 billion"
     a, b = dval(r.s), dval(h.s)
     if a is not None and b is not None and a == b and not (r.s.startswith("0") and len(r.s) > 1 and "." not in r.s): return True
     return False
@@ -440,13 +488,15 @@ def _ok(ref_alts, hyp_text, glue=False, allow_point=False, allow_repeat=False, r
     return False
 
 
-def verdict(ref_text, hyp_text, edge=False):
+def verdict(ref_text, hyp_text, edge=False, slot_mode=None):
     """ref_text: digits-form reference; ' | ' separates slots (each matched on its own, slot order is not speech
-    order); or a listener transcript (all numbers, in order). Clip verdict = worst slot verdict."""
+    order); or a listener transcript (all numbers, in order). Clip verdict = worst slot verdict. slot_mode: True when ref_text is a slot list (even a single slot, which has no
+    " | "); default = " | " in ref_text. It gates the mantissa rule (v2.2)."""
     import itertools
     hyp_text = re.sub(r"(?<=\S)\u00a1", "", hyp_text)  # repeat marker "5¡5" / "two¡ two" is display-stripped, never a number
     parts = [x for x in ref_text.split(" | ") if x.strip()] if " | " in ref_text else [ref_text]
-    lat = [[([x for x in r if x.s != "#"], pm) for r, pm in atom_lattice(p)] for p in parts]
+    _CTX["slot_mode"] = (" | " in ref_text) if slot_mode is None else slot_mode
+    lat = [[([x for x in r if x.s != "#"], pm) for r, pm in atom_lattice(p, tok0=(k * 100000 if FIX["slot"] else 0))] for k, p in enumerate(parts)]
     lat = [l for l in lat if any(r for r, _ in l)]
     if not lat:  # reference carries no number: OK when the hypothesis carries none either
         return "ok" if not [a for r, _ in atom_lattice(hyp_text)[:1] for a in r if a.s != "#"] else "bad"
@@ -491,3 +541,160 @@ def verdict1(R, hyp_text, edge=False, ref_money=False):
 
 OK_SET = {"ok", "ok_point", "ok_edge", "ok_glue", "ok_repeat"}
 HEAD = {"ok", "ok_point", "ok_edge"}  # counted as right in the headline
+
+
+# ================================================================ v2.2 metrics (verdict() is unaffected)
+def _clean_hyp(hyp_text): return re.sub(r"(?<=\S)\u00a1", "", hyp_text or "")
+
+
+def _ref_alts(ref_text, slot_mode=None):
+    """reference atom-list alternatives, exactly as verdict() builds them (slot permutations x point variants)"""
+    import itertools
+    parts = [x for x in ref_text.split(" | ") if x.strip()] if " | " in ref_text else [ref_text]
+    _CTX["slot_mode"] = (" | " in ref_text) if slot_mode is None else slot_mode
+    lat = [[([x for x in r if x.s != "#"], pm) for r, pm in atom_lattice(p, tok0=(k * 100000 if FIX["slot"] else 0))] for k, p in enumerate(parts)]
+    lat = [l for l in lat if any(r for r, _ in l)]
+    if not lat: return []
+    R = []
+    perms = list(itertools.permutations(range(len(lat)))) if len(lat) <= 5 else [tuple(range(len(lat)))]
+    for pr in perms:
+        for combo in itertools.product(*[lat[k] for k in pr]):
+            R.append([a for r, _ in combo for a in r])
+            if len(R) > 600: return R
+    return R
+
+
+def _align(R, H):
+    """best in-order alignment of ref atoms R to hyp atoms H: maximise matched ref atoms, then consumed hyp atoms.
+    Ref atoms may stay unmatched, hyp atoms may be skipped (= insertions). Same match rules as match().
+    Returns (ref_matched, hyp_consumed, [(i, i2, j, j2), ...]) with inclusive atom index ranges."""
+    from functools import lru_cache
+    nR, nH = len(R), len(H)
+
+    @lru_cache(None)
+    def f(i, j):
+        if i == nR or j == nH: return (0, 0, ())
+        best = f(i + 1, j) if i < nR else (0, 0, ())
+        a = H[j]
+        s2 = f(i, j + 1)
+        if (s2[0], s2[1]) > (best[0], best[1]): best = s2
+        if a is BAR or a.s == "#": return best
+        rs = ""
+        for i2 in range(i, min(nR, i + 8)):
+            if i2 > i and (R[i2].tok is None or R[i2].tok != R[i].tok or R[i2 - 1].nojoin or not R[i2].joinable() or not R[i2 - 1].joinable()): break
+            rs += R[i2].s
+            cands = []
+            if i2 == i and _eq1(R[i], H[j]): cands.append(j)
+            hs = ""
+            for j2 in range(j, min(nH, j + 16)):
+                if not H[j2].joinable(): break
+                hs += H[j2].s
+                if len(hs) > len(rs): break
+                if hs == rs and (j2 > j or i2 > i): cands.append(j2)
+                if not rs.startswith(hs): break
+            for j2 in cands:
+                r = f(i2 + 1, j2 + 1)
+                c = (r[0] + i2 - i + 1, r[1] + j2 - j + 1, ((i, i2, j, j2),) + r[2])
+                if (c[0], c[1]) > (best[0], best[1]): best = c
+        return best
+    return f(0, 0)
+
+
+def _best_alignment(ref_text, hyp_text, budget=1500, slot_mode=None):
+    """(unmatched_hyp_atoms, ref_atoms_matched, n_ref_atoms, R, Hs, matches) of the best (ref alt, hyp alt) pair"""
+    Rs = _ref_alts(ref_text, slot_mode)
+    Hl, seen = [], set()
+    for Hs, _ in atom_lattice(_clean_hyp(hyp_text)):
+        Hs = [a for a in Hs if a.s != "#"]
+        key = tuple(a.s for a in Hs)
+        if key in seen: continue
+        seen.add(key); Hl.append(Hs)
+        if len(Hl) >= 64: break
+    if not Rs: Rs = [[]]
+    best, n = None, 0
+    for R in Rs:
+        for Hs in Hl:
+            n += 1
+            if n > budget: break
+            rm, hc, mt = _align(tuple(R), tuple(a for a in Hs))
+            cand = (-rm, len([a for a in Hs if a is not BAR]) - hc, R, Hs, mt, rm, len(R))
+            if best is None or cand[:2] < best[:2]: best = cand
+            if best[0] == -len(R) and best[1] == 0: break
+        if n > budget or (best and best[0] == -len(best[2]) and best[1] == 0): break
+    return best
+
+
+def insertions(ref_text, hyp_text, slot_mode=None):
+    """number of hypothesis number atoms left unmatched after the best in-order match against the reference:
+    extra numbers, stutters ("twenty, twenty five" for 25 -> 1). A hyp atom counts once whether it is a word-number
+    ("twenty five") or a digit token. A hypothesis with no number against a reference with numbers -> 0."""
+    b = _best_alignment(ref_text, hyp_text, slot_mode=slot_mode)
+    return b[1]
+
+
+def form_report(ref_text, hyp_text, slot_mode=None):
+    """for each reference number group matched by the best alignment: (ref_kind, hyp_form).
+    ref_kind: 'long' (digit string >= 5 digits, no thousands commas/decimal point; or a joined hyphen chain >= 5
+    digits), 'code' (letter-digit code in the reference: M24KB, ESP8266, A-10), else 'ordinary'.
+    hyp_form: 'digits' (all hyp atoms of the match came from digit tokens), 'words', or 'mixed'."""
+    b = _best_alignment(ref_text, hyp_text, slot_mode=slot_mode)
+    _, _, R, Hs, mt, _, _ = b
+    out = []
+    for (i, i2, j, j2) in mt:
+        ks = {a.kind for a in R[i:i2 + 1]}
+        kind = "code" if "code" in ks else "long" if "long" in ks else "ordinary"
+        fs = {Hs[z].form for z in range(j, j2 + 1)}
+        form = "digits" if fs == {"d"} else "words" if fs == {"w"} else "mixed"
+        out.append((kind, form))
+    return out
+
+
+def form_summary(reports):
+    """reports: iterable of form_report() lists -> counts {kind: {form: n}} and the three headline rates:
+    ordinary_words_pct, long_digits_pct, code_digits_pct (None when no such numbers)"""
+    c = {k: {"digits": 0, "words": 0, "mixed": 0} for k in ("ordinary", "long", "code")}
+    for rep in reports:
+        for k, f in rep: c[k][f] += 1
+    def pct(k, f):
+        n = sum(c[k].values())
+        return None if not n else 100.0 * c[k][f] / n
+    return {"counts": c, "ordinary_words_pct": pct("ordinary", "words"), "long_digits_pct": pct("long", "digits"), "code_digits_pct": pct("code", "digits")}
+
+
+_NN_DROP = {"percent", "dollar", "dollars", "and", "a", "an", "point", "dot", "double", "triple", "oclock", "clock", "o"}
+
+
+def nonnum_words(text):
+    """lowercased words of text with number tokens (digits, number words, ordinals, decades) and fillers removed.
+    'and'/'a'/'point'/'double' are removed only when adjacent to a number token; percent/dollar(s) always."""
+    t = unicodedata.normalize("NFKC", text or "").lower().replace("’", "'")
+    t = re.sub(r"o'clock", " ", t)
+    t = re.sub(r"(?<=[a-z])-(?=[a-z])", " ", t)
+    toks = re.findall(r"\d[\d.,:/-]*[a-z]{0,2}|[a-z]+(?:'[a-z]+)?", t)
+    def isnum(w):
+        if w[0].isdigit(): return True
+        w = MISSPELL.get(w, w) or ""
+        return w in NUMWORD or w in FILLERS or w in FRAC_D and False
+    num = [isnum(w) for w in toks]
+    out = []
+    for k, w in enumerate(toks):
+        if num[k]: continue
+        if w in ("percent", "dollar", "dollars"): continue
+        if w in ("and", "a", "an", "point", "dot", "double", "triple"):
+            nb = (k > 0 and num[k - 1]) or (k + 1 < len(toks) and num[k + 1])
+            if nb: continue
+        out.append(w)
+    return out
+
+
+def nonnum_wer(ref_text, hyp_text):
+    """(edits, ref_words): word Levenshtein between ref and hyp after removing number tokens and fillers from both,
+    lowercasing and stripping punctuation. Shows prose drops/garbles around numbers. ref_text should be PROSE
+    (a caption/transcript), not a ' | ' slot list."""
+    a, b = nonnum_words(ref_text), nonnum_words(hyp_text)
+    prev = list(range(len(b) + 1))
+    for x in a:
+        cur = [prev[0] + 1]
+        for j, y in enumerate(b): cur.append(min(prev[j] + (x != y), prev[j + 1] + 1, cur[j] + 1))
+        prev = cur
+    return prev[-1], len(a)

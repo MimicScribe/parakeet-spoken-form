@@ -55,11 +55,11 @@ for r,h,w in [("4K","previous four K","ok"),("250K","about two hundred fifty K",
  ("1,100 | 1,400 | 3 | 4","between eleven hundred and fourteen hundred deaths three or four people","ok"),
  ("2,521 million","two thousand five hundred twenty one million tonnes","ok"),("3–5","Three to five million","ok"),
  ("0041 44212 4404","dial 0041442124404","ok"),("8 a.m. | 8 p.m.","on Wednesday AM and eight PM","bad"),("5 3","fifty three","bad")]:
-    v=N.verdict(r,h)
+    v=N.verdict(r,h,slot_mode=True)  # v2.2: the mantissa rule (3-5 / "five million") is slot-mode only
     if (v in N.HEAD)!=(w=="ok"): print("WANT",w,v,"|",r,"|",h); f+=1
 print("round3 total fail",f)
 for r,h,w in [("0-451-12148-1","Signet ISBNO-451-12148-1","ok_glue"),("10,000–20,000","Some ten to twenty thousand men","ok"),("3–5","3 to 5 million","ok"),("4 o'clock","Four o'clock. Oh, so we","ok")]:
-    v=N.verdict(r,h)
+    v=N.verdict(r,h,slot_mode=True)
     if v!=w: print("WANT",w,v,"|",r,"|",h); f+=1
 print("round4 total fail",f)
 v=N.verdict("90377","ninety three hundred and seventy seven Sedna")
@@ -77,3 +77,54 @@ for r,h,w in [("1918 9166 106,280 2213 273,039","one thousand nine hundred eight
     good = v in N.HEAD if w=="ok_any" else (v not in N.OK_SET if w=="bad" else v==w)
     if not good: print("WANT",w,v,"|",r,"|",h); f+=1
 print("v2.1 total fail",f)
+print("--- v2.2")
+def chk(name, got, want):
+    global f
+    if got != want: print("FAIL", name, "got", got, "want", want); f += 1
+# 4 slots never join
+chk("slot8|9", N.verdict("8 | 9", "eighty nine") in N.OK_SET, False)
+chk("slot8|9 sep", N.verdict("8 | 9", "eight and nine"), "ok")
+# 5 hyphen chains
+chk("2-3 squash", N.verdict("2-3", "twenty three") in N.OK_SET, False)
+chk("2-3 parts", N.verdict("2-3", "two to three"), "ok")
+chk("1932-33 squash", N.verdict("1932-33", "nineteen thirty two thirty three"), "ok")
+chk("1932-33 squash2", N.verdict("1932-33", "nineteen thirty two thirty three") , "ok")
+chk("1932-33 one-token squash", N.verdict("1932-33", "nineteen thirty two three three") , "ok")
+chk("3seg joined", N.verdict("767-12-34", "seven six seven one two three four"), "ok")
+chk("7digit joined", N.verdict("767-9205", "seven six seven nine two zero five"), "ok")
+# 6 mantissa only in slot mode
+chk("mant slot", N.verdict("7.5", "seven point five million", slot_mode=True), "ok")
+chk("mant transcript", N.verdict("it was 7.5 here", "it was seven point five million here", slot_mode=False) in N.OK_SET, False)
+chk("mant ' | '", N.verdict("7.5 | 3", "seven point five million three"), "ok")
+# 7 fillers
+chk("twenty uh two", N.verdict("22", "twenty, uh, two") in N.OK_SET, False)
+chk("twenty uh two = 20 2", N.verdict("20 | 2", "twenty uh two"), "ok")
+chk("digits across filler", N.verdict("5551234", "five five five um one two three four"), "ok")
+chk("2000 uh 19", N.verdict("2019", "two thousand uh nineteen"), "ok")
+chk("hundred uh forty", N.verdict("240", "two hundred uh forty"), "ok")
+chk("plain twenty two", N.verdict("22", "twenty two"), "ok")
+# 1 insertions
+chk("ins stutter", N.insertions("25", "twenty, twenty five"), 1)
+chk("ins none", N.insertions("25", "twenty five"), 0)
+chk("ins extra digits", N.insertions("1 | 2", "we have 1 and 2 and 3 and 4"), 2)
+chk("ins no ref num", N.insertions("hello", "I saw 3 cats"), 1)
+chk("ins digit join", N.insertions("2020", "twenty twenty"), 0)
+chk("ins missing", N.insertions("1 | 2", "one"), 0)
+# 2 non-number WER
+chk("wer same", N.nonnum_wer("I paid 5 dollars for 3 apples", "I paid five dollars for three apples"), (0, 4))
+chk("wer drop", N.nonnum_wer("I paid 5 euros for 3 apples", "I paid five for apples"), (1, 5))
+chk("wer fillers+and", N.nonnum_wer("It was 105 degrees.", "It was, um, one hundred and five degrees"), (0, 3))
+chk("wer garble", N.nonnum_wer("meet at 10:30 tomorrow", "meat at ten thirty tomorrow"), (1, 3))
+chk("wer punct/case", N.nonnum_wer("Hello, World! 2024", "hello world twenty twenty four"), (0, 2))
+# 3 form compliance
+chk("form words", N.form_report("25", "twenty five"), [("ordinary", "words")])
+chk("form digits", N.form_report("25", "25"), [("ordinary", "digits")])
+chk("form long digits", N.form_report("5551234", "5551234"), [("long", "digits")])
+chk("form long words", N.form_report("5551234", "five five five one two three four"), [("long", "words")])
+chk("form code", N.form_report("M24KB", "M24KB"), [("code", "digits")])
+chk("form code words", N.form_report("ESP8266", "ESP eighty two sixty six"), [("code", "words")])
+chk("form 9am not code", N.form_report("9am", "nine am")[0][0], "ordinary")
+chk("form 15,000 ordinary", N.form_report("15,000", "15000")[0][0], "ordinary")
+s = N.form_summary([N.form_report("25", "twenty five"), N.form_report("5551234", "5551234"), N.form_report("A-10", "A 10")])
+chk("summary", (s["ordinary_words_pct"], s["long_digits_pct"], s["code_digits_pct"]), (100.0, 100.0, 100.0))
+print("v2.2 total fail", f)
