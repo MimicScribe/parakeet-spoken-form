@@ -12,7 +12,7 @@ SCHEMA = {"type": "object", "properties": {"items": {"type": "array", "items": {
 
 
 def brief_text(b):
-    nums = "; ".join(f'"{n["reading"]}" (it is {n["kind"]}; use it with that meaning)' for n in b["numbers"]) or "none"
+    nums = "; ".join(f'"{n["reading"]}" (it is {n["kind"]}; use it ONLY as {n["kind"]}, never as another kind of number)' for n in b["numbers"]) or "none"
     return (f'<BRIEF id="{b["id"]}">\nsetting: {b["setting"]}\nregister: {b["register"]}\nform: {b["form"]}\nlength: {b["length"]}\n'
             f'required readings, verbatim: {nums}\nposition of the first number: {b["position"]}\n'
             + ("include a short hesitation (um/uh) or restart somewhere\n" if b["disfluent"] else "")
@@ -84,10 +84,21 @@ def check(b, t):
             if len(hits) != 1: return False
             a, z = hits[0].span(); bw = re.findall(r"[A-Za-z']+", t[:a])[-1:]; aw = re.findall(r"[A-Za-z']+", t[z:])[:1]
             if (bw and bw[0].lower() in NUMW) or (aw and aw[0].lower() in NUMW): return False
+    if len(t.split()) < 4: return False
+    if b.get("require_repeat_word") and not re.search(r"\b([a-z]+)[ ,]+\1\b", low): return False
+    masked = t
+    for n in b["numbers"]:
+        for h in reversed(_whole(n["reading"], masked)): masked = masked[:h.start()] + " # " + masked[h.end():]
+    if re.search(r"\b(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|double|triple)(?:[ ,]+(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|double|triple)){2,}\b", masked, re.I):
+        return False  # an unbriefed digit run would be labelled as words while the label rule writes digits
+    DW = r"(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)"
+    if re.search(r"(?<![A-Za-z'])[B-HJ-NP-Z] " + DW + r"\b|\b" + DW + r" [B-HJ-NP-Z](?![A-Za-z'])", masked):
+        return False  # unbriefed letter-digit code ("aisle B twelve") would be labelled as words, the rule writes B12
     pk = b.get("pos_key")
     if pk == "start" and b["numbers"] and not low.lstrip("\"' ").startswith(b["numbers"][0]["reading"].lower()): return False
     if pk == "end" and b["numbers"] and not low.rstrip(" .!?\"')").endswith(b["numbers"][-1]["reading"].lower()): return False
-    if b.get("pos_key") == "none" and re.search(r"\b(" + "|".join(NUMW - {"oh"}) + r")\b", low): return False
+    if pk == "middle" and b["numbers"] and (low.lstrip("\"' ").startswith(b["numbers"][0]["reading"].lower()) or low.rstrip(" .!?\"')").endswith(b["numbers"][-1]["reading"].lower())): return False
+    if pk == "none" and re.search(r"\b(" + "|".join(NUMW - {"oh", "one", "double", "triple"}) + r")\b", low): return False  # "no one", "double check" are fine
     if b["cell"] == "clip_start" and b["numbers"] and not low.lstrip("\"' ").startswith(b["numbers"][0]["reading"].lower()): return False
     if b["cell"] == "clip_end" and b["numbers"] and not low.rstrip(" .!?\"')").endswith(b["numbers"][-1]["reading"].lower()): return False
     if b["cell"] == "no_number" and re.search(r"\d", t): return False
@@ -124,7 +135,9 @@ def main():
                 spent += cost
                 for b in batch:
                     t = got.get(b["id"])
-                    if t: t = re.sub(r"[\[\]()]", "", t).strip(); t = t[:1].upper() + t[1:]
+                    if t:
+                        t = " ".join(re.sub(r"[\[\]()]", "", t).split()); t = t[:1].upper() + t[1:]
+                        if t and t[-1] not in ".?!\"'": t += "."
                     if t and check(b, t): out[b["id"]] = dict(id=b["id"], cell=b["cell"], said=t.strip(), label_v3=label(b, t.strip()), numbers=b["numbers"], setting=b["setting"], register=b["register"], form=b["form"])
                     else: bad.append(b)
                 if spent > a.max_usd: print("STOP at cap", spent); break

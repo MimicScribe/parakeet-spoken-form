@@ -444,6 +444,7 @@ def verdict(ref_text, hyp_text, edge=False):
     """ref_text: digits-form reference; ' | ' separates slots (each matched on its own, slot order is not speech
     order); or a listener transcript (all numbers, in order). Clip verdict = worst slot verdict."""
     import itertools
+    hyp_text = re.sub(r"(?<=\S)\u00a1", "", hyp_text)  # repeat marker "5¡5" / "two¡ two" is display-stripped, never a number
     parts = [x for x in ref_text.split(" | ") if x.strip()] if " | " in ref_text else [ref_text]
     lat = [[([x for x in r if x.s != "#"], pm) for r, pm in atom_lattice(p)] for p in parts]
     lat = [l for l in lat if any(r for r, _ in l)]

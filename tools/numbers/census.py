@@ -169,7 +169,7 @@ def main():
     for r in R:
         for n in r["numbers"]:
             by[n["kind"]].append((r, n))
-            if not n["repeat"]: byo[n["kind"]].append((r, n))
+            if not n["repeat"] and not re.search(r"\b(um|uh|er)\b", n["reading"]): byo[n["kind"]].append((r, n))  # hesitation readings: coverage only
     out["rows"] = len(R); out["cells"] = dict(collections.Counter(r["cell"] for r in R))
     out["numbers_per_row"] = dict(collections.Counter(len(r["numbers"]) for r in R))
     out["kinds"] = {k: len(v) for k, v in sorted(by.items(), key=lambda kv: -len(kv[1]))}
@@ -200,7 +200,7 @@ def main():
         if y is None: un += 1; continue
         ys.append(y); yforms["two_thousand" if ws[:2] == ["two", "thousand"] else "oh" if "oh" in ws else "hundred" if "hundred" in ws else "pair"] += 1
     F(un == 0, f"years: {un} unparsed")
-    sp = [span_start(n["reading"]) for k in ("a span of years", "a span of years (season or fiscal year)") for _, n in by[k]]
+    sp = [span_start(n["reading"]) for k in ("a span of years", "a span of years (season or fiscal year)") for _, n in byo[k]]
     F(None not in sp, f"year spans: {sp.count(None)} unparsed"); sp = [y for y in sp if y]
     n_y = max(len(ys), 1)
     cur, fut = sum(2010 <= y <= 2035 for y in ys) / n_y, sum(y > NOW for y in ys) / n_y
@@ -303,7 +303,7 @@ def main():
     F(set(dig.get("phone number", {}).get("length", {})) >= {7, 10, 11}, "phones: lengths miss 7/10/11")
 
     # --- v3 checks (Opus review 10-24): repeat balance, natural grouping, dash-free labels, 5-digit coverage
-    ds_all = [str(n["value"]) for r in R for n in r["numbers"] if re.fullmatch(r"\d{5,}", str(n.get("value") or ""))]
+    ds_all = [str(n["value"]) for r in R for n in r["numbers"] if re.fullmatch(r"\d{5,}", str(n.get("value") or "")) and n.get("label") != n.get("reading")]
     if ds_all:
         free = sum(not re.search(r"(\d)\1", d) for d in ds_all) / len(ds_all)
         out["digit_repeat_free_share"] = round(free, 3)
@@ -338,7 +338,7 @@ def main():
             L = locate(r["said"], n["reading"])
             c["unlocated" if not L else "start" if L[0] == 0 else "end" if L[1] >= L[2] - 1 else "middle"] += 1
         pos[k] = dict(c)
-        if k in ORDINARY_KINDS and len(v) >= 300:
+        if k in ORDINARY_KINDS and len(v) >= 300 and not a.briefs:  # briefs have no sentence yet: positions are only real on sentences
             for p in ("start", "end"): F(c[p] / len(v) >= 0.10, f"position: {k} at sentence {p} only {c[p] / len(v):.0%}")
     out["position"] = pos
 

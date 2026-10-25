@@ -211,11 +211,18 @@ def year2(R):
 def mins(m): return "oh " + P.U[m] if m < 10 else P.w99(m)
 
 
+PERIOD_HOURS = {" in the morning": set(range(5, 12)), " in the afternoon": {12, 1, 2, 3, 4, 5}, " in the evening": {5, 6, 7, 8, 9}, " at night": {9, 10, 11, 12, 1, 2, 3}}
+
+
+def period_ok(h12, opts):
+    return [o for o in opts if o not in PERIOD_HOURS or h12 in PERIOD_HOURS[o]]
+
+
 def clock2(R):
     h12, m = R.randint(1, 12), R.choice([R.randint(1, 59), R.randint(1, 59), R.choice([0, 15, 30, 45])])
     x = R.random()
-    if x < 0.40: return f"{P.w99(h12)}{'' if m == 0 else ' ' + mins(m)}" + R.choice([" a m", " p m", " in the morning", " in the evening", " in the afternoon", " at night", ""])
-    if x < 0.52: return f"{P.w99(h12)} o'clock" + R.choice(["", " in the morning", " at night"])
+    if x < 0.40: return f"{P.w99(h12)}{'' if m == 0 else ' ' + mins(m)}" + R.choice(period_ok(h12, [" A M", " P M", " in the morning", " in the evening", " in the afternoon", " at night", ""]))
+    if x < 0.52: return f"{P.w99(h12)} o'clock" + R.choice(period_ok(h12, ["", " in the morning", " at night", " in the evening", " in the afternoon"]))
     if x < 0.64: return R.choice([f"quarter past {P.w99(h12)}", f"quarter to {P.w99(h12)}", f"half past {P.w99(h12)}",
                                   f"{P.w99(R.choice([5, 10, 20, 25]))} past {P.w99(h12)}", f"{P.w99(R.choice([5, 10, 20, 25]))} to {P.w99(h12)}"])
     if x < 0.70: return R.choice(["noon", "midnight", "twelve noon"])
@@ -240,7 +247,8 @@ def money2(R):
         d, c = R.randint(0, 99), R.randint(1, 99)
         if d == 0: return f"{P.w99(c)} cents"
         if d == 1 and R.random() < 0.3: return f"a buck {P.w99(c)}"
-        return R.choice([f"{P.w99(d)} dollars and {P.w99(c)} cents", f"{P.w99(d)} dollars and {P.w99(c)} cents", f"{P.w99(d)} {mins(c)}", f"{P.w99(d)} dollars {P.w99(c)}"])
+        return R.choice([f"{P.w99(d)} dollars and {P.w99(c)} cents", f"{P.w99(d)} dollars and {P.w99(c)} cents", f"{P.w99(d)} {mins(c)}",
+                         f"{P.w99(d)} dollars {P.w99(c)}" if c >= 10 else f"{P.w99(d)} dollars and {P.w99(c)} cents"])
     if x < 0.55: n = logu(R, 1, 999); return f"{P.card(n)} {R.choice(['dollars', 'dollars', 'bucks'])}"
     if x < 0.70:
         n = logu(R, 1000, 99999)
@@ -249,8 +257,9 @@ def money2(R):
             if h % 10: return f"{P.w99(h)} hundred bucks"
         return f"{P.card(n)} dollars"
     if x < 0.85: return f"{P.card(logu(R, 100000, 999999))} dollars"
-    return R.choice([f"{P.w99(R.randint(1, 99))} point {P.U[R.randint(1, 9)]} million", f"{P.card(R.randint(1, 50))} million dollars",
-                     f"{P.U[R.randint(1, 9)]} point {P.U[R.randint(0, 9)]} {P.U[R.randint(1, 9)]} billion"])
+    unit = R.choice([" dollars", " dollars", " bucks", ""])  # mostly say the currency so the writer cannot turn it into an item count
+    return R.choice([f"{P.w99(R.randint(1, 99))} point {P.U[R.randint(1, 9)]} million{unit}", f"{P.card(R.randint(1, 50))} million dollars",
+                     f"{P.U[R.randint(1, 9)]} point {P.U[R.randint(0, 9)]} {P.U[R.randint(1, 9)]} billion{unit}"])
 
 
 def decimal2(R):
@@ -317,8 +326,8 @@ def ordinary2(R):
     k = R.choices(["year", "amount", "count", "decimal", "percent", "span", "clock", "date", "score", "range", "rep_price"],
                   weights=[13, 15, 10, 10, 8, 8, 13, 12, 4, 4, 3])[0]
     if k == "span": kind, r = span2(R); return dict(kind=kind, reading=r, label=r, value=None, repeat=False)
-    if k == "rep_price":
-        a = R.randint(1, 99); r = f"{P.w99(a)} {P.w99(a)}"
+    if k == "rep_price":  # no multiples of ten: "twenty twenty" reads as a year
+        a = R.choice([v for v in range(11, 100) if v % 10]); r = f"{P.w99(a)} {P.w99(a)}"
         return dict(kind="a price in dollars and cents said without the words dollars or cents", reading=r, label=r, value=None, repeat=True)
     if k == "range":
         a = logu(R, 2, 5000); r = f"{P.card(a)} to {P.card(a + max(1, int(a * R.uniform(0.1, 1.5))))}"
@@ -329,7 +338,8 @@ def ordinary2(R):
     r = {"year": year2, "amount": money2, "decimal": decimal2, "percent": percent2, "clock": clock2, "date": date2, "count": lambda R: P.card(logu(R, 1, 999999))}[k](R)
     kind = {"year": "a year", "amount": "an amount of money", "count": "a count of things", "decimal": "a measurement with a decimal",
             "percent": "a percentage", "clock": "a time of day", "date": "a date"}[k]
-    return dict(kind=kind, reading=r, label=r, value=None, repeat=False)
+    lab = r.replace(" A M", " AM").replace(" P M", " PM") if k == "clock" else r
+    return dict(kind=kind, reading=r, label=lab, value=None, repeat=False)
 
 
 def _win_nums(R):
@@ -478,25 +488,43 @@ def digit_number_tagged(R):
 
 
 def minimal_pair(R):
-    """two readings of the same digits that differ only by repeat placement, or 'two two' vs 'twenty two' vs 'two twenty'"""
+    """two short codes from the SAME base digits: one with an adjacent repeat, the other with the repeat moved or removed
+    ("two two four" vs "two four four" / "two four"); or 'two two' vs 'twenty two' vs 'two twenty'. 3-4 digits -> word labels."""
     if R.random() < 0.5:
-        n = R.choice([3, 4, 5]); a = list(norep(R, n)); k = R.randint(0, n - 2)
-        b = a.copy(); a[k + 1] = a[k]; b[k] = b[k + 1] if k + 1 < n else b[k]
-        A, Bd = "".join(a), "".join(b)
-        if A == Bd: Bd = Bd[::-1]
+        n = R.choice([3, 4]); base = list(norep(R, n)); k = R.randint(0, n - 2)
+        A = base.copy(); A[k + 1] = A[k]
+        if R.random() < 0.5 and n >= 3:
+            j = R.choice([i for i in range(n - 1) if i != k]); B = base.copy(); B[j + 1] = B[j]   # repeat moved
+        else:
+            B = base   # repeat removed
+        A, Bd = "".join(A), "".join(B)
+        if A == Bd: Bd = "".join(base)
         def mk(d):
             rd = P.digits_reading(d, R, {"double": 0.0, "triple": 0.0, "oh": 0.5})
             return dict(kind="short code (digits, an ID)", reading=rd, label=rd, value=d, repeat=bool(re.search(r"(\d)\1", d)), rk="minpair", groups=str(n))
         return [mk(A), mk(Bd)], "Contrast the two codes naturally (a correction or read-back: not this one, that one)."
     d = R.randint(2, 9)
-    opts = [f"{U[d]} {U[d]}", P.w99(d * 10 + d), f"{U[d]} {P.w99(d * 10)}" if d * 10 < 100 else f"{U[d]} {U[d]}"]
+    opts = [f"{U[d]} {U[d]}", P.w99(d * 10 + d), f"{U[d]} {P.w99(d * 10)}"]
     two = R.sample(opts, 2)
     return [dict(kind="short number said aloud", reading=t, label=t, value=None, repeat=t.split()[0] == t.split()[-1], rk="minpair", groups="-") for t in two], \
         "Contrast the two numbers naturally (a correction or read-back)."
 
 
+SHORT_ID_KINDS = ["room number", "extension", "PIN", "flight number", "gate number", "suite number", "apartment number", "bus route",
+                  "platform number", "form number", "locker number", "table number"]
+
+
+def short_id(R):
+    """3-4 digit IDs read digit by digit in natural contexts ("room two two oh one"); word labels (< 5 digits rule)"""
+    n = R.choice([3, 4]); rk = R.choices(["none", "pair", "triple"], weights=[50, 38, 12])[0]
+    ds = norep(R, n) if rk == "none" else with_repeat(R, n, rk if n >= 3 else "pair")
+    rd = P.digits_reading(ds, R, {"double": R.choice([0.0, 0.5]), "triple": R.choice([0.0, 0.5]), "oh": 0.5})
+    kind = R.choice(SHORT_ID_KINDS)
+    return dict(kind=f"{kind} (digits read one by one)", reading=rd, label=rd, value=ds, repeat=bool(re.search(r"(\d)\1", ds)), rk=rk, groups=str(n))
+
+
 # ---------------------------------------------------------------- alphanumerics and codes
-LET = "A B C D E F G H J K L M N P Q R S T U V W X Y Z".split()
+LET = "B C D E F G H J K L M N P Q R S T U V W X Y Z".split()  # no A (read as the article), no I/O (vs one/oh)
 
 
 def alnum(R):
@@ -514,7 +542,13 @@ def alnum(R):
     return dict(kind="alphanumeric code (letters and digits, spelled out)", reading=reading, label="".join(lab), value="".join(lab), repeat=False, rk="none", groups=pat)
 
 
+CODES3 = [(f"{l} {P.w99(n)}", f"{l}{n}") for l in "B C D F G J K M N P Q R S T V X Z".split() for n in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 20, 21, 30, 40, 50)] + \
+         [(f"{P.w99(n)} {l}", f"{n}{l}") for n in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 21) for l in "B C D F G K M P S X".split()]
+
+
 def code3(R):
+    if R.random() < 0.45:  # aisle B twelve, apartment four B, model X five: single-token letter-digit codes
+        sp, lab = R.choice(CODES3); return dict(kind="letter-digit code (like a model, aisle or seat code)", reading=sp, label=lab, value=lab, repeat=False, rk="none", groups="-")
     sp, lab = R.choice(CODES2)
     if " " in lab or not re.search(r"[A-Za-z]", lab):  # owner 10-24: word+number codes and bare numbers are labelled as words
         return dict(kind="name with a number in it", reading=sp, label=sp, value=None, repeat=False, rk="none", groups="-")
@@ -528,7 +562,8 @@ UNITS = ["kilometers", "miles", "meters", "feet", "inches", "pounds", "kilograms
 
 def ordinary3(R):
     k = R.choices(["o2", "or", "between", "frac", "approx", "neg", "unit", "ordinal"], weights=[60, 5, 5, 6, 4, 3, 10, 7])[0]
-    if k == "o2": return dict(ordinary2(R), rk="none", groups="-")
+    if k == "o2":
+        n = ordinary2(R); return dict(n, rk="word" if n["repeat"] else "none", groups="-")
     if k == "or":
         a = R.randint(1, 20); r = f"{P.card(a)} or {P.card(a + R.choice([1, 1, 2, 5]))}"; kind = "rough count (X or Y)"
     elif k == "between":
@@ -554,7 +589,55 @@ def ordinary3(R):
     return dict(kind=kind, reading=r, label=r, value=None, repeat=False, rk="none", groups="-")
 
 
-SOUNDALIKE = ["to", "too", "for", "won", "ate", "tree", "tin", "fore", "free", "sicks", "nein", "oh"]
+def with_um(n, R):
+    """'three hundred, um, fifty two': hesitation inside a word-labelled reading (label keeps it, like the spoken text)"""
+    ws = n["reading"].split()
+    if n["label"] != n["reading"] or len(ws) < 2: return n, False
+    numish = NUMW | {"oh", "zero", "point"}
+    big = {"hundred", "thousand", "million", "billion", "and"}
+    cut = [k for k in range(1, len(ws)) if ws[k - 1].lower().strip(",") in numish and ws[k].lower() in numish
+           and ws[k].lower() not in big and ws[k - 1].lower().strip(",") not in ("and", "one")]
+    if not cut: return n, False
+    k = R.choice(cut); h = R.choice(["um", "uh"])
+    r = " ".join(ws[:k]) + f", {h}, " + " ".join(ws[k:])
+    return dict(n, reading=r, label=r), True
+
+
+def filler_nums(R):
+    n = ordinary3(R)
+    n2, inside = with_um(n, R)
+    if inside: return [n2], "Keep the hesitation exactly where it is inside the number."
+    d = digit_number_tagged(R)
+    return [d], "Put a hesitation (um or uh) right before or right after the number, never inside it, and do not repeat the number."
+
+
+# ---------------------------------------------------------------- repeats inside word numbers, across clauses, teen/ty pairs
+TEENS = {13: 30, 14: 40, 15: 50, 16: 60, 17: 70, 18: 80, 19: 90}
+
+
+def word_repeat(R):
+    x = R.random()
+    if x < 0.30:  # repeated digits after a decimal point: "fifty five point five five", "point oh oh five"
+        a = R.randint(1, 99); d = R.randint(0, 9); w = R.choice(["oh", "zero"]) if d == 0 else U[d]
+        r = R.choice([f"{P.w99(a)} point {w} {w}", f"{P.w99(a)} point {w} {w} {U[R.randint(1, 9)]}", f"point {w} {w}"])
+        return [dict(kind="decimal with a repeated digit", reading=r, label=r, value=None, repeat=True, rk="word", groups="-")], ""
+    if x < 0.55:  # the same number twice in a row across a clause boundary, adjacent by construction: "five, five"
+        v = R.choice([R.randint(1, 20), R.randint(21, 99), R.randint(100, 999)]); r = f"{P.card(v)}, {P.card(v)}"
+        return [dict(kind="a count said twice in a row", reading=r, label=r, value=None, repeat=True, rk="cross_clause", groups="-")], \
+            "The number is said twice in a row across a clause boundary; keep the reading exactly as given (like: we need five, five is plenty)."
+    if x < 0.80:  # clock / year / range word repeats: "ten ten", "eleven eleven", "twenty twenty to twenty twenty one"
+        h = R.randint(10, 12); y = R.choice([20, 21])
+        r, kind = R.choice([(f"{P.w99(h)} {P.w99(h)}", "a time of day"), (f"{P.w99(y)} {P.w99(y)} to {P.w99(y)} {P.w99(y + 1)}", "a span of years"),
+                            (f"{P.w99(h)} {P.w99(h)} A M", "a time of day")])
+        return [dict(kind=kind, reading=r, label=r.replace(" A M", " AM"), value=None, repeat=True, rk="word", groups="-")], ""
+    kind = R.choice(["a price said without dollars", "a year", "a time of day", "a model number said aloud"])  # confusable teen/ty neighbours
+    t = R.choice([13, 14, 15] if kind == "a time of day" else list(TEENS))
+    r = f"{P.w99(t)} {P.w99(TEENS[t])}" + ("" if kind == "a time of day" else R.choice(["", " " + U[R.randint(1, 9)]]))
+    return [dict(kind=kind, reading=r, label=r, value=None, repeat=False, rk="teen_ty", groups="-")], ""
+
+
+SOUNDALIKE = ["to", "too", "for", "won", "ate", "tree", "tin", "free", "tan"]
+REPEAT_WORDS = ["no no", "very very", "bye bye", "that that", "had had", "really really", "yeah yeah", "okay okay", "so so", "now now", "wait wait", "go go"]
 
 
 # ---------------------------------------------------------------- spec
@@ -562,15 +645,18 @@ SPEC = {  # cell: (target rows, builder -> (numbers, extra), lengths, positions)
     "digits": (4400, lambda R: ([digit_number_tagged(R)], ""), ["short", "medium", "long"], ["start", "middle", "end"]),
     "digits_minpair": (500, minimal_pair, ["short", "medium"], ["middle"]),
     "alnum": (700, lambda R: ([alnum(R)], "Say the code letter by letter, digit by digit, exactly as given."), ["short", "medium"], ["middle", "end"]),
-    "codes": (500, lambda R: ([code3(R)], ""), ["short", "medium"], ["start", "middle", "end"]),
+    "codes": (700, lambda R: ([code3(R)], ""), ["short", "medium"], ["start", "middle", "end"]),
     "ordinary": (3600, lambda R: ([ordinary3(R)] + ([ordinary3(R)] if R.random() < 0.25 else []), ""), ["short", "medium", "long"], ["start", "middle", "end"]),
     "passage": (1300, lambda R: ([R.choices([digit_number_tagged, ordinary3, alnum], weights=[3, 6, 1])[0](R) for _ in range(R.choice([3, 3, 4]))],
                                  "Spread the numbers through the passage: one near the start, one in the middle, one near the end."), ["passage"], ["spread"]),
-    "filler": (500, lambda R: ([R.choice([digit_number_tagged, ordinary3])(R)], "Put a hesitation (um or uh) or a self-correction INSIDE or right after the number, and keep it in the sentence."),
-               ["short", "medium"], ["middle", "end"]),
-    "soundalike": (700, lambda R: ([], "Use NO numbers. Naturally use the word '%s' in its normal meaning, plus one more of: %s." % (
-        R.choices(SOUNDALIKE, weights=[14, 12, 14, 10, 8, 6, 5, 4, 6, 3, 2, 4])[0], ", ".join(R.sample([w for w in SOUNDALIKE if w != "free"], 3)))), ["short", "medium"], ["none"]),
+    "filler": (500, filler_nums, ["short", "medium"], ["middle", "end"]),
+    "word_repeats": (600, word_repeat, ["short", "medium", "long"], ["start", "middle", "end"]),
+    "soundalike": (600, lambda R: ([], "Use NO numbers. Naturally use the word '%s' in its normal meaning%s." % (
+        R.choices(SOUNDALIKE, weights=[16, 14, 16, 10, 8, 6, 5, 4, 3])[0], R.choice(["", ", and also the word '%s'" % R.choice(SOUNDALIKE)]))), ["short", "medium"], ["none"]),
     "no_number": (300, lambda R: ([], "Use NO numbers at all."), ["short", "medium", "long"], ["none"]),
+    "repeat_word_control": (250, lambda R: ([], "Use NO numbers. Include the repeated words '%s' naturally, back to back, exactly once." % R.choice(REPEAT_WORDS)),
+                            ["short", "medium"], ["none"]),
+    "short_id": (700, lambda R: ([short_id(R)], ""), ["short", "medium"], ["start", "middle", "end"]),
 }
 
 
@@ -589,6 +675,14 @@ def main():
                      names_nearby=False, name=R.choice(names) if R.random() < 0.35 else "", place=R.choice(PLACES) if R.random() < 0.2 else "")
             b["id"] = "b3_" + hashlib.sha1(json.dumps(b, sort_keys=True).encode() + os.urandom(4)).hexdigest()[:10]
             out.append(b)
+    for b in out:  # repeat tags from the actual digits/characters (builders' intent can differ from the value)
+        for n in b["numbers"]:
+            v = str(n.get("value") or "")
+            if n.get("rk") in ("minpair", "cross_clause", "word", "teen_ty") or not v: continue
+            runs = [len(m.group()) for m in re.finditer(r"(.)\1+", v)]
+            n["rk"] = "none" if not runs else "triple" if max(runs) >= 3 else "multi" if len(runs) > 1 else "pair"
+            n["repeat"] = bool(runs)
+        b["require_repeat_word"] = b["cell"] == "repeat_word_control"
     R.shuffle(out); os.makedirs("briefs", exist_ok=True)
     open(f"briefs/{a.tag}.jsonl", "w").write("".join(json.dumps(b, ensure_ascii=False) + "\n" for b in out))
     json.dump({c: v[0] for c, v in SPEC.items()}, open(f"spec_{a.tag}.json", "w"), indent=1)
