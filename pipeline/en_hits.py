@@ -89,9 +89,25 @@ def _roman_hit(text: str) -> bool:
     return False
 
 
+_DW = r"(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)"
+_NW = r"(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|" \
+      r"eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|double|triple)"
+# BROAD (2026-10-24, opt-in by name only): a loose net for the LLM tagging stage; never part of the default scan
+BROAD = {
+    "num3": re.compile(r"\d(?:[\d ,.()/-]?\d){2,}"),                                       # any 3+ digit run, incl. 555-1234, 1,250
+    "numwords2": re.compile(r"\b" + _NW + r"(?:[ ,-]+" + _NW + r"){1,}\b", re.I),            # two+ number words in a row
+    "digitwords4": re.compile(r"\b" + _DW + r"(?:[ ,-]+" + _DW + r"){3,}\b", re.I),          # digit-by-digit reading, 4+ digits
+    "letterdigit": re.compile(r"\b(?:[A-Z]{1,3}-?\d{1,4}[A-Z]?|\d{1,3}[A-Z]{1,2})\b"),     # 3D, B12, W-2, F150, 4K, A320
+    "digitrep": re.compile(r"\b(?:double|triple) " + _DW + r"\b|\b" + _DW + r" oh " + _DW + r"\b", re.I),
+}
+
+
 def hits_of(text: str, lang: str = "en", kinds: tuple = ()) -> list:
-    """Shapes found in one caption. kinds: only these (default: every English shape, or every rare shape of es / fr)."""
+    """Shapes found in one caption. kinds: only these (default: every English shape, or every rare shape of es / fr).
+    BROAD shapes are matched only when named in kinds."""
     pats = dict(PATTERNS, **RARE["en"]) if lang == "en" else dict(RARE[lang])
+    if lang == "en" and any(k in BROAD for k in kinds):
+        pats.update(BROAD)
     out = [k for k, p in pats.items() if (not kinds or k in kinds) and p.search(text or "")]
     if lang == "en" and (not kinds or "roman" in kinds) and _roman_hit(text):
         out.append("roman")
