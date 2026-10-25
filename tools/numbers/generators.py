@@ -487,6 +487,116 @@ def digit_number_tagged(R):
     return n
 
 
+def _say_group(seg, R, how):
+    """one digit group, read the way people say phone parts"""
+    if how == "pairs" and len(seg) == 4 and seg[0] != "0" and seg[2] != "0": return f"{P.w99(int(seg[:2]))} {P.w99(int(seg[2:]))}"  # twelve thirty four
+    if how == "hundred" and len(seg) == 4 and seg.endswith("00") and seg[0] != "0": return f"{P.w99(int(seg[:2]))} hundred"            # thirty five hundred
+    if how == "hundred" and len(seg) == 3 and seg.endswith("00") and seg[0] != "0": return f"{U[int(seg[0])]} hundred"                    # eight hundred
+    return P.digits_reading(seg, R, {"double": 0.4, "triple": 0.4, "oh": 0.6})
+
+
+PAUSES = [", ", ", ", ". ", "... ", " "]
+
+
+def _join(parts, R):
+    sep = R.choice(PAUSES); return sep.join(parts)
+
+
+def readback(R):
+    """a number read back with a confirmation between groups: 'five five five, yep, one two three four' (label keeps the word)"""
+    area = str(R.randint(2, 9)) + norep(R, 2); ex = str(R.randint(2, 9)) + norep(R, 2); last = norep(R, 4) if R.random() < 0.5 else with_repeat(R, 4, "pair")
+    w = R.choice(["yep", "yes", "okay", "got it", "mm-hm", "right"])
+    if R.random() < 0.5:
+        r = f"{_say_group(ex, R, 'digits')}, {w}, {_say_group(last, R, 'digits')}"; lab = f"{ex}, {w}, {last}"
+    else:
+        r = f"{_say_group(area, R, 'digits')}, {w}, {_say_group(ex, R, 'digits')}, {w}, {_say_group(last, R, 'digits')}"; lab = f"{area}, {w}, {ex}, {w}, {last}"
+    return dict(kind="phone number read back with confirmations", reading=r, label=lab, value=area + ex + last, repeat=False, rk="", groups="readback")
+
+
+def code_near_soundalike(R):
+    """letter-digit code next to a word that sounds like part of it ('three D, free shipping', 'for the four A')"""
+    n = code3(R)
+    hint = R.choice(["free", "for", "to", "too", "won", "ate", "tree", "tin"])
+    return [n], f"Put the word '{hint}' naturally right before or right after the code, in its normal meaning."
+
+
+def phone_spoken(R):
+    """phone numbers the way people actually say them (labels always digits, no dashes)"""
+    x = R.random()
+    if x < 0.30:  # toll free: "one eight hundred, three four seven, twelve thirty four" / "one eight zero zero ..." / "the eight hundred number"
+        area = R.choice(["800", "888", "877", "866", "855", "844"]); ex = str(R.randint(2, 9)) + norep(R, 2); last = R.choice([norep(R, 4), str(R.randint(1, 9)) + str(R.randint(0, 9)) + "00"])
+        a_read = _say_group(area, R, "hundred") if area == "800" and R.random() < 0.7 else P.digits_reading(area, R, {"double": 0.5, "triple": 0.6, "oh": 0.3})
+        lead = R.choice(["one ", "one ", ""])
+        r = lead + _join([a_read, _say_group(ex, R, 'digits'), _say_group(last, R, R.choice(['digits', 'pairs', 'hundred']))], R)
+        return dict(kind="toll-free phone number", reading=r, label=("1" if lead else "") + area + ex + last, value=("1" if lead else "") + area + ex + last, repeat=False, rk="", groups="tollfree")
+    if x < 0.50:  # "area code four one five, five five five, twelve thirty four"
+        area = str(R.randint(2, 9)) + norep(R, 2); ex = str(R.randint(2, 9)) + norep(R, 2); last = norep(R, 4) if R.random() < 0.6 else with_repeat(R, 4, "pair")
+        r = f"area code {_say_group(area, R, 'digits')}, {_say_group(ex, R, 'digits')}, {_say_group(last, R, R.choice(['digits', 'pairs']))}"
+        return dict(kind="phone number with area code", reading=r, label="area code " + area + ex + last, value=area + ex + last, repeat=False, rk="", groups="area-3-3-4")
+    if x < 0.65:  # country codes: "plus forty four, seven nine one one, two three four five six seven"
+        cc, n = R.choice([("44", 10), ("1", 10), ("61", 9), ("49", 10), ("33", 9), ("91", 10), ("353", 9)])
+        ds = str(R.randint(1, 9)) + norep(R, n - 1); g = [4, 6] if n == 10 else [3, 3, 3]
+        r = f"plus {P.w99(int(cc)) if len(cc) == 2 and R.random() < 0.6 else P.digits_reading(cc, R, {})}, " + ", ".join(_say_group(ds[i:i + k], R, "digits") for i, k in zip((0, g[0], sum(g[:2])), g))
+        return dict(kind="international phone number", reading=r, label="+" + cc + ds, value=cc + ds, repeat=False, rk="", groups="cc")
+    if x < 0.80:  # with extension: "... five five five, oh one nine eight, extension two three four"
+        area = str(R.randint(2, 9)) + norep(R, 2); ex = str(R.randint(2, 9)) + norep(R, 2); last = norep(R, 4); ext = norep(R, R.choice([3, 4]))
+        ext_r = P.digits_reading(ext, R, {'double': 0.4, 'triple': 0.4, 'oh': 0.5})  # 3-4 digit extension: words (short-ID rule)
+        r = f"{_say_group(area, R, 'digits')}, {_say_group(ex, R, 'digits')}, {_say_group(last, R, R.choice(['digits', 'pairs']))}, extension {ext_r}"
+        return dict(kind="phone number with extension", reading=r, label=f"{area + ex + last}, extension {ext_r}", value=area + ex + last, repeat=False, rk="", groups="3-3-4+ext")
+    area = str(R.randint(2, 9)) + norep(R, 2); ex = str(R.randint(2, 9)) + norep(R, 2); last = norep(R, 4) if R.random() < 0.5 else with_repeat(R, 4, R.choice(["pair", "triple"]))
+    r = _join([_say_group(area, R, 'digits'), _say_group(ex, R, 'digits'), _say_group(last, R, R.choice(['pairs', 'pairs', 'hundred', 'digits']))], R)
+    return dict(kind="phone number", reading=r, label=area + ex + last, value=area + ex + last, repeat=False, rk="", groups="3-3-4")
+
+
+def long_id(R):
+    """14-22 character strings: card numbers in fours, long tracking / account / policy numbers"""
+    x = R.random()
+    if x < 0.35: n, g, kind = 16, [4, 4, 4, 4], "card number"
+    elif x < 0.6: n, g, kind = R.choice([18, 20, 22]), None, "tracking number"
+    elif x < 0.8: n, g, kind = R.choice([14, 15]), None, "account number"
+    else: n, g, kind = R.choice([14, 16, 18]), None, "policy or reference number"
+    g = g or R.choice([[4] * (n // 4) + ([n % 4] if n % 4 else []), [3] * (n // 3) + ([n % 3] if n % 3 else []), [n]])
+    if g[-1] == 1: g = g[:-2] + [g[-2] + 1]  # never a lone final digit
+    ds, r, rk = make_digits(R, n, g, "long")
+    r = _join([x.strip() for x in r.split(",")], R) if len(g) > 1 else r
+    return dict(kind=kind, reading=r, label=ds, value=ds, repeat=rk != "none", rk=rk, groups="-".join(map(str, g)))
+
+
+def shortcut(R):
+    """informal ways people say numbers; labels = the spoken words (the model should carry them through, not 'correct' them)"""
+    k = R.choice(["money", "money", "year", "time", "score", "bare", "dims", "pct"])
+    if k == "money":
+        r = R.choice([f"{P.card(R.randint(1, 9))} grand", "a grand", f"{P.card(R.choice([10, 15, 20, 25, 50, 75, 100, 120, 250]))} K", "half a mil",
+                      f"{P.card(R.randint(1, 9))} mil", f"{P.card(R.randint(1, 9))} point {U[R.randint(1, 9)]} mil", f"{P.card(R.randint(2, 50))} and change",
+                      f"{P.card(R.randint(2, 9))} fifty", "a buck fifty", "a couple bucks", f"{P.card(R.randint(2, 30))} bucks a pop", "a couple hundred bucks"])
+        kind = "money said informally"
+    elif k == "year":
+        r = R.choice([f"back in oh {U[R.randint(1, 9)]}", "the nineties", "the eighties", "the two thousands", "the early two thousands", "the late nineties",
+                      f"class of {P.w99(R.randint(10, 29))}", f"summer of {P.w99(R.randint(60, 99))}", f"the {P.w99(R.choice([20, 30, 40, 50, 60, 70]))}s"])
+        kind = "year or era said informally"
+    elif k == "time":
+        h = R.randint(1, 11)
+        r = R.choice([f"half {P.w99(h)}", f"quarter of {P.w99(h + 1)}", f"a quarter after {P.w99(h)}", f"{P.w99(h)} ish", f"{P.w99(h)} thirty ish",
+                      f"half past {P.w99(h)} or so", f"{P.w99(h)} on the dot", "noon ish", f"ten after {P.w99(h)}", f"twenty of {P.w99(h + 1)}"])
+        kind = "time said informally"
+    elif k == "score":
+        a, b = R.randint(1, 6), R.randint(0, 3)
+        r = R.choice([f"{P.card(a)} nil", f"{P.card(a)} zip", f"{P.card(a)} to nothing", f"{P.card(a)} {P.card(b)}", "love fifteen", "thirty all", f"{P.card(a)} up"])
+        kind = "score said informally"
+    elif k == "bare":
+        r = R.choice([f"one {P.w99(R.choice([10, 20, 30, 40, 50]))}", f"{U[R.randint(2, 9)]} {P.w99(R.randint(11, 99))}", "four oh four", "five oh three",
+                      f"{U[R.randint(1, 4)]} oh {U[R.randint(1, 9)]}", "twenty four seven", "nine to five", f"{P.card(R.randint(2, 9))} hundred and something"])
+        kind = "number said as a shortcut (like one twenty for 120, four oh four, one oh one)"
+    elif k == "dims":
+        a, b = R.randint(2, 12), R.randint(2, 16)
+        r = R.choice([f"{P.card(a)} by {P.card(b)}", f"{P.card(a)} by {P.card(b)} feet", f"{P.card(a)} by {P.card(b)} by {P.card(R.randint(1, 8))}"])
+        kind = "dimensions (X by Y)"
+    else:
+        r = R.choice(["fifty fifty", "a hundred and ten percent", "a hundred percent", "sixty forty", "one in a million", "ninety nine point nine percent"])
+        kind = "percent or odds said informally"
+    return dict(kind=kind, reading=r, label=r, value=None, repeat=False, rk="none", groups="-")
+
+
 def minimal_pair(R):
     """two short codes from the SAME base digits: one with an adjacent repeat, the other with the repeat moved or removed
     ("two two four" vs "two four four" / "two four"); or 'two two' vs 'twenty two' vs 'two twenty'. 3-4 digits -> word labels."""
@@ -657,15 +767,23 @@ SPEC = {  # cell: (target rows, builder -> (numbers, extra), lengths, positions)
     "repeat_word_control": (250, lambda R: ([], "Use NO numbers. Include the repeated words '%s' naturally, back to back, exactly once." % R.choice(REPEAT_WORDS)),
                             ["short", "medium"], ["none"]),
     "short_id": (700, lambda R: ([short_id(R)], ""), ["short", "medium"], ["start", "middle", "end"]),
+    # v3b add-on (10-24, owner): phone numbers as people say them + 14-22 digit strings
+    "phones_spoken": (900, lambda R: ([phone_spoken(R)], "Read the phone number exactly as given (keep words like 'area code', 'plus', 'extension')."), ["short", "medium", "long"], ["start", "middle", "end"]),
+    "long_ids": (700, lambda R: ([long_id(R)], ""), ["short", "medium", "long"], ["middle", "end"]),
+    "readbacks": (400, lambda R: ([readback(R)], "Keep the confirmation words exactly where they are inside the number."), ["short", "medium"], ["middle", "end"]),
+    "codes_soundalike": (400, code_near_soundalike, ["short", "medium"], ["start", "middle", "end"]),
+    "shortcuts": (900, lambda R: ([shortcut(R)], "Use the number exactly as given: it is an informal way of saying it."), ["short", "medium", "long"], ["start", "middle", "end"]),
 }
 
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--tag", required=True); ap.add_argument("--scale", type=float, default=1.0); ap.add_argument("--seed", type=int, default=3024)
     ap.add_argument("--root", default=".", help="data directory (briefs/ and spec_<tag>.json are written here)")
+    ap.add_argument("--cells", default="", help="comma list: only generate these SPEC cells (e.g. an add-on pack)")
     a = ap.parse_args(); os.chdir(a.root); R = random.Random(a.seed); out = []
     names = FIRST + [f"{f} {l}" for f, l in zip(R.sample(FIRST, len(FIRST)), R.sample(LAST * 2, len(FIRST)))]
     for cell, (cnt, build, lengths, positions) in SPEC.items():
+        if a.cells and cell not in a.cells.split(","): continue
         for _ in range(round(cnt * a.scale)):
             nums, extra = build(R)
             L = R.choice(lengths); pos = R.choice(positions)

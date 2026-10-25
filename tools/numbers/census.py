@@ -149,6 +149,7 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--tag", default="v2"); ap.add_argument("--kept"); ap.add_argument("--briefs", action="store_true", help="census briefs/<tag>.jsonl (no sentences yet)")
     ap.add_argument("--root", default=".", help="data directory (sentences/, briefs/, plan/, voices.json; census/ is written here)")
     ap.add_argument("--prefix", default="ttsBIG1", help="audio row id prefix: <prefix>_<tag>_<sha1[:10]>")
+    ap.add_argument("--addon", action="store_true", help="add-on pack: skip value-spread flags for number types it does not contain")
     a = ap.parse_args(); os.chdir(a.root)
     if a.briefs:
         allrows = [dict(b, said=" ... ".join(n["reading"] for n in b["numbers"]) or "none") for b in map(json.loads, open(f"briefs/{a.tag}.jsonl"))]
@@ -162,8 +163,8 @@ def main():
     R = [b for b in allrows if not a.kept or rid(b) in kept]
     out, flags = {}, []
 
-    def F(ok, msg):
-        if not ok: flags.append(msg)
+    def F(ok, msg):  # add-on packs (--addon) only flag checks whose number type is present
+        if not ok and not (a.addon and re.search(r" 0%| only 0 |never|miss|< 5% five|only \[\]", msg)): flags.append(msg)
 
     by, byo = collections.defaultdict(list), collections.defaultdict(list)
     for r in R:
