@@ -73,6 +73,8 @@ Candidates are compared against unmodified Parakeet Ultra run through the same s
 
 `eval/probe_items.tsv` is the spoken-form probe set: 59 number formats and 7 controls.
 
+Generic data, label, audio and scoring tools (number briefs and census, the pinned number reader, never-reject CTC labelling and label ledger, clip-edge rule, copy-count gate, near-dup / variety / semantic checks): [tools/README.md](tools/README.md).
+
 ## Credits
 
 This work builds on other people's open models, data and code:
