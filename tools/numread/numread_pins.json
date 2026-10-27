@@ -1,0 +1,20 @@
+{
+ "_note": "numread pins: change a pin only with the golden file re-run and old-vs-new totals shown. base = vendored reader tree (reader/), pipeline = the ml_* form tables of this repo (pipeline/), repo = normaliser files next to numread.py.",
+ "base": {
+  "eval/quality/number_outcomes.py": "8e51a5dbde46946215084f0ff97896a509cdf287d2a8540141fbb5f68f7820b2",
+  "eval/quality/score_values.py": "279929aa008108b4375a68ee47e49a64205fca3f7bcd91dbd6ac17953388d236",
+  "pipeline/group_read.py": "646b1f723742475e5ed58119b1827ac64d3be00642ae23b8418e7dbdc9f98872"
+ },
+ "pipeline": {
+  "ml_cands.py": "2a61dbd10366ad2fc5c4d43dae116237833b0d14dcdd10271442cfcd0bc7bfd0",
+  "ml_multi.py": "347e9d779f28e7a5f1728141121d6dbbd06c3df74579812d18ddd92ad5edcaf8",
+  "ml_multi_cases.py": "4f9d7ef5b620897c4ea2d25c0ac4661b48a0ea5336ab7a9fbdddbcc9bcac7d74",
+  "ml_slav.py": "736fa6e9f22f64fa3ab10448cb1fac5973969e4a8cecefa827a048b845fa8ed5",
+  "ml_multi_lex.json": "0133287b3f94e10cb23cbbcbcd011f03e9d35e4ae0de4b5185d078e211027c1a",
+  "ml_multi_months.json": "296f1112beeebb8dd68a5d0ba6244b07169a5e99494b21726eb1d7878a99d31f",
+  "ml_grammar_table.json": "a459d0a9d12748f1d3f311af25a0dab7a9b4699d2474bd871b422325819e8da1"
+ },
+ "repo": {
+  "fair_reader.py": "3611c1e23505a19bbabc9452e0d44e4a724c37ea0d049ef2d2b06fc8b5ab2585"
+ }
+}

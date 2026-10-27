@@ -1,0 +1,239 @@
+{"t": "reads", "lang": "en", "text": "twenty o five", "want": ["2005"], "why": "verbalizer-style form: year with o"}
+{"t": "reads", "lang": "en", "text": "nineteen oh nine", "want": ["1909"], "why": ""}
+{"t": "reads", "lang": "en", "text": "twenty oh five", "want": ["2005"], "why": ""}
+{"t": "reads", "lang": "en", "text": "two thousand five", "want": ["2005"], "why": ""}
+{"t": "reads", "lang": "en", "text": "twenty twenty five", "want": ["2025"], "why": ""}
+{"t": "reads", "lang": "en", "text": "nineteen ninety", "want": ["1990"], "why": ""}
+{"t": "reads", "lang": "en", "text": "two thousand twenty five", "want": ["2025"], "why": ""}
+{"t": "reads", "lang": "en", "text": "one hundred and sixty percent", "want": ["160"], "why": ""}
+{"t": "reads", "lang": "en", "text": "three hundred", "want": ["300"], "why": "negative: not 3"}
+{"t": "reads", "lang": "en", "text": "twenty", "want": ["20"], "why": "negative: not 2"}
+{"t": "reads", "lang": "en", "text": "seven", "want": ["7"], "why": "negative: not 17"}
+{"t": "reads", "lang": "en", "text": "seventeen", "want": ["17"], "why": "negative: not 7"}
+{"t": "reads", "lang": "en", "text": "in twenty five", "want": ["25"], "why": "negative: not 2005"}
+{"t": "reads", "lang": "en", "text": "sixty si", "want": ["60"], "why": "negative: not 66"}
+{"t": "reads", "lang": "en", "text": "sixty-six", "want": ["66"], "why": ""}
+{"t": "reads", "lang": "en", "text": "sixty six", "want": ["66"], "why": ""}
+{"t": "reads", "lang": "en", "text": "five hundred", "want": ["500"], "why": ""}
+{"t": "reads", "lang": "en", "text": "five", "want": ["5"], "why": ""}
+{"t": "reads", "lang": "en", "text": "fifty", "want": ["50"], "why": ""}
+{"t": "reads", "lang": "en", "text": "point four", "want": ["0.4"], "why": "verbalizer-style form"}
+{"t": "reads", "lang": "en", "text": "zero point five", "want": ["0.5"], "why": ""}
+{"t": "reads", "lang": "en", "text": "half a percent growth", "want": ["0.5"], "why": "4 verified disagreements: half"}
+{"t": "reads", "lang": "en", "text": "one and a half million", "want": ["1500000"], "why": ""}
+{"t": "reads", "lang": "en", "text": "two point seventeen billion", "want": ["2170000000"], "why": "verbalizer-style form"}
+{"t": "reads", "lang": "en", "text": "two point five million", "want": ["2500000"], "why": ""}
+{"t": "reads", "lang": "en", "text": "2.5 million", "want": ["2500000"], "why": ""}
+{"t": "reads", "lang": "en", "text": "1.5 billion", "want": ["1500000000"], "why": ""}
+{"t": "reads", "lang": "en", "text": "three point two", "want": ["3.2"], "why": ""}
+{"t": "reads", "lang": "en", "text": "double oh seven", "want": ["7"], "why": "double + oh digits (leading zeros are not significant in values)"}
+{"t": "reads", "lang": "en", "text": "triple seven", "want": ["777"], "why": ""}
+{"t": "reads", "lang": "en", "text": "a buck fifty", "want": ["1.5"], "why": "colloquial money"}
+{"t": "reads", "lang": "en", "text": "a couple hundred", "want": ["200"], "why": ""}
+{"t": "reads", "lang": "en", "text": "five grand", "want": ["5000"], "why": ""}
+{"t": "reads", "lang": "en", "text": "2,005", "want": ["2005"], "why": "verbalizer-style form: one thousands separator (en)"}
+{"t": "reads", "lang": "en", "text": "1,500", "want": ["1500"], "why": ""}
+{"t": "reads", "lang": "en", "text": "2.005", "want": ["2.005"], "why": "en decimal point stays a decimal"}
+{"t": "reads", "lang": "en", "text": "five five five", "want": ["555"], "why": "digit run"}
+{"t": "reads", "lang": "en", "text": "o nine o nine two three", "want": ["90923"], "why": "o as zero in a digit run"}
+{"t": "reads", "lang": "en", "text": "3 5", "want": ["3", "5"], "why": "two numbers"}
+{"t": "reads", "lang": "en", "text": "three, five", "want": ["3", "5"], "why": "comma between number words is a hard break"}
+{"t": "reads", "lang": "en", "text": "twenty, thirty", "want": ["20", "30"], "why": ""}
+{"t": "reads", "lang": "en", "text": "two thousand, three hundred", "want": ["2000", "300"], "why": "comma break"}
+{"t": "reads", "lang": "en", "text": "one hundred, and five", "want": ["105"], "why": ""}
+{"t": "reads", "lang": "en", "text": "seven fifty three", "want": ["7", "53"], "why": "clock / pair stays two reads; matcher decides"}
+{"t": "reads", "lang": "en", "text": "one fifty eight", "want": ["1", "58"], "why": "verbalizer-style form: reads literal, matcher joins"}
+{"t": "reads", "lang": "en", "text": "quarter past three", "want": ["3", "15"], "why": ""}
+{"t": "reads", "lang": "en", "text": "three quarters", "want": ["0.75"], "why": ""}
+{"t": "reads", "lang": "en", "text": "twenty five thousand", "want": ["25000"], "why": ""}
+{"t": "reads", "lang": "en", "text": "2 million", "want": ["2000000"], "why": ""}
+{"t": "reads", "lang": "en", "text": "sixty-five million", "want": ["65000000"], "why": ""}
+{"t": "reads", "lang": "en", "text": "1.,2", "want": ["1", "2"], "why": "separator soup does not crash"}
+{"t": "reads", "lang": "en", "text": "3..4,", "want": ["3", "4"], "why": ""}
+{"t": "reads", "lang": "en", "text": "the 1 and 2 and 0 values", "want": ["1", "2", "0"], "why": "three separate numbers"}
+{"t": "reads", "lang": "en", "text": "five o'clock", "want": ["5"], "why": ""}
+{"t": "reads", "lang": "en", "text": "1k", "want": ["1"], "why": "k is not scale in digits (frozen base behaviour)"}
+{"t": "reads", "lang": "en", "text": "0.5", "want": ["0.5"], "why": ""}
+{"t": "reads", "lang": "en", "text": "fifty percent", "want": ["50"], "why": ""}
+{"t": "reads", "lang": "en", "text": "a hundred", "want": ["100"], "why": ""}
+{"t": "reads", "lang": "en", "text": "one oh one", "want": ["101"], "why": "oh between digit words is zero"}
+{"t": "reads", "lang": "en", "text": "twelve twenty three", "want": ["1223"], "why": "base merges year-like pairs"}
+{"t": "reads", "lang": "de", "text": "drei einhalb Prozent", "want": ["3.5"], "why": "verified disagreement"}
+{"t": "reads", "lang": "de", "text": "drei einhalb Millionen", "want": ["3500000"], "why": "verified disagreement"}
+{"t": "reads", "lang": "de", "text": "16 Komma vier Prozent", "want": ["16.4"], "why": ""}
+{"t": "reads", "lang": "de", "text": "zwei Komma sieben", "want": ["2.7"], "why": ""}
+{"t": "reads", "lang": "de", "text": "sieben fünf sieben zwei sechs", "want": ["75726"], "why": "digit run"}
+{"t": "reads", "lang": "de", "text": "129 Millionen dreihundertfünfundsiebzigtausend", "want": ["129375000"], "why": ""}
+{"t": "reads", "lang": "de", "text": "zweitausendfünf", "want": ["2005"], "why": ""}
+{"t": "reads", "lang": "de", "text": "zwei tausend dreissig", "want": ["2030"], "why": ""}
+{"t": "reads", "lang": "de", "text": "21.45 Uhr", "want": ["21", "45"], "why": "clock dot"}
+{"t": "reads", "lang": "de", "text": "dreihundert", "want": ["300"], "why": ""}
+{"t": "reads", "lang": "de", "text": "zwanzig fünf", "want": ["20", "5"], "why": ""}
+{"t": "reads", "lang": "de", "text": "3,5", "want": ["3.5"], "why": "de decimal comma"}
+{"t": "reads", "lang": "de", "text": "1.500", "want": ["1500"], "why": "de thousands dot"}
+{"t": "reads", "lang": "de", "text": "zwanzig", "want": ["20"], "why": ""}
+{"t": "reads", "lang": "es", "text": "40 mil millones", "want": ["40000000000"], "why": "verified disagreement"}
+{"t": "reads", "lang": "es", "text": "mil quinientos", "want": ["1500"], "why": ""}
+{"t": "reads", "lang": "es", "text": "dos mil cinco", "want": ["2005"], "why": ""}
+{"t": "reads", "lang": "es", "text": "125.934", "want": ["125934"], "why": "es thousands dot"}
+{"t": "reads", "lang": "es", "text": "1,2 millones", "want": ["1200000"], "why": ""}
+{"t": "reads", "lang": "es", "text": "cuarenta mil millones", "want": ["40000000000"], "why": ""}
+{"t": "reads", "lang": "fr", "text": "quatre-vingt-dix", "want": ["90"], "why": ""}
+{"t": "reads", "lang": "fr", "text": "mille neuf cent quatre-vingt-dix", "want": ["1990"], "why": ""}
+{"t": "reads", "lang": "fr", "text": "cent vingt", "want": ["120"], "why": ""}
+{"t": "reads", "lang": "fr", "text": "midi quinze", "want": ["12", "15"], "why": "noon word"}
+{"t": "reads", "lang": "fr", "text": "trois cent quarante, trois", "want": ["340", "3"], "why": "comma break between number words"}
+{"t": "reads", "lang": "nl", "text": "twee en half", "want": ["2.5"], "why": "verified disagreement"}
+{"t": "acc", "lang": "en", "key": "twenty", "hyp": "20", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "twenty", "hyp": "2", "want": "trunc", "why": "neg: 2 != 20"}
+{"t": "acc", "lang": "en", "key": "twenty", "hyp": "200", "want": "wrong", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "seven", "hyp": "17", "want": "wrong", "why": "neg: 7 != 17"}
+{"t": "acc", "lang": "en", "key": "seven", "hyp": "7", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "seventeen", "hyp": "7", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "three hundred", "hyp": "3", "want": "trunc", "why": "neg: 300 != 3"}
+{"t": "acc", "lang": "en", "key": "three hundred", "hyp": "300", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "three hundred", "hyp": "30", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "three hundred", "hyp": "thirty", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "three hundred", "hyp": "three hundred", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "five", "hyp": "50", "want": "wrong", "why": "neg 5 != 50"}
+{"t": "acc", "lang": "en", "key": "five", "hyp": "500", "want": "wrong", "why": "neg 5 != 500"}
+{"t": "acc", "lang": "en", "key": "fifty", "hyp": "5", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "fifty", "hyp": "500", "want": "wrong", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "fifty", "hyp": "five", "want": "trunc", "why": "neg: old scorer false accept"}
+{"t": "acc", "lang": "en", "key": "fifty", "hyp": "50", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "five hundred", "hyp": "5", "want": "trunc", "why": "neg: old scorer false accept"}
+{"t": "acc", "lang": "en", "key": "five hundred", "hyp": "50", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "five hundred", "hyp": "500", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "five thousand", "hyp": "500", "want": "trunc", "why": "neg: old scorer false accept"}
+{"t": "acc", "lang": "en", "key": "five thousand", "hyp": "5,000", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "twenty five", "hyp": "1250", "want": "wrong", "why": "neg: old scorer false accept"}
+{"t": "acc", "lang": "en", "key": "twenty five", "hyp": "25", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "twenty five", "hyp": "26", "want": "wrong", "why": ""}
+{"t": "acc", "lang": "en", "key": "twenty five", "hyp": "152", "want": "wrong", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "five", "hyp": "152", "want": "wrong", "why": "neg: old scorer false accept"}
+{"t": "acc", "lang": "en", "key": "two thousand", "hyp": "2", "want": "trunc", "why": "neg: old scorer false accept"}
+{"t": "acc", "lang": "en", "key": "two thousand", "hyp": "2000", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "two thousand", "hyp": "2,000", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "one hundred twenty", "hyp": "12", "want": "trunc", "why": "neg: old scorer false accept"}
+{"t": "acc", "lang": "en", "key": "one hundred twenty", "hyp": "120", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "one hundred twenty", "hyp": "1,200", "want": "wrong", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "twenty five", "hyp": "in 2005", "want": "wrong", "why": "neg: 'in twenty five' is not 2005 / 2005 is not 25"}
+{"t": "acc", "lang": "en", "key": "twenty five", "hyp": "twenty o five", "want": "wrong", "why": "2005 != 25"}
+{"t": "acc", "lang": "en", "key": "two thousand five", "hyp": "twenty o five", "want": "ok", "why": "verbalizer-style form"}
+{"t": "acc", "lang": "en", "key": "two thousand five", "hyp": "twenty oh five", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "2005", "hyp": "two thousand five", "want": "ok", "why": "key as digits"}
+{"t": "acc", "lang": "en", "key": "two thousand five", "hyp": "2005", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "two thousand five", "hyp": "twenty 0 5", "want": "split", "why": "form rule: grouped reading of the right value is right"}
+{"t": "acc", "lang": "en", "key": "two thousand five", "hyp": "2 0 0 5", "want": "split", "why": "digit by digit"}
+{"t": "acc", "lang": "en", "key": "one hundred fifty eight", "hyp": "one fifty eight", "want": "split", "why": "verbalizer-style form: grouped"}
+{"t": "acc", "lang": "en", "key": "one hundred fifty eight", "hyp": "1 58", "want": "split", "why": ""}
+{"t": "acc", "lang": "en", "key": "one hundred fifty eight", "hyp": "158", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "one hundred fifty eight", "hyp": "one fifty", "want": "trunc", "why": "neg: 150 / 1 50 is not 158"}
+{"t": "acc", "lang": "en", "key": "twenty", "hyp": "2 0", "want": "split", "why": "digit by digit"}
+{"t": "acc", "lang": "en", "key": "twenty", "hyp": "the 1 and 2 and 0 values", "want": "trunc", "why": "review: split parts must be adjacent"}
+{"t": "acc", "lang": "en", "key": "twenty", "hyp": "two and a zero", "want": "trunc", "why": "non-adjacent parts"}
+{"t": "acc", "lang": "en", "key": "twenty", "hyp": "twenty, twenty", "want": "dup", "why": "repeat: 2 reads of the value (refcount 1)"}
+{"t": "acc", "lang": "en", "key": "one hundred and sixty percent", "hyp": "160%", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "160%", "hyp": "one hundred sixty percent", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "one hundred and sixty percent", "hyp": "sixty percent", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "one hundred and sixty percent", "hyp": "106 percent", "want": "wrong", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "two point five", "hyp": "2.5", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "zero point five", "hyp": "point five", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "half a percent", "hyp": "0.5%", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "two point seventeen billion", "hyp": "2.17 billion", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "2.17 billion", "hyp": "2170000000", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "two point seventeen billion", "hyp": "2.17", "want": "wrong", "why": "scale lost"}
+{"t": "acc", "lang": "en", "key": "two point seventeen billion", "hyp": "two billion", "want": "wrong", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "a buck fifty", "hyp": "$1.50", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "a buck fifty", "hyp": "fifty", "want": "wrong", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "seven fifty three", "hyp": "753", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "seven fifty three", "hyp": "7:53", "want": "split", "why": "clock parts"}
+{"t": "acc", "lang": "en", "key": "seven fifty three", "hyp": "7:35", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "seven fifty three", "hyp": "seven fifty three", "want": "split", "why": ""}
+{"t": "acc", "lang": "en", "key": "five five five one two one two", "hyp": "555-1212", "want": "split", "why": "phone grouped"}
+{"t": "acc", "lang": "en", "key": "five five five one two one two", "hyp": "5551212", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "five five five one two one two", "hyp": "555 1313", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "five five five", "hyp": "555", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "five five", "hyp": "5", "want": "trunc", "why": "dropped repeat is wrong"}
+{"t": "acc", "lang": "en", "key": "five five", "hyp": "55", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "five five five", "hyp": "55", "want": "trunc", "why": "neg: repeat count"}
+{"t": "acc", "lang": "en", "key": "fifty five", "hyp": "five five", "want": "split", "why": "form irrelevant"}
+{"t": "acc", "lang": "en", "key": "ten", "hyp": "10 10", "want": "dup", "why": "refcount 1"}
+{"t": "acc", "lang": "en", "key": "ten", "hyp": "hello there", "want": "lost", "why": ""}
+{"t": "acc", "lang": "en", "key": "ten", "hyp": "I like them", "want": "lost", "why": ""}
+{"t": "acc", "lang": "en", "key": "ten", "hyp": "eleven", "want": "wrong", "why": ""}
+{"t": "acc", "lang": "en", "key": "double oh seven", "hyp": "007", "want": "ok", "why": "leading zeros not significant"}
+{"t": "acc", "lang": "en", "key": "double oh seven", "hyp": "7", "want": "ok", "why": "frozen limitation, documented"}
+{"t": "acc", "lang": "en", "key": "triple seven", "hyp": "777", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "triple seven", "hyp": "77", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "a million", "hyp": "1,000,000", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "a million", "hyp": "1 million", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "a million", "hyp": "100,000", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "ten thousand", "hyp": "10k", "want": "trunc", "why": "neg: 10k is read as 10 by the frozen base"}
+{"t": "acc", "lang": "en", "key": "twelve twenty three", "hyp": "1223", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "twenty twenty five", "hyp": "2025", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "twenty twenty five", "hyp": "20 25", "want": "split", "why": "year grouped"}
+{"t": "acc", "lang": "en", "key": "twenty twenty five", "hyp": "2,025", "want": "ok", "why": ""}
+{"t": "acc", "lang": "de", "key": "zwanzig", "hyp": "20", "want": "ok", "why": ""}
+{"t": "acc", "lang": "de", "key": "zwanzig", "hyp": "2", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "de", "key": "dreihundert", "hyp": "3", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "de", "key": "dreihundert", "hyp": "300", "want": "ok", "why": ""}
+{"t": "acc", "lang": "de", "key": "drei einhalb", "hyp": "3,5", "want": "ok", "why": ""}
+{"t": "acc", "lang": "de", "key": "drei einhalb", "hyp": "35", "want": "wrong", "why": "neg"}
+{"t": "acc", "lang": "de", "key": "zweitausendfünf", "hyp": "2005", "want": "ok", "why": ""}
+{"t": "acc", "lang": "de", "key": "zweitausendfünf", "hyp": "zwanzig null fünf", "want": "split", "why": "grouped"}
+{"t": "acc", "lang": "de", "key": "zwei Komma fünf Millionen", "hyp": "2,5 Millionen", "want": "ok", "why": ""}
+{"t": "acc", "lang": "de", "key": "zwei Komma fünf Millionen", "hyp": "2,5", "want": "wrong", "why": "scale lost"}
+{"t": "acc", "lang": "de", "key": "sieben fünf sieben zwei sechs", "hyp": "75726", "want": "ok", "why": ""}
+{"t": "acc", "lang": "es", "key": "cuarenta mil millones", "hyp": "40 mil millones", "want": "ok", "why": "verified disagreement"}
+{"t": "acc", "lang": "es", "key": "cuarenta mil millones", "hyp": "40000000000", "want": "ok", "why": ""}
+{"t": "acc", "lang": "es", "key": "cuarenta mil millones", "hyp": "40", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "es", "key": "dos mil cinco", "hyp": "2005", "want": "ok", "why": ""}
+{"t": "acc", "lang": "es", "key": "125.934", "hyp": "ciento veinticinco mil novecientos treinta y cuatro", "want": "ok", "why": ""}
+{"t": "acc", "lang": "es", "key": "dos y media", "hyp": "2,5", "want": "ok", "why": ""}
+{"t": "acc", "lang": "fr", "key": "quatre-vingt-dix", "hyp": "90", "want": "ok", "why": ""}
+{"t": "acc", "lang": "fr", "key": "quatre-vingt-dix", "hyp": "4", "want": "wrong", "why": "neg"}
+{"t": "acc", "lang": "fr", "key": "mille neuf cent quatre-vingt-dix", "hyp": "1990", "want": "ok", "why": ""}
+{"t": "acc", "lang": "fr", "key": "mille neuf cent quatre-vingt-dix", "hyp": "dix-neuf cent quatre-vingt-dix", "want": "ok", "why": ""}
+{"t": "acc", "lang": "fr", "key": "cent vingt", "hyp": "120", "want": "ok", "why": ""}
+{"t": "acc", "lang": "fr", "key": "cent vingt", "hyp": "12", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "nl", "key": "twee en half", "hyp": "2,5", "want": "ok", "why": "verified disagreement"}
+{"t": "acc", "lang": "nl", "key": "twee en half", "hyp": "25", "want": "wrong", "why": "neg"}
+{"t": "acc", "lang": "en", "key": "five ninety nine", "hyp": "$5.99", "want": "ok", "why": "written form adds the decimal reading when digits agree", "written": "5.99"}
+{"t": "acc", "lang": "en", "key": "five ninety nine", "hyp": "5.99", "want": "ok", "why": "", "written": "$5.99"}
+{"t": "acc", "lang": "en", "key": "five ninety nine", "hyp": "5", "want": "trunc", "why": "neg", "written": "5.99"}
+{"t": "acc", "lang": "en", "key": "one nine four five", "hyp": "1945", "want": "ok", "why": "joined reading of digit words"}
+{"t": "acc", "lang": "en", "key": "one nine four five", "hyp": "1", "want": "trunc", "why": "neg: old scorer accepted any component", "written": "1"}
+{"t": "acc", "lang": "en", "key": "three five", "hyp": "35", "want": "ok", "why": "spoken words decide when the written form conflicts", "written": "3"}
+{"t": "acc", "lang": "en", "key": "three five", "hyp": "3", "want": "trunc", "why": "conflicting key text '3' is ignored (REFERENCE-suspect), spoken words decide", "written": "3"}
+{"t": "acc", "lang": "en", "key": "ten", "hyp": "ten ten", "want": "ok", "why": "refcount 2: the value legitimately occurs twice", "refcount": 2}
+{"t": "rep", "lang": "en", "text": "five five five", "unit": "5", "want": 3, "why": ""}
+{"t": "rep", "lang": "en", "text": "5 5 5", "unit": "5", "want": 3, "why": ""}
+{"t": "rep", "lang": "en", "text": "555", "unit": "5", "want": 3, "why": "grouped digits"}
+{"t": "rep", "lang": "en", "text": "double five", "unit": "5", "want": 2, "why": ""}
+{"t": "rep", "lang": "en", "text": "triple five", "unit": "5", "want": 3, "why": ""}
+{"t": "rep", "lang": "en", "text": "five five", "unit": "5", "want": 2, "why": ""}
+{"t": "rep", "lang": "en", "text": "five", "unit": "5", "want": 1, "why": ""}
+{"t": "rep", "lang": "en", "text": "fifty five", "unit": "5", "want": 0, "why": "a spoken value is not two repeated digits"}
+{"t": "rep", "lang": "en", "text": "55", "unit": "5", "want": 2, "why": "written digits"}
+{"t": "rep", "lang": "en", "text": "one one", "unit": "1", "want": 2, "why": ""}
+{"t": "rep", "lang": "en", "text": "12 12", "unit": "12", "want": 2, "why": "multi-digit unit"}
+{"t": "rep", "lang": "en", "text": "twelve twelve", "unit": "12", "want": 0, "why": "words values are not digit chains"}
+{"t": "rep", "lang": "en", "text": "five and five", "unit": "5", "want": 1, "why": "not adjacent"}
+{"t": "rep", "lang": "en", "text": "five, five", "unit": "5", "want": 1, "why": "comma break"}
+{"t": "rep", "lang": "en", "text": "nine five five five", "unit": "5", "want": 3, "why": ""}
+{"t": "rep", "lang": "en", "text": "the cat", "unit": "5", "want": 0, "why": ""}
+{"t": "rep", "lang": "de", "text": "fünf fünf", "unit": "5", "want": 2, "why": ""}
+{"t": "rep", "lang": "es", "text": "cinco cinco cinco", "unit": "5", "want": 3, "why": ""}
+{"t": "acc", "lang": "de", "key": "drei und zwanzig vier und dreißig", "hyp": "um 23 Uhr vierunddreißig", "want": "split", "why": "parts with a clock unit word between"}
+{"t": "acc", "lang": "de", "key": "drei und zwanzig vier und dreißig", "hyp": "um 23.34 Uhr", "want": "split", "why": "clock dot"}
+{"t": "acc", "lang": "de", "key": "drei und zwanzig vier und dreißig", "hyp": "um 23 Uhr und 35", "want": "trunc", "why": "neg"}
+{"t": "acc", "lang": "es", "key": "cero tres cuatro seis dos", "hyp": "teléfono cero tres cuatro seis dos cuatro dos uno seis dos cero", "want": "embedded", "why": "digit-by-digit run without grouping: reported apart"}
+{"t": "acc", "lang": "en", "key": "five five five one", "hyp": "five five five one two three", "want": "embedded", "why": ""}
+{"t": "acc", "lang": "en", "key": "3462", "hyp": "13462", "want": "wrong", "why": "written digits: a different number, not embedded"}
+{"t": "acc", "lang": "en", "key": "3462", "hyp": "3462 1234", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "three four six two", "hyp": "three four six two", "want": "ok", "why": ""}
+{"t": "reads", "lang": "en", "text": "one point nine four mil", "want": ["1940000"], "why": "colloquial mil + decimal scale; 'one' is a weak number word but the integer part of the decimal"}
+{"t": "acc", "lang": "en", "key": "one point nine four million", "hyp": "$1.94 million", "want": "ok", "why": ""}
+{"t": "acc", "lang": "en", "key": "nine seventy nine seventy four forty five fifty six thirty three oh three", "hyp": "ISBN 9797445563303 into the system", "want": "ok", "why": "tens+unit is one number: 'thirty three oh three' is 33 03, not 303 (regression)"}
+{"t": "reads", "lang": "en", "text": "thirty three oh three", "want": ["33", "0", "3"], "why": "tens+unit then 'oh three' (a digit run of < 3 digit words)"}
