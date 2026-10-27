@@ -1,3 +1,7 @@
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numscore as N
 OK=[("62841-3-1","sixty two eight forty one dash three dash one"),
 ("192.168.246","one nine two one six eight two hundred forty six"),
