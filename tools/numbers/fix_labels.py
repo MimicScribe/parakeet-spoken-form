@@ -1,4 +1,4 @@
-"""Label fixes (owner 2026-10-24) for every ttsBIG1 sentence row, keyed by audio row id:
+"""Label fixes (owner 2026-10-24) for every synthetic sentence row, keyed by audio row id:
   - digit-string labels without dashes (real labels never have them unless "dash" is spoken);
   - codes stay digits only when the label is ONE letter-digit token (3D, B12, W-2, COVID-19); word+number codes and bare
     numbers ("Chapter 11", "Windows 10", "911", "529 plan") are labelled as spoken words;
@@ -35,7 +35,7 @@ def relabel(row):
 
 def main():
     import argparse, os
-    ap = argparse.ArgumentParser(); ap.add_argument("--root", default="."); ap.add_argument("--prefix", default="ttsBIG1")
+    ap = argparse.ArgumentParser(); ap.add_argument("--root", default="."); ap.add_argument("--prefix", default="pack")
     ap.add_argument("--src", action="append", required=True, help="tag=path of a sentences JSONL")
     a = ap.parse_args(); os.chdir(a.root)
     out, why, changed = {}, collections.Counter(), collections.Counter()

@@ -254,7 +254,7 @@ def mix(path):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--tag", default="v2"); ap.add_argument("--kept"); ap.add_argument("--briefs", action="store_true", help="census briefs/<tag>.jsonl (no sentences yet)")
     ap.add_argument("--root", default=".", help="data directory (sentences/, briefs/, plan/, voices.json; census/ is written here)")
-    ap.add_argument("--prefix", default="ttsBIG1", help="audio row id prefix: <prefix>_<tag>_<sha1[:10]>")
+    ap.add_argument("--prefix", default="pack", help="audio row id prefix: <prefix>_<tag>_<sha1[:10]>")
     ap.add_argument("--addon", action="store_true", help="add-on pack: skip value-spread flags for number types it does not contain")
     ap.add_argument("--outdir", default="census", help="where census/<tag>.json is written (relative to --root)")
     ap.add_argument("--mix", help="JSON mix spec (see docstring): per-hour shares over a weighted mix of label files; text only")

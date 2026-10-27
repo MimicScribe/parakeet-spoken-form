@@ -1,4 +1,4 @@
-"""Drop new sentences that near-duplicate any existing pack row (old synthetic packs + all ttsBIG1 sentences) or each other.
+"""Drop new sentences that near-duplicate any existing pack row (old synthetic packs + all generated pack sentences) or each other.
 Similarity = Jaccard of number-masked word shingles; >= 0.6 is a near-dup (Opus review metric).
   python3 neardup.py --tag v3 --root DATA --index 'old/*.jsonl' --index 'DATA/sentences/v2.jsonl'   -> sentences/<tag>_dedup.jsonl
   add --out PATH to write the kept rows elsewhere (sentences/ stays untouched) and --flagged PATH to save the dropped rows.
